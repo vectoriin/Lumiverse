@@ -405,6 +405,13 @@ type RuntimeWorkerToHost =
     }
   | { type: "images_upload"; requestId: string; input: ImageUploadDTO; userId?: string }
   | {
+      type: "images_upload_many";
+      requestId: string;
+      items: ImageUploadDTO[];
+      userId?: string;
+      concurrency?: number;
+    }
+  | {
       type: "images_upload_from_data_url";
       requestId: string;
       dataUrl: string;
@@ -2505,6 +2512,9 @@ export class WorkerHost {
         break;
       case "images_upload":
         this.handleImagesUpload(msg.requestId, msg.input, msg.userId);
+        break;
+      case "images_upload_many":
+        this.handleImagesUploadMany(msg.requestId, msg.items, msg.userId, msg.concurrency);
         break;
       case "images_upload_from_data_url":
         this.handleImagesUploadFromDataUrl(
@@ -6109,6 +6119,73 @@ export class WorkerHost {
         });
 
         this.postToWorker({ type: "response", requestId, result: this.toImageDTO(img) });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err.message });
+      }
+    })();
+  }
+
+  private handleImagesUploadMany(
+    requestId: string,
+    items: any[],
+    userId?: string,
+    concurrency?: number,
+  ): void {
+    (async () => {
+      try {
+        if (!managerSvc.hasPermission(this.manifest.identifier, "images")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} images — Images permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        if (!Array.isArray(items)) {
+          throw new Error("items must be an array of ImageUploadDTO");
+        }
+        const total = items.length;
+        const workers = Math.min(Math.max(1, concurrency ?? 16), 32);
+
+        const results: Array<{ id?: string; error?: string }> = new Array(total);
+        let next = 0;
+        const ext = this.manifest.identifier;
+        const runWorker = async (): Promise<void> => {
+          while (true) {
+            const i = next++;
+            if (i >= total) return;
+            const input = items[i];
+            try {
+              if (!(input?.data instanceof Uint8Array) || input.data.byteLength === 0) {
+                throw new Error("Image data must be a non-empty Uint8Array");
+              }
+              const mimeType = typeof input?.mime_type === "string" && input.mime_type.trim()
+                ? input.mime_type.trim()
+                : "image/png";
+              const filename = typeof input?.filename === "string" && input.filename.trim()
+                ? input.filename.trim()
+                : "image.png";
+              const imageBytes = Uint8Array.from(input.data);
+              const file = new File([imageBytes.buffer], filename, { type: mimeType });
+              const img = await imagesSvc.uploadImage(resolvedUserId, file, {
+                owner_extension_identifier: ext,
+                owner_character_id: typeof input?.owner_character_id === "string" && input.owner_character_id.trim()
+                  ? input.owner_character_id.trim()
+                  : undefined,
+                owner_chat_id: typeof input?.owner_chat_id === "string" && input.owner_chat_id.trim()
+                  ? input.owner_chat_id.trim()
+                  : undefined,
+              });
+              results[i] = { id: img.id };
+            } catch (err: any) {
+              results[i] = { error: err?.message ?? String(err) };
+            }
+          }
+        };
+        const pool: Promise<void>[] = [];
+        for (let w = 0; w < Math.min(workers, total); w++) pool.push(runWorker());
+        await Promise.all(pool);
+
+        this.postToWorker({ type: "response", requestId, result: results });
       } catch (err: any) {
         this.postToWorker({ type: "response", requestId, error: err.message });
       }
