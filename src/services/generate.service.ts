@@ -2356,6 +2356,16 @@ export async function startGeneration(
           return;
         }
 
+        if (stagedMessageId) {
+          try {
+            chatsSvc.deleteMessage(input.userId, stagedMessageId);
+          } catch {
+            /* best-effort cleanup */
+          }
+        }
+
+        abortChatBackground(input.userId, input.chat_id);
+
         const msg = errorMessage(err);
         pool.errorPool(generationId, msg);
         eventBus.emit(
@@ -2708,6 +2718,15 @@ async function runGeneration(
         });
       }
     } else if (lifecycle.stagedMessageId) {
+      if (!closedContent && !fullReasoning) {
+        try {
+          chatsSvc.deleteMessage(userId, lifecycle.stagedMessageId);
+        } catch {
+          /* best-effort cleanup */
+        }
+        return { content: closedContent };
+      }
+
       const existingStagedExtra =
         chatsSvc.getMessage(userId, lifecycle.stagedMessageId)?.extra || {};
       const partialExtra = fullReasoning
@@ -3329,6 +3348,7 @@ async function runGeneration(
       }
     } else {
       const msg = errorMessage(err);
+      abortChatBackground(userId, chatId);
       // Socket drops, provider 5xx mid-stream, etc. — persist whatever was
       // already streamed so the user keeps the visible content rather than
       // having the streaming bubble wiped on error.

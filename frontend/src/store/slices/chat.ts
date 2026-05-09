@@ -392,6 +392,8 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
             : {}),
           streamingError: error,
           isStreaming: false,
+          streamingContent: '',
+          streamingReasoning: '',
           streamingReasoningDuration: null,
           streamingReasoningStartedAt: null,
           activeGenerationId: null,
