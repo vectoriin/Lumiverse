@@ -71,7 +71,7 @@ export class GoogleProvider implements LlmProvider {
       if (p.thought) {
         reasoning += p.text || "";
       } else if (p.functionCall) {
-        fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID() });
+        fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID(), thought_signature: p.thoughtSignature });
       } else {
         content += p.text || "";
       }
@@ -146,7 +146,7 @@ export class GoogleProvider implements LlmProvider {
             if (p.thought) {
               reasoning += p.text || "";
             } else if (p.functionCall) {
-              fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID() });
+              fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID(), thought_signature: p.thoughtSignature });
             } else {
               text += p.text || "";
             }
@@ -221,7 +221,9 @@ export class GoogleProvider implements LlmProvider {
         case "audio":
           return { inlineData: { mimeType: part.mime_type, data: part.data } };
         case "tool_use":
-          return { functionCall: { name: part.name, args: part.input } };
+          return part.thought_signature
+            ? { functionCall: { name: part.name, args: part.input }, thoughtSignature: part.thought_signature }
+            : { functionCall: { name: part.name, args: part.input } };
         case "tool_result": {
           let payload: unknown = part.content;
           try { payload = JSON.parse(part.content); } catch { /* keep as string */ }
