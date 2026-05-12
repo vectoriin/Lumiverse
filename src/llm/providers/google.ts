@@ -4,13 +4,20 @@ import { createCooperativeYielder, fetchWithPreflightAbort, readWithAbort } from
 import { getTextContent, type GenerationRequest, type GenerationResponse, type StreamChunk, type ToolCallResult, type LlmMessage, type LlmMessagePart } from "../types";
 import { fetchProviderJson, ProviderRequestError, throwProviderResponseError } from "../../utils/provider-errors";
 
+const GEMINI_SCHEMA_FIELDS = new Set(["type","format","title","description","nullable","enum","maxItems","minItems","properties","required","minProperties","maxProperties","minLength","maxLength","pattern","example","anyOf","propertyOrdering","default","items","minimum","maximum"]);
+
 export function sanitizeGeminiSchema(schema: unknown): unknown {
-  if (Array.isArray(schema)) return schema.map(sanitizeGeminiSchema);
-  if (!schema || typeof schema !== "object") return schema;
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
-    if (k === "additionalProperties" || k === "$schema") continue;
-    out[k] = sanitizeGeminiSchema(v);
+    if (!GEMINI_SCHEMA_FIELDS.has(k)) continue;
+    if (k === "items") out[k] = sanitizeGeminiSchema(v);
+    else if (k === "anyOf" && Array.isArray(v)) out[k] = v.map(sanitizeGeminiSchema);
+    else if (k === "properties" && v && typeof v === "object" && !Array.isArray(v)) {
+      const p: Record<string, unknown> = {};
+      for (const [pn, ps] of Object.entries(v as Record<string, unknown>)) p[pn] = sanitizeGeminiSchema(ps);
+      out[k] = p;
+    } else out[k] = v;
   }
   return out;
 }
