@@ -596,7 +596,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
         pendingRaf = 0
         const target = event.target
         if (target instanceof Element) {
-          const row = target.closest('[data-message-id]')
+          const row = target.closest('[data-index][data-message-id]')
           if (row) rowVirtualizer.measureElement(row)
         }
 
