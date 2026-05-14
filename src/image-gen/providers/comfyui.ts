@@ -1,9 +1,20 @@
 import type { ImageProvider } from "../provider"
+import type { ComfyUICapabilities } from "../types"
 import type { ImageProviderCapabilities, ImageParameterSchemaMap } from "../param-schema"
 import type { ImageGenRequest, ImageGenResponse } from "../types"
+import { discoverCapabilities } from "../comfyui-discovery"
 import { fetchProviderJson, ProviderRequestError, throwProviderResponseError } from "../../utils/provider-errors"
 
-const PARAMETERS: ImageParameterSchemaMap = {}
+const PARAMETERS: ImageParameterSchemaMap = {
+  seed: { type: "integer", description: "Seed injected into mapped ComfyUI workflow seed fields.", group: "advanced" },
+  steps: { type: "integer", default: 28, min: 1, max: 80, step: 1, description: "Sampling steps injected into mapped ComfyUI workflow fields.", group: "advanced" },
+  cfg: { type: "number", default: 7, min: 1, max: 20, step: 0.5, description: "CFG scale injected into mapped ComfyUI workflow fields.", group: "advanced" },
+  sampler_name: { type: "string", description: "Sampler injected into mapped ComfyUI workflow fields.", group: "advanced", modelSubtype: "samplers" },
+  scheduler: { type: "string", description: "Scheduler injected into mapped ComfyUI workflow fields.", group: "advanced", modelSubtype: "schedulers" },
+  width: { type: "integer", default: 1024, min: 256, max: 2048, step: 64, description: "Width injected into mapped ComfyUI workflow fields.", group: "advanced" },
+  height: { type: "integer", default: 1024, min: 256, max: 2048, step: 64, description: "Height injected into mapped ComfyUI workflow fields.", group: "advanced" },
+  checkpoint: { type: "string", description: "Checkpoint injected into mapped ComfyUI checkpoint fields.", group: "models", modelSubtype: "checkpoints" },
+}
 
 interface ComfyImageResult {
   filename: string
@@ -272,6 +283,18 @@ export class ComfyUIImageProvider implements ImageProvider {
     }))
   }
 
+  async listModelsBySubtype(
+    _apiKey: string,
+    apiUrl: string,
+    subtype: string,
+  ): Promise<Array<{ id: string; label: string }>> {
+    const baseUrl = apiUrl || this.capabilities.defaultUrl
+    assertSafeComfyUrl(baseUrl!)
+    const capabilities = await discoverCapabilities(baseUrl!)
+    const values = getCapabilityList(capabilities, subtype)
+    return values.map((name) => ({ id: name, label: name.replace(/\.[^.]+$/, "") }))
+  }
+
   private async *wsEventsWithNodes(
     ws: WebSocket,
     promptId: string,
@@ -491,4 +514,41 @@ export function buildComfyImageViewUrl(
   image: ComfyImageResult,
 ): string {
   return `${baseUrl}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder || "")}&type=${encodeURIComponent(image.type || "output")}`
+}
+
+function getCapabilityList(capabilities: ComfyUICapabilities, subtype: string): string[] {
+  switch (subtype) {
+    case "checkpoints":
+    case "checkpoint":
+      return capabilities.checkpoints
+    case "samplers":
+    case "sampler_name":
+      return capabilities.samplers
+    case "schedulers":
+    case "scheduler":
+      return capabilities.schedulers
+    case "vaes":
+    case "vae":
+      return capabilities.vaes
+    case "loras":
+    case "lora":
+      return capabilities.loras
+    case "unets":
+    case "unet":
+      return capabilities.unets
+    case "clips":
+    case "clip":
+      return capabilities.clips
+    case "dualClips":
+    case "dual_clips":
+      return capabilities.dualClips
+    case "upscaleModels":
+    case "upscale_models":
+      return capabilities.upscaleModels
+    case "detectorModels":
+    case "detector_models":
+      return capabilities.detectorModels
+    default:
+      return []
+  }
 }

@@ -10,10 +10,15 @@ import * as secretsSvc from "./secrets.service";
 import * as imageGenConnSvc from "./image-gen-connections.service";
 import { imageGenConnectionSecretKey } from "./image-gen-connections.service";
 import { getImageProvider, getImageProviderList } from "../image-gen/registry";
+import { getComfyUIObjectInfo } from "../image-gen/comfyui-discovery";
+import { normalizeComfyUIWorkflow } from "../image-gen/comfyui-import";
+import { readComfyUIConfig } from "../image-gen/comfyui-workflow-storage";
+import { patchWorkflow, type ComfyUIPatchValues } from "../image-gen/comfyui-workflow-patch";
 import { rawGenerate } from "./generate.service";
 import type { LlmMessage } from "../llm/types";
 import type { ImageGenRequest } from "../image-gen/types";
 import type { Message } from "../types/message";
+import type { ImageGenConnectionProfile } from "../types/image-gen-connection";
 
 // Ensure image gen providers are registered
 import "../image-gen/index";
@@ -249,6 +254,10 @@ export async function generateSceneBackground(
       }
     }
 
+    if (connection.provider === "comfyui") {
+      await applyComfyUIWorkflowConfig(connection, params, promptResult.prompt, promptResult.negativePrompt);
+    }
+
     const request: ImageGenRequest = {
       prompt: promptResult.prompt,
       negativePrompt: promptResult.negativePrompt,
@@ -333,6 +342,73 @@ export async function generateSceneBackground(
       activeImageGenerations.delete(registryKey);
     }
   }
+}
+
+async function applyComfyUIWorkflowConfig(
+  connection: ImageGenConnectionProfile,
+  params: Record<string, any>,
+  prompt: string,
+  negativePrompt?: string,
+): Promise<void> {
+  if (params.workflow && typeof params.workflow === "object") return;
+
+  const config = readComfyUIConfig(connection.metadata);
+  if (!config) return;
+
+  const mappings = config.field_mappings || [];
+  const hasPositivePrompt = mappings.some((mapping) => mapping.mappedAs === "positive_prompt");
+  if (!hasPositivePrompt) {
+    throw new Error("Imported ComfyUI workflow must map at least one positive prompt field");
+  }
+
+  const objectInfo = await getComfyUIObjectInfo(connection.api_url || "http://localhost:8188");
+  const normalizedWorkflow = normalizeComfyUIWorkflow(
+    config.workflow_api_json || config.workflow_json,
+    objectInfo ?? undefined,
+  );
+
+  const customValues =
+    params.comfyui_custom_fields && typeof params.comfyui_custom_fields === "object"
+      ? params.comfyui_custom_fields as Record<string, unknown>
+      : params.custom && typeof params.custom === "object"
+        ? params.custom as Record<string, unknown>
+        : undefined;
+
+  const patchValues: ComfyUIPatchValues = {
+    positive_prompt: prompt,
+    negative_prompt: negativePrompt || params.negativePrompt,
+    seed: numberParam(params.seed),
+    steps: numberParam(params.steps),
+    cfg: numberParam(params.cfg),
+    sampler_name: stringParam(params.sampler_name),
+    scheduler: stringParam(params.scheduler),
+    width: numberParam(params.width),
+    height: numberParam(params.height),
+    checkpoint: stringParam(params.checkpoint || params.ckpt_name),
+    custom: customValues,
+  };
+
+  const extraFieldValues = params.comfyui_field_values;
+  if (extraFieldValues && typeof extraFieldValues === "object") {
+    Object.assign(patchValues, extraFieldValues);
+  }
+
+  params.workflow = patchWorkflow(normalizedWorkflow.apiWorkflow, mappings, patchValues);
+  params.workflowFormat = "api_prompt";
+  params.preserveImportedWorkflow = true;
+}
+
+function numberParam(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function stringParam(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function resolvePromptInput(settings: ImageGenSettings, opts?: GenerateImageOptions): ImageGenPromptPreset {

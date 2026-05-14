@@ -251,7 +251,7 @@ export function WorkflowEditorModal({
             <p className={styles.panelHint}>
               {replacingWorkflow
                 ? 'Importing a new JSON replaces the current workflow and refreshes the mapping choices.'
-                : 'Dream Weaver will pick up the usual prompt, sampler, seed, and size fields when it can, and you can expose anything else from the graph after import.'}
+                : 'Image generation will pick up the usual prompt, sampler, seed, and size fields when it can, and you can expose anything else from the graph after import.'}
             </p>
 
             <textarea

@@ -1,6 +1,15 @@
 import { Hono } from "hono";
 import * as svc from "../services/image-gen-connections.service";
 import { getImageProviderList } from "../image-gen/registry";
+import { normalizeComfyUIWorkflow } from "../image-gen/comfyui-import";
+import { discoverCapabilities, getComfyUIObjectInfo } from "../image-gen/comfyui-discovery";
+import { detectInjectionPoints } from "../image-gen/comfyui-workflow-parser";
+import {
+  readComfyUIConfig,
+  writeComfyUIConfig,
+} from "../image-gen/comfyui-workflow-storage";
+import { buildComfyUIWorkflowFieldOptions } from "../services/dream-weaver/visual-studio/comfyui-workflow-field-options";
+import type { ComfyUIFieldMapping } from "../image-gen/comfyui-workflow-patch";
 import { parsePagination } from "../services/pagination";
 
 // Side-effect import: registers all image gen providers in the registry
@@ -82,6 +91,106 @@ app.get("/:id/models", async (c) => {
   const userId = c.get("userId");
   const result = await svc.listConnectionModels(userId, c.req.param("id"));
   return c.json(result);
+});
+
+app.post("/:id/comfyui/workflow/import", async (c) => {
+  const userId = c.get("userId");
+  const connectionId = c.req.param("id");
+  const body = await c.req.json();
+  const workflow = body?.workflow;
+
+  if (workflow === undefined || workflow === null) {
+    return c.json({ error: "workflow is required" }, 400);
+  }
+
+  const connection = svc.getConnection(userId, connectionId);
+  if (!connection) return c.json({ error: "Connection not found" }, 404);
+  if (connection.provider !== "comfyui") {
+    return c.json({ error: "Connection is not a ComfyUI connection" }, 400);
+  }
+
+  const objectInfo = await getComfyUIObjectInfo(connection.api_url || "http://localhost:8188");
+  let normalized: ReturnType<typeof normalizeComfyUIWorkflow>;
+  try {
+    normalized = normalizeComfyUIWorkflow(workflow, objectInfo ?? undefined);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: message }, 400);
+  }
+
+  const mappings: ComfyUIFieldMapping[] = detectInjectionPoints(normalized.apiWorkflow)
+    .filter((point) => point.suggestedAs !== null)
+    .map((point) => ({
+      nodeId: point.nodeId,
+      fieldName: point.fieldName,
+      mappedAs: point.suggestedAs as ComfyUIFieldMapping["mappedAs"],
+      autoDetected: true,
+    }));
+
+  const config = {
+    workflow_json: normalized.graphWorkflow,
+    workflow_api_json: normalized.apiWorkflow,
+    workflow_format: normalized.format,
+    field_mappings: mappings,
+    field_options: buildComfyUIWorkflowFieldOptions(normalized.apiWorkflow, objectInfo),
+    imported_at: Date.now(),
+  };
+
+  await svc.updateConnection(userId, connectionId, {
+    metadata: writeComfyUIConfig(connection.metadata, config),
+  });
+
+  return c.json({ config });
+});
+
+app.get("/:id/comfyui/workflow", (c) => {
+  const userId = c.get("userId");
+  const connection = svc.getConnection(userId, c.req.param("id"));
+  if (!connection) return c.json({ error: "Connection not found" }, 404);
+  if (connection.provider !== "comfyui") {
+    return c.json({ error: "Connection is not a ComfyUI connection" }, 400);
+  }
+  return c.json({ config: readComfyUIConfig(connection.metadata) });
+});
+
+app.put("/:id/comfyui/workflow/mappings", async (c) => {
+  const userId = c.get("userId");
+  const connectionId = c.req.param("id");
+  const body = await c.req.json();
+  if (!Array.isArray(body?.mappings)) {
+    return c.json({ error: "mappings must be an array" }, 400);
+  }
+
+  const connection = svc.getConnection(userId, connectionId);
+  if (!connection) return c.json({ error: "Connection not found" }, 404);
+  if (connection.provider !== "comfyui") {
+    return c.json({ error: "Connection is not a ComfyUI connection" }, 400);
+  }
+
+  const existing = readComfyUIConfig(connection.metadata);
+  if (!existing) return c.json({ error: "No workflow imported for this connection" }, 400);
+
+  const config = { ...existing, field_mappings: body.mappings as ComfyUIFieldMapping[] };
+  await svc.updateConnection(userId, connectionId, {
+    metadata: writeComfyUIConfig(connection.metadata, config),
+  });
+
+  return c.json({ config });
+});
+
+app.get("/:id/comfyui/capabilities", async (c) => {
+  const userId = c.get("userId");
+  const connection = svc.getConnection(userId, c.req.param("id"));
+  if (!connection) return c.json({ error: "Connection not found" }, 404);
+  if (connection.provider !== "comfyui") {
+    return c.json({ error: "Connection is not a ComfyUI connection" }, 400);
+  }
+
+  const capabilities = await discoverCapabilities(
+    connection.api_url || "http://localhost:8188",
+    c.req.query("refresh") === "1",
+  );
+  return c.json({ capabilities });
 });
 
 app.get("/:id/nanogpt-usage", async (c) => {

@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ImageIcon, Trash2, Edit3, Zap, Check, Star, Copy, MoreVertical, RefreshCw } from 'lucide-react'
+import { ImageIcon, Trash2, Edit3, Zap, Check, Star, Copy, MoreVertical, RefreshCw, Workflow } from 'lucide-react'
 import { imageGenConnectionsApi } from '@/api/image-gen-connections'
+import type { ComfyUICapabilities } from '@/api/image-gen'
+import type { ComfyUIFieldMapping, ComfyUIWorkflowConfig } from '@/api/dream-weaver'
 import type { ImageGenConnectionProfile, ImageGenProviderInfo, CreateImageGenConnectionInput, NanoGptSubscriptionUsage } from '@/types/api'
 import ImageGenConnectionForm from './ImageGenConnectionForm'
+import { WorkflowEditorModal } from '@/components/dream-weaver/visual-studio/comfyui/WorkflowEditorModal'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
 import { Spinner } from '@/components/shared/Spinner'
 import styles from '../connection-manager/ConnectionItem.module.css'
@@ -45,8 +48,13 @@ export default function ImageGenConnectionItem({ profile, isActive, providers, o
   const [nanoGptUsage, setNanoGptUsage] = useState<NanoGptSubscriptionUsage | null>(null)
   const [nanoGptUsageLoading, setNanoGptUsageLoading] = useState(false)
   const [menuPos, setMenuPos] = useState<ContextMenuPos | null>(null)
+  const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false)
+  const [workflowConfig, setWorkflowConfig] = useState<ComfyUIWorkflowConfig | null>(null)
+  const [workflowCapabilities, setWorkflowCapabilities] = useState<ComfyUICapabilities | null>(null)
+  const [workflowError, setWorkflowError] = useState<string | null>(null)
 
   const isNanoGpt = profile.provider === 'nanogpt'
+  const isComfyUI = profile.provider === 'comfyui'
   const showNanoGptUsage = isNanoGpt && isActive && profile.has_api_key && !editing
 
   useEffect(() => {
@@ -85,6 +93,45 @@ export default function ImageGenConnectionItem({ profile, isActive, providers, o
       setTesting(false)
     }
   }, [profile.id])
+
+  const refreshComfyProfile = useCallback(async () => {
+    try {
+      onUpdate(await imageGenConnectionsApi.get(profile.id))
+    } catch {
+      // The workflow update already succeeded; stale list metadata is non-fatal.
+    }
+  }, [onUpdate, profile.id])
+
+  const openWorkflowEditor = useCallback(async () => {
+    if (!isComfyUI) return
+    setMenuPos(null)
+    setWorkflowEditorOpen(true)
+    setWorkflowError(null)
+    try {
+      const [configResponse, capabilities] = await Promise.all([
+        imageGenConnectionsApi.getComfyUIWorkflowConfig(profile.id),
+        imageGenConnectionsApi.getComfyUICapabilities(profile.id),
+      ])
+      setWorkflowConfig(configResponse.config)
+      setWorkflowCapabilities(capabilities)
+    } catch (err: any) {
+      setWorkflowError(err?.message || 'Failed to load ComfyUI workflow')
+    }
+  }, [isComfyUI, profile.id])
+
+  const importComfyWorkflow = useCallback(async (workflow: unknown) => {
+    const response = await imageGenConnectionsApi.importComfyUIWorkflow(profile.id, workflow)
+    setWorkflowConfig(response.config)
+    await refreshComfyProfile()
+    return response.config
+  }, [profile.id, refreshComfyProfile])
+
+  const updateComfyMappings = useCallback(async (mappings: ComfyUIFieldMapping[]) => {
+    const response = await imageGenConnectionsApi.updateComfyUIWorkflowMappings(profile.id, mappings)
+    setWorkflowConfig(response.config)
+    await refreshComfyProfile()
+    return response.config
+  }, [profile.id, refreshComfyProfile])
 
   const handleSaveEdit = useCallback(async (input: CreateImageGenConnectionInput) => {
     try {
@@ -155,6 +202,7 @@ export default function ImageGenConnectionItem({ profile, isActive, providers, o
             onClose={() => setMenuPos(null)}
             items={[
               { key: 'test', label: testing ? 'Testing...' : 'Test connection', icon: <Zap size={14} />, onClick: () => { setMenuPos(null); handleTest() }, disabled: testing },
+              ...(isComfyUI ? [{ key: 'workflow', label: 'ComfyUI workflow', icon: <Workflow size={14} />, onClick: openWorkflowEditor }] : []),
               { key: 'duplicate', label: 'Duplicate', icon: <Copy size={14} />, onClick: () => { setMenuPos(null); onDuplicate() } },
               { key: 'div', type: 'divider' as const },
               { key: 'delete', label: 'Delete', icon: <Trash2 size={14} />, onClick: () => { setMenuPos(null); onDelete() }, danger: true },
@@ -185,6 +233,16 @@ export default function ImageGenConnectionItem({ profile, isActive, providers, o
             {nanoGptUsageLoading ? <Spinner size={10} /> : <RefreshCw size={10} />}
           </button>
         </div>
+      )}
+      {workflowEditorOpen && (
+        <WorkflowEditorModal
+          config={workflowConfig}
+          capabilities={workflowCapabilities}
+          error={workflowError}
+          onImportWorkflow={importComfyWorkflow}
+          onUpdateMappings={updateComfyMappings}
+          onClose={() => setWorkflowEditorOpen(false)}
+        />
       )}
     </div>
   )
