@@ -11,7 +11,6 @@ import { characterGalleryApi } from '@/api/character-gallery'
 import { imagesApi } from '@/api/images'
 import { worldBooksApi } from '@/api/world-books'
 import { chatsApi } from '@/api/chats'
-import { regexApi } from '@/api/regex'
 import { useStore } from '@/store'
 import { useCharacterBrowser } from '@/hooks/useCharacterBrowser'
 import { uuidv7 } from '@/lib/uuid'
@@ -24,7 +23,6 @@ import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import { useLongPress } from '@/hooks/useLongPress'
 import type { Character, CharacterGalleryItem } from '@/types/api'
 import type { WallpaperRef } from '@/types/store'
-import type { RegexScript } from '@/types/regex'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/shared/FormComponents'
 import SearchableSelect from '@/components/shared/SearchableSelect'
@@ -107,6 +105,9 @@ export default function CharacterEditorPage() {
   const setActiveChatWallpaper = useStore((s) => s.setActiveChatWallpaper)
   const setSceneBackground = useStore((s) => s.setSceneBackground)
   const updateCharInStore = useStore((s) => s.updateCharacter)
+  const regexScripts = useStore((s) => s.regexScripts)
+  const loadRegexScripts = useStore((s) => s.loadRegexScripts)
+  const updateRegexScript = useStore((s) => s.updateRegexScript)
   const browser = useCharacterBrowser()
 
   const character = allCharacters.find((c) => c.id === editingCharacterId) ?? null
@@ -128,8 +129,6 @@ export default function CharacterEditorPage() {
   const [saving, setSaving] = useState(false)
   const [galleryItems, setGalleryItems] = useState<CharacterGalleryItem[]>([])
   const [worldBooks, setWorldBooks] = useState<Array<{ id: string; name: string }>>([])
-  const [boundRegexScripts, setBoundRegexScripts] = useState<RegexScript[]>([])
-  const [allRegexScripts, setAllRegexScripts] = useState<RegexScript[]>([])
   const [galleryUploading, setGalleryUploading] = useState(false)
   const [extracting, setExtracting] = useState(false)
   const [galleryContextMenu, setGalleryContextMenu] = useState<{ pos: ContextMenuPos; item: CharacterGalleryItem } | null>(null)
@@ -209,23 +208,15 @@ export default function CharacterEditorPage() {
     fetchGallery()
   }, [fetchGallery])
 
-  // Fetch regex scripts (all + character-bound) when character changes
-  const fetchRegexScripts = useCallback(async () => {
-    if (!editingCharacterId) return
-    try {
-      const [allRes, boundRes] = await Promise.all([
-        regexApi.list({ limit: 500 }),
-        regexApi.list({ limit: 500, scope: 'character', character_id: editingCharacterId }),
-      ])
-      setAllRegexScripts(allRes.data)
-      // Filter to only scripts actually scoped to this character
-      setBoundRegexScripts(boundRes.data.filter((s) => s.scope === 'character' && s.scope_id === editingCharacterId))
-    } catch { /* no-op */ }
-  }, [editingCharacterId])
+  const boundRegexScripts = useMemo(
+    () => regexScripts.filter((s) => s.scope === 'character' && s.scope_id === editingCharacterId),
+    [regexScripts, editingCharacterId]
+  )
 
   useEffect(() => {
-    fetchRegexScripts()
-  }, [fetchRegexScripts])
+    if (!editingCharacterId) return
+    loadRegexScripts().catch(() => {})
+  }, [editingCharacterId, loadRegexScripts])
 
   const upsertWorldBookOption = useCallback((book: { id: string; name: string }) => {
     setWorldBooks((prev) => {
@@ -633,25 +624,23 @@ export default function CharacterEditorPage() {
     async (scriptId: string) => {
       if (!editingCharacterId) return
       try {
-        await regexApi.update(scriptId, { scope: 'character', scope_id: editingCharacterId })
-        fetchRegexScripts()
+        await updateRegexScript(scriptId, { scope: 'character', scope_id: editingCharacterId })
       } catch (err: any) {
         toast.error(err.body?.error || err.message || 'Failed to bind regex')
       }
     },
-    [editingCharacterId, fetchRegexScripts]
+    [editingCharacterId, updateRegexScript]
   )
 
   const handleUnbindRegex = useCallback(
     async (scriptId: string) => {
       try {
-        await regexApi.update(scriptId, { scope: 'global', scope_id: null })
-        fetchRegexScripts()
+        await updateRegexScript(scriptId, { scope: 'global', scope_id: null })
       } catch (err: any) {
         toast.error(err.body?.error || err.message || 'Failed to unbind regex')
       }
     },
-    [fetchRegexScripts]
+    [updateRegexScript]
   )
 
   const clearActivatedWorldInfo = useStore((s) => s.clearActivatedWorldInfo)
@@ -1331,7 +1320,7 @@ export default function CharacterEditorPage() {
                         )}
 
                         {(() => {
-                          const unboundGlobals = allRegexScripts.filter(
+                          const unboundGlobals = regexScripts.filter(
                             (s) => s.scope === 'global' && !boundRegexScripts.some((b) => b.id === s.id)
                           )
                           if (unboundGlobals.length === 0 && boundRegexScripts.length === 0) {

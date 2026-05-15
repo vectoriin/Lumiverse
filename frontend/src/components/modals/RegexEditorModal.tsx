@@ -57,6 +57,8 @@ export default function RegexEditorModal() {
   const closeModal = useStore((s) => s.closeModal)
   const regexScripts = useStore((s) => s.regexScripts)
   const updateRegexScript = useStore((s) => s.updateRegexScript)
+  const activeCharacterId = useStore((s) => s.activeCharacterId)
+  const activeChatId = useStore((s) => s.activeChatId)
 
   const scriptId = modalProps?.scriptId as string
   const script = useMemo(() => regexScripts.find((s) => s.id === scriptId), [regexScripts, scriptId])
@@ -127,6 +129,21 @@ export default function RegexEditorModal() {
   const handleSave = useCallback(async () => {
     if (!scriptId) return
     try {
+      let scopeId: string | null = null
+      if (scope === 'character') {
+        scopeId = script?.scope === 'character' && script.scope_id ? script.scope_id : activeCharacterId
+        if (!scopeId) {
+          toast.error('Open a character chat before saving a character-scoped regex')
+          return
+        }
+      } else if (scope === 'chat') {
+        scopeId = script?.scope === 'chat' && script.scope_id ? script.scope_id : activeChatId
+        if (!scopeId) {
+          toast.error('Open a chat before saving a chat-scoped regex')
+          return
+        }
+      }
+
       await updateRegexScript(scriptId, {
         name: name.trim(),
         script_id: userScriptId,
@@ -136,6 +153,7 @@ export default function RegexEditorModal() {
         placement,
         target,
         scope,
+        scope_id: scopeId,
         min_depth: minDepth ? parseInt(minDepth) : null,
         max_depth: maxDepth ? parseInt(maxDepth) : null,
         substitute_macros: substituteMacros,
@@ -148,7 +166,7 @@ export default function RegexEditorModal() {
     } catch (err: any) {
       toast.error(err.body?.error || err.message)
     }
-  }, [scriptId, name, userScriptId, findRegex, replaceString, flags, placement, target, scope, minDepth, maxDepth, substituteMacros, trimStrings, runOnEdit, description, folder, updateRegexScript, closeModal])
+  }, [scriptId, script, activeCharacterId, activeChatId, name, userScriptId, findRegex, replaceString, flags, placement, target, scope, minDepth, maxDepth, substituteMacros, trimStrings, runOnEdit, description, folder, updateRegexScript, closeModal])
 
   if (!script) return null
 

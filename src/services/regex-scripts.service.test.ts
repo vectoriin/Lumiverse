@@ -228,6 +228,39 @@ describe("preset-bound regex activation", () => {
   });
 });
 
+describe("regex scope binding", () => {
+  test("rejects changing to character scope without a scope id", () => {
+    const created = createRegexScript(USER_ID, {
+      name: "Needs Character",
+      find_regex: "one",
+    });
+    expect(typeof created).not.toBe("string");
+
+    const script = created as Exclude<typeof created, string>;
+    const result = updateRegexScript(USER_ID, script.id, { scope: "character" });
+
+    expect(typeof result).toBe("string");
+    expect(mustGetScript(script.id).scope).toBe("global");
+    expect(mustGetScript(script.id).scope_id).toBeNull();
+  });
+
+  test("clears scope id when changing back to global scope", () => {
+    const created = createRegexScript(USER_ID, {
+      name: "Character Bound",
+      find_regex: "one",
+      scope: "character",
+      scope_id: "char-1",
+    });
+    expect(typeof created).not.toBe("string");
+
+    const script = created as Exclude<typeof created, string>;
+    const updated = updateRegexScript(USER_ID, script.id, { scope: "global" });
+
+    expect(updated && typeof updated !== "string" ? updated.scope : null).toBe("global");
+    expect(updated && typeof updated !== "string" ? updated.scope_id : "missing").toBeNull();
+  });
+});
+
 describe("regex performance reporting", () => {
   test("flags a slow regex script in metadata", () => {
     const created = createRegexScript(USER_ID, {

@@ -522,6 +522,13 @@ export function updateRegexScript(
   const activePresetId = normalizeOptionalId(context?.activePresetId);
   const isPresetBound = !!existing.preset_id;
   const nextInput: UpdateRegexScriptInput = { ...input };
+  if (nextInput.scope !== undefined) {
+    if (nextInput.scope === "global") {
+      nextInput.scope_id = null;
+    } else if (nextInput.scope_id === undefined) {
+      nextInput.scope_id = existing.scope === nextInput.scope ? existing.scope_id : null;
+    }
+  }
   if (shouldResetRegexPerformance(nextInput)) {
     nextInput.metadata = withoutRegexPerformanceMetadata(nextInput.metadata ?? existing.metadata);
   }
