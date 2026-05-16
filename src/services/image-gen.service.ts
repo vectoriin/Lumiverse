@@ -304,7 +304,7 @@ export async function generateSceneBackground(
           message = chatsSvc.createMessage(chatId, {
             is_user: false,
             name: "ImageGen",
-            content: promptResult.prompt,
+            content: "",
             extra: {
               image_gen: {
                 provider: connection.provider,
@@ -385,7 +385,6 @@ async function applyComfyUIWorkflowConfig(
   const patchValues: ComfyUIPatchValues = {
     positive_prompt: prompt,
     negative_prompt: negativePrompt || params.negativePrompt,
-    seed: numberParam(params.seed),
     steps: numberParam(params.steps),
     cfg: numberParam(params.cfg),
     sampler_name: stringParam(params.sampler_name),
@@ -400,6 +399,7 @@ async function applyComfyUIWorkflowConfig(
   if (extraFieldValues && typeof extraFieldValues === "object") {
     Object.assign(patchValues, extraFieldValues);
   }
+  patchValues.seed = resolveComfySeedParam(patchValues.seed ?? params.seed);
 
   params.workflow = patchWorkflow(normalizedWorkflow.apiWorkflow, mappings, patchValues);
   params.workflowFormat = "api_prompt";
@@ -417,6 +417,16 @@ function numberParam(value: unknown): number | undefined {
 
 function stringParam(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function resolveComfySeedParam(value: unknown): number | undefined {
+  const seed = numberParam(value);
+  if (seed === undefined) return undefined;
+  if (seed !== -1) return seed;
+
+  const values = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(values);
+  return values[0];
 }
 
 function normalizeRandomSeed(params: Record<string, any>, supportsSeed: boolean): void {

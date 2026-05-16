@@ -1954,8 +1954,12 @@ export async function assemblePrompt(
               (await evaluate(rawContent, macroEnv, registry)).text,
             )
           : rawContent;
-        historyParts.push(resolvedContent);
         const attachments = attachmentsForContext(msg, generatedImageContextPolicy);
+        if (msg.extra?.image_gen && resolvedContent.trim().length === 0 && attachments.length === 0) {
+          continue;
+        }
+
+        historyParts.push(resolvedContent);
         if (attachments.length > 0) {
           // Build multipart content: text + attachment parts. Skip the text part
           // when it's blank so strict providers (Anthropic et al) don't reject
@@ -5669,8 +5673,12 @@ async function legacyAssembly(
       throw signal.reason ?? new DOMException("Aborted", "AbortError");
     }
     const resolved = healFormattingArtifacts(await resolveMacros(m.content));
-    legacyHistoryParts.push(resolved);
     const attachments = attachmentsForContext(m, legacyGeneratedImageContextPolicy);
+    if (m.extra?.image_gen && resolved.trim().length === 0 && attachments.length === 0) {
+      continue;
+    }
+
+    legacyHistoryParts.push(resolved);
     if (attachments.length > 0) {
       const parts: import("../llm/types").LlmMessagePart[] = [];
       if (resolved.trim().length > 0) {
