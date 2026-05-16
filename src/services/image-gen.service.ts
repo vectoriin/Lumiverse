@@ -212,6 +212,7 @@ export async function generateSceneBackground(
     const outputTarget = opts?.outputTarget || settings.outputTarget || "background";
     const params = { ...connection.default_parameters, ...(settings.parameters || {}) };
     normalizeRandomSeed(params, !!provider.capabilities.parameters.seed);
+    resolveProviderRandomSeed(params, connection.provider);
     const promptResult = await resolveImagePrompt(
       userId,
       chatId,
@@ -424,9 +425,7 @@ function resolveComfySeedParam(value: unknown): number | undefined {
   if (seed === undefined) return undefined;
   if (seed !== -1) return seed;
 
-  const values = new Uint32Array(1);
-  globalThis.crypto.getRandomValues(values);
-  return values[0];
+  return randomImageSeed();
 }
 
 function normalizeRandomSeed(params: Record<string, any>, supportsSeed: boolean): void {
@@ -435,6 +434,24 @@ function normalizeRandomSeed(params: Record<string, any>, supportsSeed: boolean)
   if (seed == null || (typeof seed === "string" && seed.trim() === "")) {
     params.seed = -1;
   }
+}
+
+function resolveProviderRandomSeed(params: Record<string, any>, providerName: string): void {
+  if (providerName === "swarmui") return;
+  if (numberParam(params.seed) === -1) params.seed = randomImageSeed();
+}
+
+function randomImageSeed(): number {
+  const max = 2_147_483_647;
+  const range = max + 1;
+  const limit = Math.floor(0x1_0000_0000 / range) * range;
+  const values = new Uint32Array(1);
+
+  do {
+    globalThis.crypto.getRandomValues(values);
+  } while (values[0] >= limit);
+
+  return values[0] % range;
 }
 
 function resolvePromptInput(settings: ImageGenSettings, opts?: GenerateImageOptions): ImageGenPromptPreset {
