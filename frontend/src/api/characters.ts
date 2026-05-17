@@ -58,9 +58,10 @@ export const charactersApi = {
     return post<Character>(`/characters/${id}/duplicate`)
   },
 
-  uploadAvatar(id: string, file: File, onProgress?: (percent: number) => void) {
+  uploadAvatar(id: string, file: File, onProgress?: (percent: number) => void, originalFile?: File) {
     const form = new FormData()
     form.append('avatar', file)
+    if (originalFile) form.append('original_avatar', originalFile)
     if (onProgress) {
       return uploadWithProgress<Character>(`/characters/${id}/avatar`, form, onProgress)
     }

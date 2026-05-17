@@ -479,13 +479,15 @@ app.get("/:id/avatar", async (c) => {
   const sizeParam = c.req.query("size") as images.ThumbTier | undefined;
   const tier = sizeParam === "sm" || sizeParam === "lg" ? sizeParam : undefined;
 
+  const imageId = info.avatar_crop_image_id || info.image_id;
+
   // Prefer image_id, fall back to legacy avatar_path
-  if (info.image_id) {
-    const filepath = await images.getImageFilePath(userId, info.image_id, tier);
+  if (imageId) {
+    const filepath = await images.getImageFilePath(userId, imageId, tier);
     if (filepath) {
       return createAvatarResolverResponse(
         filepath,
-        info.image_id + (tier ? `_${tier}` : ""),
+        imageId + (tier ? `_${tier}` : ""),
         c.req.header("If-None-Match")
       );
     }
@@ -562,9 +564,10 @@ app.post("/:id/avatar", async (c) => {
 
   const formData = await c.req.formData();
   const file = formData.get("avatar") as File | null;
+  const originalFile = formData.get("original_avatar") as File | null;
   if (!file) return c.json({ error: "avatar file is required" }, 400);
 
-  const updated = await svc.replaceCharacterAvatar(userId, char.id, file);
+  const updated = await svc.replaceCharacterAvatar(userId, char.id, file, originalFile ?? undefined);
   if (!updated) return c.json({ error: "Not found" }, 404);
   return c.json(updated);
 });

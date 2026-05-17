@@ -2129,6 +2129,103 @@ function appendToChunk(chunkId: string, message: Message, sanitizedContent: stri
     .run(message.id, JSON.stringify(messageIds), newContent, newTokenCount, messageIds.length, now, chunkId);
 }
 
+type SalienceSnapshotRow = {
+  score: number;
+  score_source: string | null;
+  emotional_tags: string | null;
+  status_changes: string | null;
+  narrative_flags: string | null;
+  has_dialogue: number | null;
+  has_action: number | null;
+  has_internal_thought: number | null;
+  word_count: number | null;
+  scored_at: number;
+  scored_by: string | null;
+  created_at: number;
+};
+
+function snapshotSalienceByChunkContent(chatId: string): Map<string, SalienceSnapshotRow[]> {
+  const rows = getDb().query(
+    `SELECT cc.content,
+            ms.score, ms.score_source, ms.emotional_tags, ms.status_changes,
+            ms.narrative_flags, ms.has_dialogue, ms.has_action,
+            ms.has_internal_thought, ms.word_count, ms.scored_at,
+            ms.scored_by, ms.created_at
+     FROM memory_salience ms
+     JOIN chat_chunks cc ON cc.id = ms.chunk_id
+     WHERE ms.chat_id = ?
+     ORDER BY cc.created_at ASC`,
+  ).all(chatId) as Array<SalienceSnapshotRow & { content: string }>;
+
+  const byContent = new Map<string, SalienceSnapshotRow[]>();
+  for (const row of rows) {
+    const { content, ...salience } = row;
+    const bucket = byContent.get(content);
+    if (bucket) bucket.push(salience);
+    else byContent.set(content, [salience]);
+  }
+  return byContent;
+}
+
+function takeSalienceSnapshotForContent(content: string, salienceByContent: Map<string, SalienceSnapshotRow[]>): SalienceSnapshotRow | null {
+  const exactBucket = salienceByContent.get(content);
+  const exact = exactBucket?.shift();
+  if (exact) {
+    if (exactBucket && exactBucket.length === 0) salienceByContent.delete(content);
+    return exact;
+  }
+
+  let prefixMatch: string | null = null;
+  for (const previousContent of salienceByContent.keys()) {
+    if (!content.startsWith(`${previousContent}\n[`)) continue;
+    if (!prefixMatch || previousContent.length > prefixMatch.length) {
+      prefixMatch = previousContent;
+    }
+  }
+  if (!prefixMatch) return null;
+
+  const prefixBucket = salienceByContent.get(prefixMatch);
+  const prefix = prefixBucket?.shift() ?? null;
+  if (prefixBucket && prefixBucket.length === 0) salienceByContent.delete(prefixMatch);
+  return prefix;
+}
+
+function restoreSalienceForRebuiltChunk(chatId: string, chunk: ChatChunk, salienceByContent: Map<string, SalienceSnapshotRow[]>): void {
+  // Exact matches preserve fully valid scores. Prefix matches preserve the old
+  // score for an appended chunk until cortex replaces it, matching the normal
+  // append path where salience remains visible while async scoring runs.
+  const salience = takeSalienceSnapshotForContent(chunk.content, salienceByContent);
+  if (!salience) return;
+
+  getDb().transaction(() => {
+    getDb().query(
+      `INSERT INTO memory_salience
+        (id, chunk_id, chat_id, score, score_source, emotional_tags, status_changes,
+         narrative_flags, has_dialogue, has_action, has_internal_thought, word_count,
+         scored_at, scored_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      crypto.randomUUID(), chunk.id, chatId,
+      salience.score, salience.score_source,
+      salience.emotional_tags ?? "[]",
+      salience.status_changes ?? "[]",
+      salience.narrative_flags ?? "[]",
+      salience.has_dialogue ?? 0,
+      salience.has_action ?? 0,
+      salience.has_internal_thought ?? 0,
+      salience.word_count ?? 0,
+      salience.scored_at,
+      salience.scored_by,
+      salience.created_at,
+    );
+    getDb().query("UPDATE chat_chunks SET salience_score = ?, emotional_tags = ? WHERE id = ?").run(
+      salience.score,
+      salience.emotional_tags ?? "[]",
+      chunk.id,
+    );
+  })();
+}
+
 async function updateChatChunks(userId: string, chatId: string, newMessage: Message): Promise<void> {
   const cfg = await embeddingsSvc.getEmbeddingConfig(userId);
   if (!cfg.enabled || !cfg.vectorize_chat_messages) return;
@@ -2414,6 +2511,7 @@ async function _rebuildChatChunksImpl(userId: string, chatId: string): Promise<v
     return;
   }
 
+  const salienceByContent = snapshotSalienceByChunkContent(chatId);
   getDb().query("DELETE FROM chat_chunks WHERE chat_id = ?").run(chatId);
 
   const chatMemSettings = embeddingsSvc.resolveEffectiveChatMemorySettings(
@@ -2476,6 +2574,7 @@ async function _rebuildChatChunksImpl(userId: string, chatId: string): Promise<v
 
     if (forceNewChunk) {
       const chunk = createChatChunk(chatId, currentChunk, currentChunkSanitized);
+      restoreSalienceForRebuiltChunk(chatId, chunk, salienceByContent);
       vectorizationQueue.queueChunkVectorization(userId, chatId, chunk.id, 3);
       currentChunk = [];
       currentChunkSanitized = [];
@@ -2489,6 +2588,7 @@ async function _rebuildChatChunksImpl(userId: string, chatId: string): Promise<v
 
   if (currentChunk.length > 0) {
     const chunk = createChatChunk(chatId, currentChunk, currentChunkSanitized);
+    restoreSalienceForRebuiltChunk(chatId, chunk, salienceByContent);
     vectorizationQueue.queueChunkVectorization(userId, chatId, chunk.id, 3);
   }
 

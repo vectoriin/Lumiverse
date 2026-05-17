@@ -114,7 +114,8 @@ export default function PortraitPanel({ side = 'right' }: PortraitPanelProps) {
       if (altEntry?.original_image_id) return imagesApi.url(altEntry.original_image_id)
       return imagesApi.url(activeChatAvatarId)
     }
-    // Primary avatar — the character card image is already stored at full size
+    const originalImageId = character?.extensions?.original_image_id
+    if (typeof originalImageId === 'string' && originalImageId) return imagesApi.url(originalImageId)
     if (character?.image_id) return imagesApi.url(character.image_id)
     return null
   }, [character, activeChatAvatarId])

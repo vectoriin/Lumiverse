@@ -350,12 +350,17 @@ export function listCharacterTags(userId: string): { tag: string; count: number 
 export function getCharacterAvatarInfo(
   userId: string,
   id: string
-): { image_id: string | null; avatar_path: string | null } | null {
+): { image_id: string | null; avatar_path: string | null; avatar_crop_image_id: string | null } | null {
   const row = getDb()
-    .query("SELECT image_id, avatar_path FROM characters WHERE id = ? AND user_id = ?")
+    .query("SELECT image_id, avatar_path, extensions FROM characters WHERE id = ? AND user_id = ?")
     .get(id, userId) as any;
   if (!row) return null;
-  return { image_id: row.image_id || null, avatar_path: row.avatar_path || null };
+  let avatarCropImageId: string | null = null;
+  try {
+    const extensions = JSON.parse(row.extensions || "{}");
+    avatarCropImageId = typeof extensions.avatar_crop_image_id === "string" ? extensions.avatar_crop_image_id : null;
+  } catch {}
+  return { image_id: row.image_id || null, avatar_path: row.avatar_path || null, avatar_crop_image_id: avatarCropImageId };
 }
 
 export type CharacterSortMode = "recent" | "discover";
@@ -568,16 +573,34 @@ export function setCharacterImage(userId: string, id: string, imageId: string): 
   return result.changes > 0;
 }
 
-export async function replaceCharacterAvatar(userId: string, id: string, file: File): Promise<Character | null> {
+export async function replaceCharacterAvatar(userId: string, id: string, file: File, originalFile?: File): Promise<Character | null> {
   const existing = getCharacter(userId, id);
   if (!existing) return null;
 
+  const oldOriginalImageId = typeof existing.extensions?.original_image_id === "string"
+    ? existing.extensions.original_image_id
+    : null;
+  const oldCropImageId = typeof existing.extensions?.avatar_crop_image_id === "string"
+    ? existing.extensions.avatar_crop_image_id
+    : null;
+
   if (existing.image_id) imagesSvc.deleteImage(userId, existing.image_id);
+  if (oldOriginalImageId && oldOriginalImageId !== existing.image_id) imagesSvc.deleteImage(userId, oldOriginalImageId);
+  if (oldCropImageId && oldCropImageId !== existing.image_id && oldCropImageId !== oldOriginalImageId) imagesSvc.deleteImage(userId, oldCropImageId);
   if (existing.avatar_path) await filesSvc.deleteAvatar(existing.avatar_path);
 
-  const image = await imagesSvc.uploadImage(userId, file);
-  setCharacterImage(userId, id, image.id);
-  setCharacterAvatar(userId, id, image.filename);
+  const originalImage = await imagesSvc.uploadImage(userId, originalFile ?? file);
+  const cropImage = originalFile ? await imagesSvc.uploadImage(userId, file) : null;
+  setCharacterImage(userId, id, originalImage.id);
+  setCharacterAvatar(userId, id, originalImage.filename);
+
+  const extensions = { ...(existing.extensions ?? {}) };
+  delete extensions.original_image_id;
+  if (cropImage) extensions.avatar_crop_image_id = cropImage.id;
+  else delete extensions.avatar_crop_image_id;
+  getDb()
+    .query("UPDATE characters SET extensions = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+    .run(JSON.stringify(extensions), Math.floor(Date.now() / 1000), id, userId);
 
   const updated = getCharacter(userId, id);
   if (!updated) return null;

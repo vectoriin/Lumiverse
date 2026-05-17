@@ -680,11 +680,11 @@ export default function CharacterEditorPage() {
 
   // Avatar
   const handleCropComplete = useCallback(
-    async (croppedFile: File, _originalFile: File) => {
+    async (croppedFile: File, originalFile: File) => {
       if (!editingCharacterId) return
       setAvatarUploadProgress(0)
       try {
-        const updated = await charactersApi.uploadAvatar(editingCharacterId, croppedFile, (p) => setAvatarUploadProgress(p))
+        const updated = await charactersApi.uploadAvatar(editingCharacterId, croppedFile, (p) => setAvatarUploadProgress(p), originalFile)
         updateCharInStore(editingCharacterId, updated)
         setAvatarKey((k) => k + 1)
       } catch (err) {

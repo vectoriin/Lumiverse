@@ -114,6 +114,10 @@ export function getThumbnailSettings(userId: string): ThumbnailSettings {
 }
 
 function thumbSuffix(tier: ThumbTier): string {
+  return `_thumb_${tier}_v2.webp`;
+}
+
+function legacyThumbSuffix(tier: ThumbTier): string {
   return `_thumb_${tier}.webp`;
 }
 
@@ -124,7 +128,7 @@ async function generateThumbnail(
 ): Promise<boolean> {
   try {
     await sharp(source)
-      .resize(size, size, { fit: "cover" })
+      .resize(size, size, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: WEBP_QUALITY })
       .toFile(outputPath);
     return true;
@@ -613,8 +617,10 @@ export async function rebuildAllThumbnails(
 
         // Delete existing tier files
         for (const tier of ["sm", "lg"] as const) {
-          const p = join(dir, `${img.id}${thumbSuffix(tier)}`);
-          if (existsSync(p)) unlinkSync(p);
+          for (const suffix of [thumbSuffix(tier), legacyThumbSuffix(tier)]) {
+            const p = join(dir, `${img.id}${suffix}`);
+            if (existsSync(p)) unlinkSync(p);
+          }
         }
 
         // Regenerate both tiers
@@ -651,8 +657,10 @@ export function deleteImage(userId: string, id: string): boolean {
 
   // Remove all thumbnail tiers
   for (const tier of ["sm", "lg"] as const) {
-    const p = join(dir, `${image.id}${thumbSuffix(tier)}`);
-    if (existsSync(p)) unlinkSync(p);
+    for (const suffix of [thumbSuffix(tier), legacyThumbSuffix(tier)]) {
+      const p = join(dir, `${image.id}${suffix}`);
+      if (existsSync(p)) unlinkSync(p);
+    }
   }
 
   const result = getDb().query("DELETE FROM images WHERE id = ? AND user_id = ?").run(id, userId);

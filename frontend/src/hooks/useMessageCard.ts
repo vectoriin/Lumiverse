@@ -137,6 +137,13 @@ export function useMessageCard(message: Message, chatId: string) {
   const getCharAvatarUrl = isBubbleMode ? getCharacterAvatarLargeUrlById : getCharacterAvatarThumbUrlById
   const getPersonaAvatarUrl = isBubbleMode ? getPersonaAvatarLargeUrlById : getPersonaAvatarThumbUrlById
   const getImageUrl = isBubbleMode ? imagesApi.largeUrl : imagesApi.smallUrl
+  const characterAvatarCropImageId = typeof effectiveCharacter?.extensions?.avatar_crop_image_id === 'string'
+    ? effectiveCharacter.extensions.avatar_crop_image_id
+    : null
+  const activeAltAvatar = activeChatAvatarId && effectiveCharId === activeCharacterId
+    ? (effectiveCharacter?.extensions?.alternate_avatars as Array<{ image_id: string; original_image_id?: string }> | undefined)
+        ?.find((avatar) => avatar.image_id === activeChatAvatarId)
+    : null
 
   const avatarUrl = isUser
     ? getPersonaAvatarUrl(
@@ -145,7 +152,7 @@ export function useMessageCard(message: Message, chatId: string) {
       )
     : (activeChatAvatarId && effectiveCharId === activeCharacterId)
       ? getImageUrl(activeChatAvatarId)
-      : getCharAvatarUrl(effectiveCharId, effectiveCharacter?.image_id ?? null)
+      : getCharAvatarUrl(effectiveCharId, characterAvatarCropImageId ?? effectiveCharacter?.image_id ?? null)
 
   // Full-size avatar URL for lightbox/floating viewer (no resize)
   const fullAvatarUrl = isUser
@@ -154,8 +161,13 @@ export function useMessageCard(message: Message, chatId: string) {
         messagePersona?.image_id ?? activePersona?.image_id ?? null
       )
     : (activeChatAvatarId && effectiveCharId === activeCharacterId)
-      ? imagesApi.url(activeChatAvatarId)
-      : getCharacterAvatarUrlById(effectiveCharId, effectiveCharacter?.image_id ?? null)
+      ? imagesApi.url(activeAltAvatar?.original_image_id || activeChatAvatarId)
+      : getCharacterAvatarUrlById(
+          effectiveCharId,
+          typeof effectiveCharacter?.extensions?.original_image_id === 'string'
+            ? effectiveCharacter.extensions.original_image_id
+            : effectiveCharacter?.image_id ?? null
+        )
 
   const macroUserName = useMemo(() => {
     const fallback = activePersona?.name ?? 'User'
