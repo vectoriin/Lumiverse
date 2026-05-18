@@ -55,6 +55,24 @@ function optionalBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
+function uniqueStringIds(value: unknown, max = 5000): string[] | null {
+  if (!Array.isArray(value) || value.length > max) return null;
+  const ids = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") return null;
+    const id = item.trim();
+    if (!id) return null;
+    ids.add(id);
+  }
+  return [...ids];
+}
+
+function chunksOf<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
 async function resolveCortexParticipants(userId: string, chat: ReturnType<typeof getChat>) {
   const characterNames: string[] = [];
   const aliasMaps: Map<string, string>[] = [];
@@ -991,6 +1009,57 @@ app.get("/chats/:chatId/entities", (c) => {
     data: enriched,
     total: enriched.length,
   });
+});
+
+/** POST /chats/:chatId/entities/bulk-delete — Delete multiple entities in one transaction */
+app.post("/chats/:chatId/entities/bulk-delete", async (c) => {
+  const chatId = c.req.param("chatId");
+  const owned = ensureChatOwnership(c, chatId);
+  if (!owned.ok) return owned.response;
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (!isRecord(body)) {
+    return c.json({ error: "Request body must be a JSON object" }, 400);
+  }
+
+  const entityIds = uniqueStringIds(body.entityIds ?? body.entity_ids);
+  if (!entityIds) {
+    return c.json({ error: "entityIds must be an array of 0-5000 non-empty string IDs" }, 400);
+  }
+  if (entityIds.length === 0) return c.json({ success: true, deletedCount: 0 });
+
+  const db = getDb();
+  const batches = chunksOf(entityIds, 400);
+  let deletedCount = 0;
+
+  db.transaction(() => {
+    for (const batch of batches) {
+      const placeholders = batch.map(() => "?").join(", ");
+
+      db.query(
+        `DELETE FROM memory_relations
+         WHERE chat_id = ?
+           AND (source_entity_id IN (${placeholders}) OR target_entity_id IN (${placeholders}))`,
+      ).run(chatId, ...batch, ...batch);
+
+      db.query(
+        `DELETE FROM memory_mentions WHERE chat_id = ? AND entity_id IN (${placeholders})`,
+      ).run(chatId, ...batch);
+
+      const result = db.query(
+        `DELETE FROM memory_entities WHERE chat_id = ? AND id IN (${placeholders})`,
+      ).run(chatId, ...batch) as { changes?: number };
+      deletedCount += result.changes ?? 0;
+    }
+  })();
+
+  return c.json({ success: true, deletedCount });
 });
 
 /** GET /chats/:chatId/entities/:entityId — Get a single entity */

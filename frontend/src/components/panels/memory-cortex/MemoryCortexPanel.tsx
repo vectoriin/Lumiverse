@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type KeyboardEvent } from "react";
 import {
   Brain, Users, Network, ChevronDown, ChevronRight, ChevronLeft, RefreshCw,
   MapPin, Swords, Package, Landmark, Lightbulb, Calendar,
@@ -42,6 +42,9 @@ export default function MemoryCortexPanel() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedEntityIds, setSelectedEntityIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const loadEntities = useCallback(async () => {
     if (!activeChatId) return;
@@ -71,11 +74,23 @@ export default function MemoryCortexPanel() {
     loadStats();
   }, [loadEntities, loadStats]);
 
+  useEffect(() => {
+    setSelectionMode(false);
+    setSelectedEntityIds(new Set());
+    setExpandedId(null);
+  }, [activeChatId]);
+
   const handleDeleteEntity = async (entityId: string) => {
     if (!activeChatId) return;
     try {
       await memoryCortexApi.deleteEntity(activeChatId, entityId);
       setEntities((prev) => prev.filter((e) => e.id !== entityId));
+      setSelectedEntityIds((prev) => {
+        if (!prev.has(entityId)) return prev;
+        const next = new Set(prev);
+        next.delete(entityId);
+        return next;
+      });
       addToast({ type: "info", message: "Entity removed" });
     } catch {
       addToast({ type: "error", message: "Failed to remove entity" });
@@ -96,6 +111,56 @@ export default function MemoryCortexPanel() {
 
   const activeEntities = filtered.filter((e) => e.status !== "inactive");
   const archivedEntities = filtered.filter((e) => e.status === "inactive");
+  const visibleArchivedEntities = archivedEntities.slice(0, 10);
+  const visibleEntityIds = [...activeEntities, ...visibleArchivedEntities].map((e) => e.id);
+  const selectedCount = selectedEntityIds.size;
+
+  const toggleEntitySelection = (entityId: string) => {
+    setSelectedEntityIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(entityId)) next.delete(entityId);
+      else next.add(entityId);
+      return next;
+    });
+  };
+
+  const selectVisibleEntities = () => {
+    setSelectionMode(true);
+    setSelectedEntityIds((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleEntityIds) next.add(id);
+      return next;
+    });
+  };
+
+  const clearEntitySelection = () => {
+    setSelectedEntityIds(new Set());
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    clearEntitySelection();
+  };
+
+  const handleBulkDeleteEntities = async () => {
+    if (!activeChatId || selectedEntityIds.size === 0 || bulkDeleting) return;
+    const ids = [...selectedEntityIds];
+    setBulkDeleting(true);
+    try {
+      const res = await memoryCortexApi.bulkDeleteEntities(activeChatId, ids);
+      const deletedIds = new Set(ids);
+      setEntities((prev) => prev.filter((e) => !deletedIds.has(e.id)));
+      setSelectedEntityIds(new Set());
+      setSelectionMode(false);
+      setExpandedId((prev) => prev && deletedIds.has(prev) ? null : prev);
+      await loadStats();
+      addToast({ type: "info", message: `${res.deletedCount} entit${res.deletedCount === 1 ? "y" : "ies"} removed` });
+    } catch {
+      addToast({ type: "error", message: "Failed to remove selected entities" });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   // Get unique entity types for filter
   const entityTypes = [...new Set(entities.map((e) => e.entityType))];
@@ -173,7 +238,34 @@ export default function MemoryCortexPanel() {
                 ))}
               </select>
             )}
+            <button
+              className={clsx(styles.selectionModeBtn, selectionMode && styles.selectionModeBtnActive)}
+              onClick={() => selectionMode ? exitSelectionMode() : setSelectionMode(true)}
+              type="button"
+            >
+              {selectionMode ? "Done" : "Select"}
+            </button>
           </div>
+
+          {selectionMode && (
+            <div className={styles.selectionToolbar}>
+              <span className={styles.selectionCount}>{selectedCount} selected</span>
+              <button className={styles.selectionToolbarBtn} onClick={selectVisibleEntities} type="button">
+                Select visible
+              </button>
+              <button className={styles.selectionToolbarBtn} onClick={clearEntitySelection} disabled={selectedCount === 0} type="button">
+                Clear
+              </button>
+              <button
+                className={styles.selectionToolbarDanger}
+                onClick={handleBulkDeleteEntities}
+                disabled={selectedCount === 0 || bulkDeleting}
+                type="button"
+              >
+                {bulkDeleting ? "Removing..." : "Remove selected"}
+              </button>
+            </div>
+          )}
 
           {/* Entity list */}
           {loading ? (
@@ -193,18 +285,24 @@ export default function MemoryCortexPanel() {
                   expanded={expandedId === entity.id}
                   onToggle={() => setExpandedId(expandedId === entity.id ? null : entity.id)}
                   onDelete={() => handleDeleteEntity(entity.id)}
+                  selectionMode={selectionMode}
+                  selected={selectedEntityIds.has(entity.id)}
+                  onSelect={() => toggleEntitySelection(entity.id)}
                 />
               ))}
               {archivedEntities.length > 0 && (
                 <div className={styles.archivedSection}>
                   <span className={styles.archivedLabel}>Archived ({archivedEntities.length})</span>
-                  {archivedEntities.slice(0, 10).map((entity) => (
+                  {visibleArchivedEntities.map((entity) => (
                     <EntityCard
                       key={entity.id}
                       entity={entity}
                       expanded={expandedId === entity.id}
                       onToggle={() => setExpandedId(expandedId === entity.id ? null : entity.id)}
                       onDelete={() => handleDeleteEntity(entity.id)}
+                      selectionMode={selectionMode}
+                      selected={selectedEntityIds.has(entity.id)}
+                      onSelect={() => toggleEntitySelection(entity.id)}
                     />
                   ))}
                 </div>
@@ -246,11 +344,17 @@ function EntityCard({
   expanded,
   onToggle,
   onDelete,
+  selectionMode,
+  selected,
+  onSelect,
 }: {
   entity: CortexEntity;
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  selectionMode: boolean;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const Icon = ENTITY_ICONS[entity.entityType] || Lightbulb;
   const statusColor = STATUS_COLORS[entity.status] || STATUS_COLORS.unknown;
@@ -271,14 +375,35 @@ function EntityCard({
 
   // Last seen
   const lastSeen = relativeTime(entity.lastMentionTimestamp ?? entity.lastSeenAt);
+  const handleHeaderClick = () => {
+    if (selectionMode) onSelect();
+    else onToggle();
+  };
+
+  const handleHeaderKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    handleHeaderClick();
+  };
 
   return (
     <div className={clsx(
       styles.entityCard,
       entity.status === "inactive" && styles.entityCardArchived,
       isProvisional && styles.entityCardProvisional,
+      selected && styles.entityCardSelected,
     )}>
-      <div className={styles.entityHeader} role="button" tabIndex={0} onClick={onToggle}>
+      <div className={styles.entityHeader} role="button" tabIndex={0} onClick={handleHeaderClick} onKeyDown={handleHeaderKeyDown}>
+        {selectionMode && (
+          <input
+            className={styles.entitySelectCheckbox}
+            type="checkbox"
+            checked={selected}
+            onChange={onSelect}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Select ${entity.name}`}
+          />
+        )}
         <div className={styles.entityIcon}>
           <Icon size={14} />
         </div>

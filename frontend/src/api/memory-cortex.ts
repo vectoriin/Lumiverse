@@ -364,6 +364,8 @@ export const memoryCortexApi = {
     put<CortexEntity>(`${BASE}/chats/${chatId}/entities/${entityId}`, data),
   deleteEntity: (chatId: string, entityId: string) =>
     del<{ success: boolean }>(`${BASE}/chats/${chatId}/entities/${entityId}`),
+  bulkDeleteEntities: (chatId: string, entityIds: string[]) =>
+    post<{ success: boolean; deletedCount: number }>(`${BASE}/chats/${chatId}/entities/bulk-delete`, { entityIds }),
   mergeEntities: (chatId: string, sourceId: string, targetId: string) =>
     post<CortexEntity>(`${BASE}/chats/${chatId}/entities/merge`, { sourceId, targetId }),
 
