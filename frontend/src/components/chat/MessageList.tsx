@@ -249,9 +249,12 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
         lumiaOOCStyle,
       ].join(':')
 
+      // Below key must stay content-independent as folding content into the key remounts the row every streamed token and thrashes the virtualizer.
+      const key = ['message', message.id, message.swipe_id, displayMode].join(':')
+
       items.push({
         type: 'message',
-        key: measureKey,
+        key,
         measureKey,
         message,
         messageIndex: index,
@@ -485,7 +488,11 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
 
   useLayoutEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
-      const scrollOffset = rowVirtualizer.scrollOffset ?? scrollRef.current?.scrollTop ?? 0
+      const el = scrollRef.current
+      if (el && el.scrollHeight - el.scrollTop - el.clientHeight > SCROLLED_UP_EPSILON) {
+        return false
+      }
+      const scrollOffset = rowVirtualizer.scrollOffset ?? el?.scrollTop ?? 0
       return item.end < scrollOffset
     }
 
@@ -499,9 +506,62 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   // Gate that keeps the keyboard/safe-zone repin from fighting the unified
   // scroll guard while streaming is active.
   const isStreamingRef = useRef(isStreaming)
-  useEffect(() => {
-    isStreamingRef.current = isStreaming
-  }, [isStreaming])
+  const streamEndSettleUntilRef = useRef(0)
+  const reflowAnchorRef = useRef<{ el: HTMLElement; top: number } | null>(null)
+  const STREAM_END_SETTLE_MS = 1200
+  const SCROLLED_UP_EPSILON = 24
+
+  const inStreamEndSettle = useCallback(
+    () => performance.now() < streamEndSettleUntilRef.current,
+    [],
+  )
+
+  const captureReflowAnchor = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) {
+      reflowAnchorRef.current = null
+      return
+    }
+    const rect = el.getBoundingClientRect()
+    const node = document.elementFromPoint(rect.left + rect.width / 2, rect.top + 4)
+    const anchor = node && el.contains(node)
+      ? (node.closest<HTMLElement>('[data-virtual-index] *') ?? (node as HTMLElement))
+      : null
+    reflowAnchorRef.current = anchor
+      ? { el: anchor, top: anchor.getBoundingClientRect().top }
+      : null
+  }, [])
+
+  const restoreReflowAnchor = useCallback(() => {
+    const anchor = reflowAnchorRef.current
+    const el = scrollRef.current
+    if (!anchor || !el || !anchor.el.isConnected) return
+    const delta = (anchor.el.getBoundingClientRect().top - anchor.top) / getUiScale()
+    if (Math.abs(delta) < 1) return
+    isProgrammaticScrollRef.current = true
+    el.scrollTop += delta
+    lastScrollTopRef.current = el.scrollTop
+    lastScrollHeightRef.current = el.scrollHeight
+  }, [])
+
+  const pinToBottomIfNeeded = useCallback((el: HTMLElement) => {
+    const target = el.scrollHeight - el.clientHeight
+    if (Math.abs(el.scrollTop - target) <= 1) return
+    isProgrammaticScrollRef.current = true
+    el.scrollTop = target
+  }, [])
+
+  if (isStreamingRef.current && !isStreaming) {
+    const el = scrollRef.current
+    const distFromBottom = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0
+    if (el && distFromBottom > SCROLLED_UP_EPSILON) {
+      streamEndSettleUntilRef.current = performance.now() + STREAM_END_SETTLE_MS
+      captureReflowAnchor()
+    } else {
+      streamEndSettleUntilRef.current = 0
+    }
+  }
+  isStreamingRef.current = isStreaming
 
   const scrollToHistoryBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const el = scrollRef.current
@@ -524,8 +584,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   const BOTTOM_REPIN_EPSILON = 6
 
   const recoverTailVoid = useCallback(() => {
-    // If user deliberately scrolled up, the streaming height-lock 
-    // releasing at stream end must not snap them down.
+    if (performance.now() < streamEndSettleUntilRef.current) return false
     if (!isPinnedRef.current) return false
 
     const el = scrollRef.current
@@ -580,6 +639,11 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     if (isProgrammaticScrollRef.current) {
       isProgrammaticScrollRef.current = false
       return
+    }
+
+    if (streamEndSettleUntilRef.current !== 0) {
+      streamEndSettleUntilRef.current = 0
+      reflowAnchorRef.current = null
     }
 
     if (prependVisualOffsetRef.current > 0 && deltaTop < 0) {
@@ -714,6 +778,11 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       lastSH = newSH
       lastST = newST
 
+      if (inStreamEndSettle()) {
+        restoreReflowAnchor()
+        return
+      }
+
       if (recoverTailVoid()) return
 
       if (heightDelta === 0) return
@@ -728,8 +797,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       // so streaming tokens (or any other bottom growth) don't push content
       // up the screen.
       if (isPinnedRef.current) {
-        isProgrammaticScrollRef.current = true
-        latest.scrollTop = latest.scrollHeight - latest.clientHeight
+        pinToBottomIfNeeded(latest)
       }
     }
 
@@ -744,7 +812,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       mo.disconnect()
       if (pendingRaf) cancelAnimationFrame(pendingRaf)
     }
-  }, [isCoarsePointer, recoverTailVoid, rowVirtualizer])
+  }, [isCoarsePointer, inStreamEndSettle, restoreReflowAnchor, pinToBottomIfNeeded, recoverTailVoid, rowVirtualizer])
 
   // Re-pin to bottom when the input safe-zone changes — keyboard opening on
   // mobile/iOS PWA grows --lcs-input-safe-zone. Without this, the last
@@ -765,8 +833,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       if (!isPinnedRef.current) return
       const latest = scrollRef.current
       if (!latest) return
-      isProgrammaticScrollRef.current = true
-      latest.scrollTop = latest.scrollHeight - latest.clientHeight
+      pinToBottomIfNeeded(latest)
     }
 
     // iOS keyboard animation (~250-350ms) fires multiple visualViewport
@@ -776,6 +843,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     // — the unified scroll guard already handles content growth.
     const repinIfAnchored = () => {
       if (isStreamingRef.current) return
+      if (inStreamEndSettle()) return
       if (!isPinnedRef.current) return
       requestAnimationFrame(pinToBottom)
       clearSettleTimers()
@@ -796,7 +864,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       vv?.removeEventListener('scroll', repinIfAnchored)
       clearSettleTimers()
     }
-  }, [])
+  }, [inStreamEndSettle, pinToBottomIfNeeded])
 
   // Scroll to bottom on chat change — always pin when switching chats
   useEffect(() => {
@@ -829,6 +897,11 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
         pendingRaf = 0
         measureMountedRows()
 
+        if (inStreamEndSettle()) {
+          restoreReflowAnchor()
+          return
+        }
+
         if (recoverTailVoid()) return
         if (!settleRaf) {
           settleRaf = requestAnimationFrame(() => {
@@ -839,8 +912,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
 
         const latest = scrollRef.current
         if (!latest || !isPinnedRef.current) return
-        isProgrammaticScrollRef.current = true
-        latest.scrollTop = latest.scrollHeight - latest.clientHeight
+        pinToBottomIfNeeded(latest)
         lastScrollTopRef.current = latest.scrollTop
         lastScrollHeightRef.current = latest.scrollHeight
       })
@@ -852,7 +924,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       if (pendingRaf) cancelAnimationFrame(pendingRaf)
       if (settleRaf) cancelAnimationFrame(settleRaf)
     }
-  }, [measureMountedRows, recoverTailVoid])
+  }, [inStreamEndSettle, restoreReflowAnchor, pinToBottomIfNeeded, measureMountedRows, recoverTailVoid])
 
   return (
     <div
