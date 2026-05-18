@@ -912,7 +912,8 @@ export default function InputArea({ chatId }: InputAreaProps) {
 
     // On iOS PWA, the virtual keyboard changes `bottom` via CSS variable but
     // doesn't change the element's size — ResizeObserver alone won't catch it.
-    // Listen to visualViewport resize (keyboard open/close) and re-compute.
+    // WebKit can report keyboard geometry via resize and/or scroll, so listen
+    // to both to keep the message-list safe-zone aligned with the input bar.
     let vpFrame = 0
     const onViewportResize = () => {
       // Run after main.tsx's syncViewportVars (also uses requestAnimationFrame)
@@ -921,6 +922,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     }
     if (isIOSPwa) {
       window.visualViewport?.addEventListener('resize', onViewportResize)
+      window.visualViewport?.addEventListener('scroll', onViewportResize)
     }
 
     return () => {
@@ -928,6 +930,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
       cancelAnimationFrame(vpFrame)
       if (isIOSPwa) {
         window.visualViewport?.removeEventListener('resize', onViewportResize)
+        window.visualViewport?.removeEventListener('scroll', onViewportResize)
       }
     }
   }, [])
