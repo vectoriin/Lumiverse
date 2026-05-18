@@ -487,6 +487,9 @@ export function getCharactersByIds(userId: string, ids: string[]): Map<string, C
 export function createCharacter(userId: string, input: CreateCharacterInput): Character {
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
+  const extensions = { ...(input.extensions || {}) };
+  delete extensions.avatar_crop_image_id;
+  delete extensions.original_image_id;
 
   getDb()
     .query(
@@ -508,7 +511,7 @@ export function createCharacter(userId: string, input: CreateCharacterInput): Ch
       input.post_history_instructions || "",
       JSON.stringify(input.tags || []),
       JSON.stringify(input.alternate_greetings || []),
-      JSON.stringify(input.extensions || {}),
+      JSON.stringify(extensions),
       now,
       now
     );

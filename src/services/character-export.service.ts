@@ -176,6 +176,14 @@ async function readImageBytes(userId: string, imageId: string): Promise<ImageByt
   };
 }
 
+function getExportAvatarImageIds(character: Character): string[] {
+  const ids = [
+    typeof character.extensions?.original_image_id === "string" ? character.extensions.original_image_id : null,
+    character.image_id,
+  ];
+  return ids.filter((id, index): id is string => Boolean(id) && ids.indexOf(id) === index);
+}
+
 // ── CCSv3 JSON builder ──────────────────────────────────────────────────────
 
 /** Extension keys that are Lumiverse-internal and should not leak into CCSv3 exports. */
@@ -186,6 +194,8 @@ const INTERNAL_EXTENSION_KEYS = new Set([
   "alternate_avatars",
   "world_book_id",
   "world_book_ids",
+  "avatar_crop_image_id",
+  "original_image_id",
   "_lumiverse_source_filename",
   "risu_asset_map",
 ]);
@@ -303,10 +313,11 @@ export async function exportAsPng(userId: string, characterId: string): Promise<
   // Get avatar image
   let avatarBuffer: Buffer | null = null;
 
-  if (character.image_id) {
-    const filepath = await getImageFilePath(userId, character.image_id);
+  for (const imageId of getExportAvatarImageIds(character)) {
+    const filepath = await getImageFilePath(userId, imageId);
     if (filepath) {
       avatarBuffer = Buffer.from(await Bun.file(filepath).arrayBuffer());
+      break;
     }
   }
 
@@ -378,11 +389,12 @@ export async function exportAsCharx(userId: string, characterId: string): Promis
   // Primary avatar — CHARX spec: assets/{category}/{type}/{filename}.
   // Strip any stale card tEXt chunks so the archive's avatar can't shadow
   // card.json for readers that peek at PNG text chunks.
-  if (character.image_id) {
-    const img = await readImageBytes(userId, character.image_id);
+  for (const imageId of getExportAvatarImageIds(character)) {
+    const img = await readImageBytes(userId, imageId);
     if (img) {
       const cleaned = stripCardTextChunks(img.bytes);
       entries[`assets/icon/image/main${img.ext}`] = new Uint8Array(cleaned);
+      break;
     }
   }
 

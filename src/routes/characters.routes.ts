@@ -479,10 +479,9 @@ app.get("/:id/avatar", async (c) => {
   const sizeParam = c.req.query("size") as images.ThumbTier | undefined;
   const tier = sizeParam === "sm" || sizeParam === "lg" ? sizeParam : undefined;
 
-  const imageId = info.avatar_crop_image_id || info.image_id;
-
   // Prefer image_id, fall back to legacy avatar_path
-  if (imageId) {
+  for (const imageId of [info.avatar_crop_image_id, info.image_id]) {
+    if (!imageId) continue;
     const filepath = await images.getImageFilePath(userId, imageId, tier);
     if (filepath) {
       return createAvatarResolverResponse(
