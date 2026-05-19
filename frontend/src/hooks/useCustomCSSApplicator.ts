@@ -33,15 +33,17 @@ export function useCustomCSSApplicator() {
     // Collect all CSS sources
     const parts: string[] = []
 
-    // Global CSS (if enabled)
-    if (customCSS.enabled && customCSS.css.trim()) {
-      parts.push(rewriteThemeAssetUrls(sanitizeCSS(customCSS.css), customCSS.bundleId))
-    }
+    if (customCSS.enabled) {
+      // Global CSS
+      if (customCSS.css.trim()) {
+        parts.push(rewriteThemeAssetUrls(sanitizeCSS(customCSS.css), customCSS.bundleId))
+      }
 
-    // Per-component CSS (from enabled overrides)
-    for (const [, override] of Object.entries(componentOverrides)) {
-      if (override.enabled && override.css?.trim()) {
-        parts.push(rewriteThemeAssetUrls(sanitizeCSS(override.css), customCSS.bundleId))
+      // Per-component CSS (from enabled overrides)
+      for (const [, override] of Object.entries(componentOverrides)) {
+        if (override.enabled && override.css?.trim()) {
+          parts.push(rewriteThemeAssetUrls(sanitizeCSS(override.css), customCSS.bundleId))
+        }
       }
     }
 
