@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { bunInstallCmd, detectDangerousBackendCapabilities, PRIVILEGED_PERMISSIONS } from "./manager.service";
+import {
+  bunInstallCmd,
+  declaredCapabilitiesFromManifest,
+  detectDangerousBackendCapabilities,
+  PRIVILEGED_PERMISSIONS,
+} from "./manager.service";
+import type { SpindleCapability, SpindleManifest } from "lumiverse-spindle-types";
 
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
   const previous = new Map<string, string | undefined>();
@@ -78,11 +84,108 @@ describe("detectDangerousBackendCapabilities", () => {
       [`Object.getOwnPropertyDescriptor(process, "env")?.value`, "dangerous process API usage"],
       [`\u0070rocess.env.SECRET`, "dangerous process API usage"],
       [`eval(Buffer.from("Zm9v", "base64").toString())`, "dynamic code execution"],
+      [`const bytes = Buffer.from(input, "base64");`, "base64 decoding"],
     ];
 
     for (const [code, label] of samples) {
       expect(detectDangerousBackendCapabilities(code)).toContain(label);
     }
+  });
+
+  test("does not flag empty-body Function probes (Zod / Cloudflare feature-detect)", () => {
+    const samples = [
+      `try { return new Function(""), true } catch { return false }`,
+      `try { Function(''); } catch (_) { /* no-op */ }`,
+      `if (typeof Function === 'function') { new Function() }`,
+    ];
+    for (const code of samples) {
+      expect(detectDangerousBackendCapabilities(code)).toEqual([]);
+    }
+  });
+
+  test("does not flag forbidden tokens that appear inside regex literals", () => {
+    const samples = [
+      // lumiscript's host-dispatcher security check — itself bans Function().
+      `if (/(?<!\\.)\\b(?:new\\s+)?Function\\s*\\(/.test(stripped)) throw new Error("nope");`,
+      // Regex literals after various tokens are recognized as regex, not division.
+      `const re = /eval\\s*\\(/g; void re;`,
+      `return /Function\\s*\\(/.test(x);`,
+      `arr.filter((s) => /eval\\(/.test(s));`,
+    ];
+    for (const code of samples) {
+      expect(detectDangerousBackendCapabilities(code)).toEqual([]);
+    }
+  });
+
+  test("still flags real dynamic-execution calls outside regex literals", () => {
+    const samples: Array<[string, string]> = [
+      [`eval(payload)`, "dynamic code execution"],
+      [`new Function("return process")()`, "dynamic code execution"],
+      [`Function('return globalThis.fetch')()`, "dynamic code execution"],
+    ];
+    for (const [code, label] of samples) {
+      expect(detectDangerousBackendCapabilities(code)).toContain(label);
+    }
+  });
+
+  test("respects manifest-declared capabilities", () => {
+    const code = `
+      const compiled = new Function("a", "return a + 1");
+      const bytes    = Buffer.from(payload, "base64");
+    `;
+
+    // Without declarations, both labels surface.
+    expect(detectDangerousBackendCapabilities(code).sort()).toEqual([
+      "base64 decoding",
+      "dynamic code execution",
+    ]);
+
+    // Declared capabilities filter the matching labels out.
+    expect(
+      detectDangerousBackendCapabilities(code, new Set<SpindleCapability>(["dynamic_code_execution"])),
+    ).toEqual(["base64 decoding"]);
+    expect(
+      detectDangerousBackendCapabilities(
+        code,
+        new Set<SpindleCapability>(["dynamic_code_execution", "base64_decode"]),
+      ),
+    ).toEqual([]);
+
+    // Declarations do not unlock hard-blocked capabilities (no opt-in path).
+    const unsafe = `import { readFileSync } from "node:fs"; void readFileSync;`;
+    expect(
+      detectDangerousBackendCapabilities(
+        unsafe,
+        new Set<SpindleCapability>(["dynamic_code_execution", "base64_decode"]),
+      ),
+    ).toContain("filesystem module access");
+  });
+
+  test("declaredCapabilitiesFromManifest accepts only valid entries", () => {
+    const base = {
+      version: "0.0.0",
+      name: "x",
+      identifier: "x",
+      author: "x",
+      github: "x",
+      homepage: "x",
+      permissions: [],
+    } as unknown as SpindleManifest;
+
+    expect(declaredCapabilitiesFromManifest(base)).toEqual(new Set());
+
+    const valid = { ...base, requested_capabilities: ["dynamic_code_execution"] } as SpindleManifest;
+    expect(declaredCapabilitiesFromManifest(valid)).toEqual(
+      new Set<SpindleCapability>(["dynamic_code_execution"]),
+    );
+
+    const mixed = {
+      ...base,
+      requested_capabilities: ["dynamic_code_execution", "bogus_value", "base64_decode"] as SpindleCapability[],
+    } as SpindleManifest;
+    expect(declaredCapabilitiesFromManifest(mixed)).toEqual(
+      new Set<SpindleCapability>(["dynamic_code_execution", "base64_decode"]),
+    );
   });
 
   test("ignores unsafe examples inside documentation strings and comments", () => {

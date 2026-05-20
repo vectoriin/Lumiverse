@@ -3,9 +3,14 @@ import { env } from "../env";
 import type {
   SpindleManifest,
   SpindlePermission,
+  SpindleCapability,
   ExtensionInfo,
 } from "lumiverse-spindle-types";
-import { validateIdentifier, isValidPermission } from "lumiverse-spindle-types";
+import {
+  validateIdentifier,
+  isValidPermission,
+  isValidCapability,
+} from "lumiverse-spindle-types";
 import {
   existsSync,
   mkdirSync,
@@ -153,6 +158,93 @@ function collectIgnoredSpans(source: string): SourceSpan[] {
     return end;
   };
 
+  // Tokens after which a `/` starts a regex literal rather than division.
+  // Conservative: only single-char operators / openers and a closed set of
+  // keywords. The fallthrough is "treat as division" — false negatives in
+  // regex detection just leave the existing behaviour intact (substrings
+  // inside regex bodies remain scannable), so the heuristic only needs to
+  // be RIGHT about value-producing tokens to avoid swallowing real code.
+  const REGEX_CONTEXT_CHARS = new Set([
+    "(", ",", "=", "!", "&", "|", "?", ":", ";", "{", "[", "}",
+    "+", "-", "*", "%", "~", "^", "<", ">",
+  ]);
+  const REGEX_CONTEXT_KEYWORDS = new Set([
+    "return", "typeof", "delete", "void", "throw", "new",
+    "in", "of", "instanceof", "case", "do", "else", "yield", "await",
+  ]);
+
+  /**
+   * Find the last non-whitespace, non-comment character before `pos` and
+   * decide whether a `/` at `pos` starts a regex literal. Walks backwards
+   * skipping whitespace, single-line comments (which we've already
+   * registered as spans, but they don't exist yet at this scan position —
+   * scanCode runs forward), and identifier characters (to detect keyword
+   * tokens like `return`).
+   *
+   * Returns true if `pos` is regex-context, false if it's division-context.
+   * Defaults to true at start-of-input (a leading `/` is a regex).
+   */
+  const isRegexContext = (pos: number): boolean => {
+    let j = pos - 1;
+    // Skip whitespace.
+    while (j >= 0 && /\s/.test(source[j])) j -= 1;
+    if (j < 0) return true;
+    const ch = source[j];
+    if (REGEX_CONTEXT_CHARS.has(ch)) return true;
+    // Identifier scan — keyword or value?
+    if (/[A-Za-z_$]/.test(ch)) {
+      let k = j;
+      while (k >= 0 && /[A-Za-z0-9_$]/.test(source[k])) k -= 1;
+      const word = source.slice(k + 1, j + 1);
+      if (REGEX_CONTEXT_KEYWORDS.has(word)) return true;
+      return false;
+    }
+    // Closing `)`, `]`, `++`, `--`, etc. — value context, treat as division.
+    return false;
+  };
+
+  /**
+   * Scan a regex literal starting at `start` (the leading `/`). Returns the
+   * index past the closing `/` and any flag characters. Respects character
+   * classes (`[...]` can contain `/` literally) and `\` escapes.
+   */
+  const scanRegex = (start: number, end: number): number => {
+    let i = start + 1;
+    let inClass = false;
+    while (i < end) {
+      const ch = source[i];
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === "[") {
+        inClass = true;
+        i += 1;
+        continue;
+      }
+      if (ch === "]" && inClass) {
+        inClass = false;
+        i += 1;
+        continue;
+      }
+      if (ch === "/" && !inClass) {
+        i += 1;
+        // Consume regex flags.
+        while (i < end && /[dgimsuy]/.test(source[i])) i += 1;
+        addSpan(start, i);
+        return i;
+      }
+      if (ch === "\n") {
+        // Unterminated regex on a single line — bail out, leave the rest
+        // scannable. (Real JS would have rejected this at parse time.)
+        return start + 1;
+      }
+      i += 1;
+    }
+    addSpan(start, end);
+    return end;
+  };
+
   const scanCode = (start: number, end: number, stopOnTemplateBrace = false): number => {
     let i = start;
     while (i < end) {
@@ -169,6 +261,16 @@ function collectIgnoredSpans(source: string): SourceSpan[] {
         const commentEnd = blockEnd === -1 ? end : blockEnd + 2;
         addSpan(i, commentEnd);
         i = commentEnd;
+        continue;
+      }
+      // Regex literal — disambiguated from division by preceding-token check.
+      // Bundle minifiers preserve regex literals (`/pat/flags`), and several
+      // legitimate extensions inline a regex whose source string mentions
+      // forbidden tokens (e.g. lumiscript's host-dispatcher security check
+      // `/(?<!\.)\b(?:new\s+)?Function\s*\(/.test(t)`). Without this branch
+      // the scanner reads the regex source as raw code and false-positives.
+      if (source[i] === "/" && isRegexContext(i)) {
+        i = scanRegex(i, end);
         continue;
       }
       if (source[i] === '"' || source[i] === "'") {
@@ -318,7 +420,49 @@ function addDestructuringHits(source: ScannableSource, hits: Set<string>): void 
   }
 }
 
-export function detectDangerousBackendCapabilities(content: string): string[] {
+/**
+ * Maps a scanner label to the manifest-declared capability that, when
+ * present, suppresses that label. Capabilities are install-time opt-ins
+ * declared in `spindle.json`'s `requested_capabilities` field; the user
+ * grants them on install just like `permissions`. Only labels with a
+ * meaningful false-positive rate get a capability mapping — filesystem,
+ * subprocess, sockets, sqlite, workers, Bun system APIs, and process APIs
+ * remain hard-blocked with no opt-in available.
+ */
+const LABEL_TO_CAPABILITY: ReadonlyMap<string, SpindleCapability> = new Map([
+  ["dynamic code execution", "dynamic_code_execution"],
+  ["base64 decoding",        "base64_decode"],
+]);
+
+/**
+ * Match `Function(...)` calls where the FIRST argument is an empty string
+ * literal (or where the call has no arguments). Used to carve out the
+ * Zod / generic feature-detect probe `try { new Function(""); … }` that
+ * checks for Cloudflare-Workers-style environments without actually
+ * executing any code. The body of an empty-string Function is empty —
+ * the call constructs a no-op, indistinguishable from `() => {}`.
+ *
+ * Matches `Function()`, `Function("")`, `Function('')`, `Function(\`\`)`,
+ * with whitespace tolerated.
+ */
+const EMPTY_FUNCTION_PROBE_RE = /\bFunction\s*\(\s*(?:""|''|``|)\s*\)/g;
+
+function isEmptyFunctionProbe(source: ScannableSource, matchIndex: number): boolean {
+  EMPTY_FUNCTION_PROBE_RE.lastIndex = 0;
+  let probe: RegExpExecArray | null;
+  while ((probe = EMPTY_FUNCTION_PROBE_RE.exec(source.text)) !== null) {
+    // matchIndex points at the `F` of `Function(`; the probe match also
+    // starts at the `F` after `\b`. So index equality is the test.
+    if (probe.index === matchIndex) return true;
+    if (probe.index > matchIndex) return false;
+  }
+  return false;
+}
+
+export function detectDangerousBackendCapabilities(
+  content: string,
+  declared: ReadonlySet<SpindleCapability> = new Set(),
+): string[] {
   const hits = new Set<string>();
   for (const source of createScannableSources(content)) {
     for (const check of DANGEROUS_BACKEND_CHECKS) {
@@ -334,17 +478,63 @@ export function detectDangerousBackendCapabilities(content: string): string[] {
     if (matchOutsideIgnored(source, /\bObject\.getOwnPropertyDescriptor\s*\(\s*process\s*,\s*["'`]env["'`]/).length > 0) {
       hits.add("dangerous process API usage");
     }
-    if (matchOutsideIgnored(source, /\beval\s*\(|\bFunction\s*\(|\bBuffer\.from\s*\([^)]*["'`]base64["'`]/).length > 0) {
+
+    // Dynamic code execution — `eval(` / `Function(`. The empty-body
+    // Function probe (`new Function("")`) is excluded as a known
+    // feature-detect pattern with no real execution capability.
+    const dynExecMatches = matchOutsideIgnored(source, /\beval\s*\(|\bFunction\s*\(/);
+    for (const match of dynExecMatches) {
+      if (match.index === undefined) continue;
+      const matchedText = match[0];
+      if (matchedText.startsWith("Function") && isEmptyFunctionProbe(source, match.index)) continue;
       hits.add("dynamic code execution");
+      break;
+    }
+
+    // Base64 decoding — `Buffer.from(..., "base64")`. Split from
+    // dynamic-execution so it carries its own capability and can be
+    // declared independently.
+    if (matchOutsideIgnored(source, /\bBuffer\.from\s*\([^)]*["'`]base64["'`]/).length > 0) {
+      hits.add("base64 decoding");
     }
   }
-  return [...hits];
+
+  if (declared.size === 0) return [...hits];
+  return [...hits].filter((label) => {
+    const cap = LABEL_TO_CAPABILITY.get(label);
+    return cap === undefined || !declared.has(cap);
+  });
 }
 
-async function assertSafeBackendBundle(identifier: string, backendPath: string): Promise<void> {
+/**
+ * Normalize a manifest's `requested_capabilities` field into a Set the
+ * scanner can consume. Invalid entries are dropped silently — the scanner
+ * still enforces the underlying check; an invalid declaration just means
+ * no opt-in.
+ */
+export function declaredCapabilitiesFromManifest(
+  manifest: SpindleManifest,
+): Set<SpindleCapability> {
+  const declared = new Set<SpindleCapability>();
+  const raw = manifest.requested_capabilities;
+  if (!Array.isArray(raw)) return declared;
+  for (const entry of raw) {
+    if (typeof entry === "string" && isValidCapability(entry)) declared.add(entry);
+  }
+  return declared;
+}
+
+async function assertSafeBackendBundle(
+  identifier: string,
+  backendPath: string,
+  declared: ReadonlySet<SpindleCapability> = new Set(),
+): Promise<void> {
   if (!(await Bun.file(backendPath).exists())) return;
 
-  const blocked = detectDangerousBackendCapabilities(await Bun.file(backendPath).text());
+  const blocked = detectDangerousBackendCapabilities(
+    await Bun.file(backendPath).text(),
+    declared,
+  );
   if (blocked.length === 0) return;
 
   throw new Error(
@@ -811,12 +1001,14 @@ export async function buildExtension(identifier: string): Promise<void> {
     }
   }
 
+  const declaredCaps = declaredCapabilitiesFromManifest(manifest);
+
   // If the repo ships pre-built dist/ (files tracked in git), skip build entirely
   const distDir = join(repo, "dist");
   if (existsSync(distDir)) {
     const lsFiles = await spawnAsync(["git", "ls-files", "dist"], { cwd: repo });
     if (lsFiles.exitCode === 0 && lsFiles.stdout.trim().length > 0) {
-      await assertSafeBackendBundle(identifier, backendOut);
+      await assertSafeBackendBundle(identifier, backendOut, declaredCaps);
       return;
     }
   }
@@ -857,7 +1049,7 @@ export async function buildExtension(identifier: string): Promise<void> {
     }
   }
 
-  await assertSafeBackendBundle(identifier, backendOut);
+  await assertSafeBackendBundle(identifier, backendOut, declaredCaps);
 }
 
 // ─── Install ─────────────────────────────────────────────────────────────
@@ -1286,7 +1478,7 @@ export async function getBackendEntryPath(identifier: string): Promise<string | 
   const repo = repoDir(identifier);
   const entryPath = resolveWithin(repo, entry, "entry_backend");
   if (!(await Bun.file(entryPath).exists())) return null;
-  await assertSafeBackendBundle(identifier, entryPath);
+  await assertSafeBackendBundle(identifier, entryPath, declaredCapabilitiesFromManifest(manifest));
   return entryPath;
 }
 

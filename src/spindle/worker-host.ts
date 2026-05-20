@@ -1209,7 +1209,10 @@ export class WorkerHost {
       throw new Error(`Backend process entry not found: ${normalized}`);
     }
 
-    const blocked = managerSvc.detectDangerousBackendCapabilities(await Bun.file(entryPath).text());
+    const blocked = managerSvc.detectDangerousBackendCapabilities(
+      await Bun.file(entryPath).text(),
+      managerSvc.declaredCapabilitiesFromManifest(this.manifest),
+    );
     if (blocked.length > 0) {
       throw new Error(
         `Backend process entry \"${normalized}\" uses blocked backend capabilities: ${blocked.join(", ")}`
