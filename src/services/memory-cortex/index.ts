@@ -212,7 +212,17 @@ async function yieldToEventLoop(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
-export function getCortexWarmupSignature(config: MemoryCortexConfig): string {
+/**
+ * Structural signature: the subset of cortex config that determines what's
+ * actually stored per-chunk (extracted entities, salience flags, font colors,
+ * etc.). Stamped on chat_chunks.cortex_warmup_signature so we can tell when a
+ * chunk's derived state is still consistent with the current config.
+ *
+ * Runtime-only fields (sidecar tuning, timeouts, consolidation thresholds,
+ * pruning) live in getCortexRuntimeSignature instead — they affect future
+ * ingestions, not the validity of work already done.
+ */
+export function getCortexStructuralSignature(config: MemoryCortexConfig): string {
   return JSON.stringify({
     enabled: config.enabled,
     entityTracking: config.entityTracking,
@@ -220,7 +230,16 @@ export function getCortexWarmupSignature(config: MemoryCortexConfig): string {
     thoughtMarkers: config.thoughtMarkers,
     salienceScoring: config.salienceScoring,
     salienceScoringMode: config.salienceScoringMode,
-    consolidation: config.consolidation,
+    entityWhitelist: config.entityWhitelist,
+    entityExtractionFilters: config.entityExtractionFilters,
+  });
+}
+
+/** Runtime signature: fields that affect how new ingestions are performed but
+ *  don't invalidate per-chunk state already on disk. Surfaced for telemetry
+ *  and downstream callers that want to detect runtime-only drift. */
+export function getCortexRuntimeSignature(config: MemoryCortexConfig): string {
+  return JSON.stringify({
     sidecar: {
       connectionProfileId: config.sidecar?.connectionProfileId ?? null,
       model: config.sidecar?.model ?? null,
@@ -231,10 +250,80 @@ export function getCortexWarmupSignature(config: MemoryCortexConfig): string {
       rebuildConcurrency: config.sidecar?.rebuildConcurrency ?? 3,
     },
     sidecarTimeoutMs: config.sidecarTimeoutMs,
+    consolidation: config.consolidation,
     entityPruning: config.entityPruning,
-    entityWhitelist: config.entityWhitelist,
-    entityExtractionFilters: config.entityExtractionFilters,
   });
+}
+
+const LEGACY_SIGNATURE_KEYS_TO_DROP = new Set([
+  "consolidation",
+  "sidecar",
+  "sidecarTimeoutMs",
+  "entityPruning",
+]);
+
+/**
+ * Rewrite a legacy (pre-narrowed) chunk warmup signature into the new
+ * structural-only format. Legacy signatures embedded runtime tuning fields
+ * (sidecar timeouts, consolidation thresholds, pruning) — touching any of
+ * those used to invalidate every chunk and force a full rebuild even though
+ * none of those fields affect per-chunk derived state. Returns null when the
+ * stored value can't be parsed; callers should null out the chunk's signature
+ * so the resumable path picks it up. Returns the input unchanged when it's
+ * already in the new format.
+ */
+export function migrateLegacyChunkSignature(stored: string): string | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(stored); } catch { return null; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const obj = parsed as Record<string, unknown>;
+
+  let hasLegacyKey = false;
+  for (const key of LEGACY_SIGNATURE_KEYS_TO_DROP) {
+    if (key in obj) { hasLegacyKey = true; break; }
+  }
+  if (!hasLegacyKey) return stored;
+
+  return JSON.stringify({
+    enabled: obj.enabled,
+    entityTracking: obj.entityTracking,
+    entityExtractionMode: obj.entityExtractionMode,
+    thoughtMarkers: obj.thoughtMarkers,
+    salienceScoring: obj.salienceScoring,
+    salienceScoringMode: obj.salienceScoringMode,
+    entityWhitelist: obj.entityWhitelist,
+    entityExtractionFilters: obj.entityExtractionFilters,
+  });
+}
+
+/**
+ * Lazy per-chat migration: rewrite legacy chunk warmup signatures to the
+ * narrowed structural format. Idempotent. Called at the start of warmup so
+ * the coverage check post-upgrade sees pre-existing chunks as still warm
+ * under the same structural config (avoiding a one-time forced full rebuild
+ * that would nuke entities). Returns the number of rows rewritten.
+ */
+export function migrateLegacyChunkSignatures(chatId: string): number {
+  const db = getDb();
+  const rows = db
+    .query("SELECT id, cortex_warmup_signature FROM chat_chunks WHERE chat_id = ? AND cortex_warmup_signature IS NOT NULL")
+    .all(chatId) as Array<{ id: string; cortex_warmup_signature: string }>;
+  if (rows.length === 0) return 0;
+
+  const updateStmt = db.query("UPDATE chat_chunks SET cortex_warmup_signature = ? WHERE id = ?");
+  const clearStmt = db.query("UPDATE chat_chunks SET cortex_warmup_signature = NULL, cortex_warmup_completed_at = NULL WHERE id = ?");
+  let migrated = 0;
+  for (const row of rows) {
+    const next = migrateLegacyChunkSignature(row.cortex_warmup_signature);
+    if (next === null) {
+      clearStmt.run(row.id);
+      migrated++;
+    } else if (next !== row.cortex_warmup_signature) {
+      updateStmt.run(next, row.id);
+      migrated++;
+    }
+  }
+  return migrated;
 }
 
 function clearDerivedCortexData(chatId: string, options: { preserveSalience?: boolean } = {}): void {
@@ -778,7 +867,7 @@ export async function processChunk(
   const config = getCortexConfig(data.userId);
   if (!config.enabled) return;
   const sidecarActive = shouldUseCortexSidecarForChunkAnalysis(config) && !!generateRawFn && !!sidecarConnectionId;
-  const warmupSignature = getCortexWarmupSignature(config);
+  const warmupSignature = getCortexStructuralSignature(config);
 
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
@@ -1323,7 +1412,7 @@ export async function rebuildCortex(
     return { chunksProcessed: 0, entitiesFound: 0, relationsFound: 0 };
   }
   const resumable = options.resumable === true;
-  const warmupSignature = options.warmupSignature || getCortexWarmupSignature(config);
+  const warmupSignature = options.warmupSignature || getCortexStructuralSignature(config);
   const sidecarAvailable = shouldUseCortexSidecar(config) && !!generateRawFn && !!sidecarConnectionId;
   const sidecarAnalysisActive = shouldUseCortexSidecarForChunkAnalysis(config) && !!generateRawFn && !!sidecarConnectionId;
   const db = getDb();

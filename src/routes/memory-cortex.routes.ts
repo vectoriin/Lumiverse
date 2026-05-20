@@ -129,7 +129,6 @@ interface CortexFreshnessSnapshot {
   ltcmConfigHash: string | null;
   rebuildSignature: string;
   sourceChunkCount: number;
-  sourceChunkUpdatedAt: number;
 }
 
 interface StoredCortexFreshnessSnapshot extends CortexFreshnessSnapshot {
@@ -151,15 +150,11 @@ interface WarmupResponse {
 
 const passiveWarmups = new Set<string>();
 
-function getChunkFreshnessSnapshot(chatId: string): Pick<CortexFreshnessSnapshot, "sourceChunkCount" | "sourceChunkUpdatedAt"> {
+function getChatChunkCount(chatId: string): number {
   const row = getDb()
-    .query("SELECT COUNT(*) as chunkCount, MAX(updated_at) as maxUpdatedAt FROM chat_chunks WHERE chat_id = ?")
-    .get(chatId) as { chunkCount?: number; maxUpdatedAt?: number | null } | null;
-
-  return {
-    sourceChunkCount: row?.chunkCount ?? 0,
-    sourceChunkUpdatedAt: row?.maxUpdatedAt ?? 0,
-  };
+    .query("SELECT COUNT(*) as chunkCount FROM chat_chunks WHERE chat_id = ?")
+    .get(chatId) as { chunkCount?: number } | null;
+  return row?.chunkCount ?? 0;
 }
 
 function parseStoredCortexFreshness(chat: ReturnType<typeof getChat>): StoredCortexFreshnessSnapshot | null {
@@ -173,7 +168,6 @@ function parseStoredCortexFreshness(chat: ReturnType<typeof getChat>): StoredCor
     ltcmConfigHash: typeof raw.ltcmConfigHash === "string" ? raw.ltcmConfigHash : null,
     rebuildSignature,
     sourceChunkCount: typeof raw.sourceChunkCount === "number" ? raw.sourceChunkCount : -1,
-    sourceChunkUpdatedAt: typeof raw.sourceChunkUpdatedAt === "number" ? raw.sourceChunkUpdatedAt : -1,
     completedAt: typeof raw.completedAt === "number" ? raw.completedAt : 0,
   };
 }
@@ -190,8 +184,8 @@ async function buildCortexFreshnessSnapshot(
 ): Promise<CortexFreshnessSnapshot> {
   return {
     ltcmConfigHash: await chatsSvc.getCurrentChatMemoryHash(userId),
-    rebuildSignature: memoryCortex.getCortexWarmupSignature(cortexConfig),
-    ...getChunkFreshnessSnapshot(chatId),
+    rebuildSignature: memoryCortex.getCortexStructuralSignature(cortexConfig),
+    sourceChunkCount: getChatChunkCount(chatId),
   };
 }
 
@@ -204,8 +198,7 @@ function isCortexFresh(
 
   return stored.ltcmConfigHash === snapshot.ltcmConfigHash
     && stored.rebuildSignature === snapshot.rebuildSignature
-    && stored.sourceChunkCount === snapshot.sourceChunkCount
-    && stored.sourceChunkUpdatedAt === snapshot.sourceChunkUpdatedAt;
+    && stored.sourceChunkCount === snapshot.sourceChunkCount;
 }
 
 function stampCortexFreshnessSnapshot(
@@ -346,6 +339,12 @@ async function performChatWarmup(userId: string, chatId: string, force: boolean)
       chatMemory: { status: "skipped", reason: "chat_not_found" },
       cortex: { status: "skipped", reason: "chat_not_found" },
     };
+  }
+
+  // Rewrite any legacy (pre-narrowed) chunk signatures before the coverage
+  // check runs. Idempotent and cheap — skips fast when nothing matches.
+  try { memoryCortex.migrateLegacyChunkSignatures(chatId); } catch (err) {
+    console.warn("[memory-cortex] Legacy chunk signature migration failed:", err);
   }
 
   const embeddings = await embeddingsSvc.getEmbeddingConfig(userId);
