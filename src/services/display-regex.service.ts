@@ -1,4 +1,4 @@
-import { buildEnv, initMacros, mergeDynamicMacros, resolveGroupCharacterNames } from "../macros";
+import { buildEnv, initMacros, mergeDynamicMacros, resolveGroupCharacterNames, resolvePersonaPronouns } from "../macros";
 import type { MacroEnv } from "../macros";
 import { messageContentProcessorChain } from "../spindle/message-content-processor";
 import { getEffectiveCharacterName } from "../types/character";
@@ -92,6 +92,7 @@ function buildEnvFromContext(userId: string, ctx: DisplayRegexContext): MacroEnv
   }
 
   const persona = personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id);
+  const personaPronouns = resolvePersonaPronouns(persona);
   const connection = connectionsSvc.getDefaultConnection(userId);
   return {
     commit: true,
@@ -113,9 +114,9 @@ function buildEnvFromContext(userId: string, ctx: DisplayRegexContext): MacroEnv
       personality: "",
       scenario: "",
       persona: persona?.description || "",
-      personaSubjectivePronoun: persona?.subjective_pronoun || "",
-      personaObjectivePronoun: persona?.objective_pronoun || "",
-      personaPossessivePronoun: persona?.possessive_pronoun || "",
+      personaSubjectivePronoun: personaPronouns.subjective,
+      personaObjectivePronoun: personaPronouns.objective,
+      personaPossessivePronoun: personaPronouns.possessive,
       mesExamples: "",
       mesExamplesRaw: "",
       systemPrompt: "",

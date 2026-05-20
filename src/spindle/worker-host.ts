@@ -8896,7 +8896,7 @@ export class WorkerHost {
         return;
       }
 
-      const { evaluate, buildEnv, initMacros, registry } = await import("../macros");
+      const { evaluate, buildEnv, initMacros, registry, resolvePersonaPronouns } = await import("../macros");
       initMacros();
 
       const chatsSvc = await import("../services/chats.service");
@@ -8950,6 +8950,7 @@ export class WorkerHost {
       if (!env) {
         // Minimal fallback
         const persona = personasSvc.getDefaultPersona(resolvedUserId);
+        const personaPronouns = resolvePersonaPronouns(persona);
         const connection = connectionsSvc.getDefaultConnection(resolvedUserId);
         env = {
           commit,
@@ -8959,9 +8960,9 @@ export class WorkerHost {
           },
           character: {
             name: "", description: "", personality: "", scenario: "", persona: persona?.description || "",
-            personaSubjectivePronoun: persona?.subjective_pronoun || "",
-            personaObjectivePronoun: persona?.objective_pronoun || "",
-            personaPossessivePronoun: persona?.possessive_pronoun || "",
+            personaSubjectivePronoun: personaPronouns.subjective,
+            personaObjectivePronoun: personaPronouns.objective,
+            personaPossessivePronoun: personaPronouns.possessive,
             mesExamples: "", mesExamplesRaw: "", systemPrompt: "", postHistoryInstructions: "",
             depthPrompt: "", creatorNotes: "", version: "", creator: "", firstMessage: "",
           },

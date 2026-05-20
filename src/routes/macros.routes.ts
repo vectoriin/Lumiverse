@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { evaluate, buildEnv, resolveGroupCharacterNames, registry, initMacros } from "../macros";
+import { evaluate, buildEnv, resolveGroupCharacterNames, resolvePersonaPronouns, registry, initMacros } from "../macros";
 import { getEffectiveCharacterName } from "../types/character";
 import type { Chat } from "../types/chat";
 import type { MacroEnv } from "../macros";
@@ -204,6 +204,7 @@ function buildEnvFromIds(userId: string, body: {
   }
 
   const persona = personasSvc.resolvePersonaOrDefault(userId, body.persona_id);
+  const personaPronouns = resolvePersonaPronouns(persona);
   const connection = connectionsSvc.getDefaultConnection(userId);
 
   return {
@@ -214,9 +215,9 @@ function buildEnvFromIds(userId: string, body: {
     },
     character: {
       name: "", description: "", personality: "", scenario: "", persona: persona?.description || "",
-      personaSubjectivePronoun: persona?.subjective_pronoun || "",
-      personaObjectivePronoun: persona?.objective_pronoun || "",
-      personaPossessivePronoun: persona?.possessive_pronoun || "",
+      personaSubjectivePronoun: personaPronouns.subjective,
+      personaObjectivePronoun: personaPronouns.objective,
+      personaPossessivePronoun: personaPronouns.possessive,
       mesExamples: "", mesExamplesRaw: "", systemPrompt: "", postHistoryInstructions: "",
       depthPrompt: "", creatorNotes: "", version: "", creator: "", firstMessage: "",
     },

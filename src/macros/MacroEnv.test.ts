@@ -3,6 +3,7 @@ import { buildEnv } from "./MacroEnv";
 import type { Character } from "../types/character";
 import type { Chat } from "../types/chat";
 import type { Message } from "../types/message";
+import type { Persona } from "../types/persona";
 
 const baseCharacter: Character = {
   id: "char-1",
@@ -29,6 +30,24 @@ const baseChat: Chat = {
   id: "chat-1",
   character_id: "char-1",
   name: "Test Chat",
+  metadata: {},
+  created_at: 0,
+  updated_at: 0,
+};
+
+const basePersona: Persona = {
+  id: "persona-1",
+  name: "Alice",
+  title: "",
+  description: "",
+  subjective_pronoun: "",
+  objective_pronoun: "",
+  possessive_pronoun: "",
+  folder: "",
+  avatar_path: null,
+  image_id: null,
+  is_default: true,
+  attached_world_book_id: null,
   metadata: {},
   created_at: 0,
   updated_at: 0,
@@ -100,5 +119,42 @@ describe("buildEnv firstMessage", () => {
     });
 
     expect(env.character.firstMessage).toBe("Group greeting");
+  });
+});
+
+describe("buildEnv persona pronouns", () => {
+  test("defaults blank persona pronouns to neutral values", () => {
+    const env = buildEnv({
+      character: baseCharacter,
+      persona: basePersona,
+      chat: baseChat,
+      messages: [],
+      generationType: "normal",
+      connection: null,
+    });
+
+    expect(env.character.personaSubjectivePronoun).toBe("they");
+    expect(env.character.personaObjectivePronoun).toBe("them");
+    expect(env.character.personaPossessivePronoun).toBe("their");
+  });
+
+  test("uses configured persona pronouns when present", () => {
+    const env = buildEnv({
+      character: baseCharacter,
+      persona: {
+        ...basePersona,
+        subjective_pronoun: " she ",
+        objective_pronoun: " her ",
+        possessive_pronoun: " her ",
+      },
+      chat: baseChat,
+      messages: [],
+      generationType: "normal",
+      connection: null,
+    });
+
+    expect(env.character.personaSubjectivePronoun).toBe("she");
+    expect(env.character.personaObjectivePronoun).toBe("her");
+    expect(env.character.personaPossessivePronoun).toBe("her");
   });
 });

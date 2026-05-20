@@ -31,8 +31,21 @@ export interface BuildEnvContext {
   signal?: AbortSignal;
 }
 
+export function resolvePersonaPronouns(persona: Persona | null): {
+  subjective: string;
+  objective: string;
+  possessive: string;
+} {
+  return {
+    subjective: persona?.subjective_pronoun?.trim() || "they",
+    objective: persona?.objective_pronoun?.trim() || "them",
+    possessive: persona?.possessive_pronoun?.trim() || "their",
+  };
+}
+
 export function buildEnv(ctx: BuildEnvContext): MacroEnv {
   const { character, persona, chat, messages, generationType, connection } = ctx;
+  const personaPronouns = resolvePersonaPronouns(persona);
 
   const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
   const lastUserMsg = findLast(messages, (m) => m.is_user);
@@ -67,9 +80,9 @@ export function buildEnv(ctx: BuildEnvContext): MacroEnv {
       personality: character.personality || "",
       scenario: character.scenario || "",
       persona: buildPersonaWithAddons(persona),
-      personaSubjectivePronoun: persona?.subjective_pronoun || "",
-      personaObjectivePronoun: persona?.objective_pronoun || "",
-      personaPossessivePronoun: persona?.possessive_pronoun || "",
+      personaSubjectivePronoun: personaPronouns.subjective,
+      personaObjectivePronoun: personaPronouns.objective,
+      personaPossessivePronoun: personaPronouns.possessive,
       mesExamples: character.mes_example || "",
       mesExamplesRaw: character.mes_example || "",
       systemPrompt: stripLegacyDreamWeaverVoiceSection(character.system_prompt || "", character),
