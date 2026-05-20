@@ -9,6 +9,8 @@
  * but does not replace OS-level isolation (sandbox-exec, containers, etc.).
  */
 
+import { isCapabilityBlockingTemporarilyRelaxed } from "./capability-relaxation";
+
 const BLOCKED_SPECIFIERS = new Set([
   "fs",
   "node:fs",
@@ -141,6 +143,9 @@ function createMaskedEnv(rawEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 export function initializeSandbox(): void {
+  // TODO_REMOVE_RELAXED_CAPABILITY_BLOCKING: temporary extension compatibility stopgap.
+  const relaxDynamicCodeBlocking = isCapabilityBlockingTemporarilyRelaxed();
+
   // ── Guard dynamic import ──
   try {
     const originalImport = (globalThis as any).import;
@@ -167,46 +172,48 @@ export function initializeSandbox(): void {
     }
   }
 
-  // ── Block eval ──
-  try {
-    Object.defineProperty(globalThis, "eval", {
-      value: function () {
-        throw new Error("eval is disabled in extension context");
-      },
-      writable: false,
-      configurable: false,
-    });
-  } catch {
-    /* ignore */
-  }
+  if (!relaxDynamicCodeBlocking) {
+    // ── Block eval ──
+    try {
+      Object.defineProperty(globalThis, "eval", {
+        value: function () {
+          throw new Error("eval is disabled in extension context");
+        },
+        writable: false,
+        configurable: false,
+      });
+    } catch {
+      /* ignore */
+    }
 
-  // ── Block Function constructor ──
-  try {
-    const originalFunctionPrototype = Function.prototype;
-    const blockedFunction = function () {
-      throw new Error("Function constructor is disabled in extension context");
-    };
-    const blockedFunctionPrototype = Object.create(
-      Object.getPrototypeOf(originalFunctionPrototype)
-    );
-    Object.defineProperties(
-      blockedFunctionPrototype,
-      Object.getOwnPropertyDescriptors(originalFunctionPrototype)
-    );
-    Object.defineProperty(blockedFunctionPrototype, "constructor", {
-      value: blockedFunction,
-      writable: true,
-      configurable: true,
-    });
-    blockedFunction.prototype = blockedFunctionPrototype;
+    // ── Block Function constructor ──
+    try {
+      const originalFunctionPrototype = Function.prototype;
+      const blockedFunction = function () {
+        throw new Error("Function constructor is disabled in extension context");
+      };
+      const blockedFunctionPrototype = Object.create(
+        Object.getPrototypeOf(originalFunctionPrototype)
+      );
+      Object.defineProperties(
+        blockedFunctionPrototype,
+        Object.getOwnPropertyDescriptors(originalFunctionPrototype)
+      );
+      Object.defineProperty(blockedFunctionPrototype, "constructor", {
+        value: blockedFunction,
+        writable: true,
+        configurable: true,
+      });
+      blockedFunction.prototype = blockedFunctionPrototype;
 
-    Object.defineProperty(globalThis, "Function", {
-      value: blockedFunction,
-      writable: false,
-      configurable: false,
-    });
-  } catch {
-    /* ignore */
+      Object.defineProperty(globalThis, "Function", {
+        value: blockedFunction,
+        writable: false,
+        configurable: false,
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   // ── Restrict Bun APIs ──

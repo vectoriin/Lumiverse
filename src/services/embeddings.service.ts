@@ -1,4 +1,4 @@
-import { connect, Index, rerankers, type Connection, type Table } from "@lancedb/lancedb";
+import { connect, Index, type Connection, type Table } from "@lancedb/lancedb";
 import { dirname, join } from "path";
 import { mkdirSync, readdirSync, renameSync, rmSync, existsSync, readFileSync } from "fs";
 import { env } from "../env";
@@ -3613,41 +3613,58 @@ export async function searchChatChunks(
   const vectorOnlyColumns = skipVectorFetch
     ? ["source_id", "content", "_distance", "metadata_json"]
     : ["source_id", "content", "_distance", "metadata_json", "vector"];
-  const hybridColumns = skipVectorFetch
-    ? ["source_id", "content", "_distance", "_relevance_score", "metadata_json"]
-    : ["source_id", "content", "_distance", "_relevance_score", "metadata_json", "vector"];
 
-  // Try hybrid search when query text is available
-  let rows: any[];
   // Refine with full vectors after PQ approximate search for better accuracy.
   // Skip refineFactor for unscoped queries — the cost is prohibitive on large partitions.
   const applyRefineFactor = (q: any) => {
     if (getTableState(EMBEDDINGS_TABLE).vectorIndexReady && filterWasScoped) q.refineFactor(5);
     return q;
   };
-  if (queryText?.trim() && hybridWeightMode !== "vector_first") {
-    try {
-      const reranker = await rerankers.RRFReranker.create();
-      const q = table
-        .query()
-        .nearestTo(vector)
-        .fullTextSearch(queryText.trim())
-        .where(filter)
-        .rerank(reranker)
-        .select(hybridColumns)
-        .limit(fetchLimit);
-      rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
-    } catch {
-      if (signal?.aborted) return [];
-      // FTS index may not exist yet — fall back to vector-only
-      const q = table
+
+  // Hybrid retrieval is split into two independent native queries (vector ANN
+  // + FTS BM25) which are fused with RRF in JS. One native op per call
+  // isolates failures (FTS index missing, tokenizer pathologies) from the
+  // vector leg and avoids the per-call Lance reranker allocation that was
+  // implicated in Bun 1.3.12+ crash reports.
+  let rows: any[];
+  const useHybrid = !!queryText?.trim() && hybridWeightMode !== "vector_first";
+
+  if (useHybrid) {
+    const ftsQueryText = queryText!.trim().slice(0, FTS_QUERY_MAX_CHARS);
+
+    const vectorQ = applyRefineFactor(
+      table
         .query()
         .nearestTo(vector)
         .where(filter)
         .select(vectorOnlyColumns)
-        .limit(fetchLimit);
-      rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
-    }
+        .limit(fetchLimit),
+    );
+    const ftsQ = table
+      .query()
+      .fullTextSearch(ftsQueryText)
+      .where(filter)
+      // FTS leg uses the same projection — _relevance_score is implicit in
+      // the array ordering returned by LanceDB, which is all RRF needs.
+      .select(vectorOnlyColumns)
+      .limit(fetchLimit);
+
+    const vectorPromise = raceWithSignal(vectorQ.toArray() as Promise<any[]>, signal).catch((err) => {
+      if (signal?.aborted) throw err;
+      console.warn("[embeddings] Vector search leg failed:", err);
+      return [] as any[];
+    });
+    const ftsPromise = raceWithSignal(ftsQ.toArray() as Promise<any[]>, signal).catch((err) => {
+      if (signal?.aborted) throw err;
+      // FTS index may not exist yet, or tokenizer rejected the query — vector
+      // leg still returns useful results so this is a silent fallback.
+      return [] as any[];
+    });
+
+    const [vectorRows, ftsRows] = await Promise.all([vectorPromise, ftsPromise]);
+    if (signal?.aborted) return [];
+
+    rows = reciprocalRankFusion(vectorRows, ftsRows);
   } else {
     const q = table
       .query()
@@ -3773,6 +3790,56 @@ function resolveExcludedChunkIds(chatId: string, excludedMessageIds: Set<string>
     }
   }
   return chunkIds.size > 0 ? chunkIds : null;
+}
+
+/**
+ * Cap on the query text fed to the FTS leg of hybrid retrieval. The BM25
+ * tokenizer doesn't get useful signal from very long fuzzy queries, and
+ * tokenizing 24 KB+ of context every chat tick is the kind of native work
+ * that's been Bun-fragile in 1.3.12+. Vector leg already uses a fixed-dim
+ * embedding so it's unaffected by this clip.
+ */
+const FTS_QUERY_MAX_CHARS = 4096;
+
+/**
+ * Reciprocal Rank Fusion: combine two ranked candidate lists from
+ * independent native queries (vector ANN + FTS BM25) into a single ranking
+ * without invoking Lance's native reranker. Score is rank-position-only
+ * (`Σ 1/(k + rank_i)` per appearance), so vector-leg rows keep their
+ * `_distance` and FTS-only rows fall through with the row data Lance
+ * returned. Items appearing in both lists naturally rise to the top.
+ */
+const RRF_K = 60;
+function reciprocalRankFusion(vectorRows: any[], ftsRows: any[]): any[] {
+  if (vectorRows.length === 0 && ftsRows.length === 0) return [];
+  if (ftsRows.length === 0) return vectorRows;
+  if (vectorRows.length === 0) return ftsRows;
+
+  const scores = new Map<string, number>();
+  const rowById = new Map<string, any>();
+
+  for (let i = 0; i < vectorRows.length; i++) {
+    const row = vectorRows[i];
+    const id = String(row.source_id);
+    scores.set(id, (scores.get(id) ?? 0) + 1 / (RRF_K + i + 1));
+    rowById.set(id, row);
+  }
+  for (let i = 0; i < ftsRows.length; i++) {
+    const row = ftsRows[i];
+    const id = String(row.source_id);
+    scores.set(id, (scores.get(id) ?? 0) + 1 / (RRF_K + i + 1));
+    // Prefer the vector-leg row data when present — it carries _distance
+    // which downstream filters (similarityThreshold) still read.
+    if (!rowById.has(id)) rowById.set(id, row);
+  }
+
+  const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+  const out: any[] = [];
+  for (const [id] of ranked) {
+    const row = rowById.get(id);
+    if (row) out.push(row);
+  }
+  return out;
 }
 
 /**
@@ -4203,36 +4270,40 @@ export async function searchDatabankChunks(
     if (getTableState(EMBEDDINGS_TABLE).vectorIndexReady) q.refineFactor(5);
     return q;
   };
+  const projection = ["source_id", "content", "_distance", "metadata_json"];
 
   if (queryText?.trim()) {
-    try {
-      const { rerankers } = await import("@lancedb/lancedb");
-      const reranker = await rerankers.RRFReranker.create();
-      const q = table
-        .query()
-        .nearestTo(vector)
-        .fullTextSearch(queryText.trim())
-        .where(filter)
-        .rerank(reranker)
-        .select(["source_id", "content", "_distance", "_relevance_score", "metadata_json"])
-        .limit(fetchLimit);
-      rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
-    } catch {
-      if (signal?.aborted) return [];
-      const q = table
-        .query()
-        .nearestTo(vector)
-        .where(filter)
-        .select(["source_id", "content", "_distance", "metadata_json"])
-        .limit(fetchLimit);
-      rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
-    }
+    // Same split-then-RRF strategy as searchChatChunks — isolates the FTS
+    // leg's native code path from the vector leg.
+    const ftsQueryText = queryText.trim().slice(0, FTS_QUERY_MAX_CHARS);
+
+    const vectorPromise = raceWithSignal(
+      applyRefineFactor(
+        table.query().nearestTo(vector).where(filter).select(projection).limit(fetchLimit),
+      ).toArray() as Promise<any[]>,
+      signal,
+    ).catch((err) => {
+      if (signal?.aborted) throw err;
+      console.warn("[embeddings] Databank vector search leg failed:", err);
+      return [] as any[];
+    });
+    const ftsPromise = raceWithSignal(
+      table.query().fullTextSearch(ftsQueryText).where(filter).select(projection).limit(fetchLimit).toArray() as Promise<any[]>,
+      signal,
+    ).catch((err) => {
+      if (signal?.aborted) throw err;
+      return [] as any[];
+    });
+
+    const [vectorRows, ftsRows] = await Promise.all([vectorPromise, ftsPromise]);
+    if (signal?.aborted) return [];
+    rows = reciprocalRankFusion(vectorRows, ftsRows);
   } else {
     const q = table
       .query()
       .nearestTo(vector)
       .where(filter)
-      .select(["source_id", "content", "_distance", "metadata_json"])
+      .select(projection)
       .limit(fetchLimit);
     rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
   }

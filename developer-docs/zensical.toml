@@ -45,6 +45,7 @@ nav = [
     { "World Books" = "backend-api/world-books.md" },
     { "Regex Scripts" = "backend-api/regex-scripts.md" },
     { "Databanks" = "backend-api/databanks.md" },
+    { "Memories" = "backend-api/memories.md" },
     { "Personas" = "backend-api/personas.md" },
     { "Council" = "backend-api/council.md" },
     { "Chat Mutation" = "backend-api/chat-mutation.md" },

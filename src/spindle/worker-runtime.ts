@@ -50,6 +50,30 @@ import type {
   ImageUploadDTO,
   ImageUploadFromDataUrlOptionsDTO,
   ChatMessageDTO,
+  ChatChunkDTO,
+  ChatLinkAttachDTO,
+  ChatLinkDTO,
+  ChatMemoryResultDTO,
+  ChatMemoryWarmupResultDTO,
+  CortexIngestionStatusDTO,
+  CortexIngestionTelemetryDTO,
+  CortexQueryDTO,
+  CortexResultDTO,
+  CortexUsageStatsDTO,
+  LinkedCortexResultDTO,
+  MemoryConsolidationDTO,
+  MemoryCortexConfigDTO,
+  MemoryEntityDTO,
+  MemoryEntityStatusUpdateDTO,
+  MemoryEntityUpsertDTO,
+  MemoryRelationDTO,
+  MemoryRelationUpsertDTO,
+  MemorySalienceDTO,
+  VaultChunkDTO,
+  VaultCreateDTO,
+  VaultDTO,
+  VaultReindexResultDTO,
+  VaultWithContentsDTO,
 } from "lumiverse-spindle-types";
 import { initializeSandbox } from "./worker-runtime-sandbox";
 import {
@@ -2313,6 +2337,420 @@ const spindleApi: RuntimeSpindleAPI = {
         const requestId = crypto.randomUUID();
         const result = await request({ type: "databank_documents_reprocess", requestId, documentId, userId });
         return result as { success: true; status: "processing" };
+      },
+    },
+  },
+
+  memories: {
+    cortex: {
+      async getConfig(userId?: string): Promise<MemoryCortexConfigDTO> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_config_get", requestId, userId });
+        return result as MemoryCortexConfigDTO;
+      },
+      async putConfig(patch: Partial<MemoryCortexConfigDTO>, userId?: string): Promise<MemoryCortexConfigDTO> {
+        assertMutationAllowed("spindle.memories.cortex.putConfig()");
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_config_put", requestId, patch, userId });
+        return result as MemoryCortexConfigDTO;
+      },
+      async query(query: CortexQueryDTO): Promise<CortexResultDTO> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_query_cortex", requestId, query });
+        return result as CortexResultDTO;
+      },
+      async getCached(chatId: string): Promise<CortexResultDTO | null> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_get_cached", requestId, chatId });
+        return result as CortexResultDTO | null;
+      },
+      async queryLinked(
+        chatId: string,
+        options?: { queryText?: string; userId?: string },
+      ): Promise<LinkedCortexResultDTO> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_query_linked",
+          requestId,
+          chatId,
+          queryText: options?.queryText,
+          userId: options?.userId,
+        });
+        return result as LinkedCortexResultDTO;
+      },
+      async getCachedLinked(chatId: string): Promise<LinkedCortexResultDTO | null> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_get_cached_linked", requestId, chatId });
+        return result as LinkedCortexResultDTO | null;
+      },
+      async invalidateCache(chatId: string): Promise<void> {
+        assertMutationAllowed("spindle.memories.cortex.invalidateCache()");
+        const requestId = crypto.randomUUID();
+        await request({ type: "memories_invalidate_cache", requestId, chatId });
+      },
+      async invalidateLinkedCache(chatId: string): Promise<void> {
+        assertMutationAllowed("spindle.memories.cortex.invalidateLinkedCache()");
+        const requestId = crypto.randomUUID();
+        await request({ type: "memories_invalidate_linked_cache", requestId, chatId });
+      },
+    },
+
+    entities: {
+      async list(
+        chatId: string,
+        options?: { activeOnly?: boolean; limit?: number; userId?: string },
+      ): Promise<MemoryEntityDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_entities_list",
+          requestId,
+          chatId,
+          activeOnly: options?.activeOnly,
+          limit: options?.limit,
+          userId: options?.userId,
+        });
+        return result as MemoryEntityDTO[];
+      },
+      async get(entityId: string, userId?: string): Promise<MemoryEntityDTO | null> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_entities_get", requestId, entityId, userId });
+        return result as MemoryEntityDTO | null;
+      },
+      async findByName(chatId: string, name: string, userId?: string): Promise<MemoryEntityDTO | null> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_entities_find_by_name",
+          requestId,
+          chatId,
+          name,
+          userId,
+        });
+        return result as MemoryEntityDTO | null;
+      },
+      async upsert(
+        chatId: string,
+        entity: MemoryEntityUpsertDTO,
+        options?: { chunkId?: string | null; createdAt?: number; userId?: string },
+      ): Promise<MemoryEntityDTO> {
+        assertMutationAllowed("spindle.memories.entities.upsert()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_entities_upsert",
+          requestId,
+          chatId,
+          entity,
+          chunkId: options?.chunkId ?? null,
+          createdAt: options?.createdAt,
+          userId: options?.userId,
+        });
+        return result as MemoryEntityDTO;
+      },
+      async updateStatus(
+        entityId: string,
+        patch: MemoryEntityStatusUpdateDTO,
+        userId?: string,
+      ): Promise<MemoryEntityDTO> {
+        assertMutationAllowed("spindle.memories.entities.updateStatus()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_entities_update_status",
+          requestId,
+          entityId,
+          patch,
+          userId,
+        });
+        return result as MemoryEntityDTO;
+      },
+      async addFacts(entityId: string, facts: string[], userId?: string): Promise<MemoryEntityDTO> {
+        assertMutationAllowed("spindle.memories.entities.addFacts()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_entities_add_facts",
+          requestId,
+          entityId,
+          facts,
+          userId,
+        });
+        return result as MemoryEntityDTO;
+      },
+      async getFacts(entityId: string, userId?: string): Promise<string[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_entities_get_facts", requestId, entityId, userId });
+        return result as string[];
+      },
+      async updateEmotionalValence(
+        entityId: string,
+        valence: Record<string, number>,
+        userId?: string,
+      ): Promise<MemoryEntityDTO> {
+        assertMutationAllowed("spindle.memories.entities.updateEmotionalValence()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_entities_update_emotional_valence",
+          requestId,
+          entityId,
+          valence,
+          userId,
+        });
+        return result as MemoryEntityDTO;
+      },
+    },
+
+    relations: {
+      async list(chatId: string, userId?: string): Promise<MemoryRelationDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_relations_list", requestId, chatId, userId });
+        return result as MemoryRelationDTO[];
+      },
+      async listAll(chatId: string, userId?: string): Promise<MemoryRelationDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_relations_list_all", requestId, chatId, userId });
+        return result as MemoryRelationDTO[];
+      },
+      async forEntity(chatId: string, entityId: string, userId?: string): Promise<MemoryRelationDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_relations_for_entity",
+          requestId,
+          chatId,
+          entityId,
+          userId,
+        });
+        return result as MemoryRelationDTO[];
+      },
+      async forEntities(
+        chatId: string,
+        entityIds: string[],
+        options?: { limit?: number; userId?: string },
+      ): Promise<MemoryRelationDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_relations_for_entities",
+          requestId,
+          chatId,
+          entityIds,
+          limit: options?.limit,
+          userId: options?.userId,
+        });
+        return result as MemoryRelationDTO[];
+      },
+      async upsert(
+        chatId: string,
+        relation: MemoryRelationUpsertDTO,
+        options?: { chunkId?: string | null; userId?: string },
+      ): Promise<MemoryRelationDTO | null> {
+        assertMutationAllowed("spindle.memories.relations.upsert()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_relations_upsert",
+          requestId,
+          chatId,
+          relation,
+          chunkId: options?.chunkId ?? null,
+          userId: options?.userId,
+        });
+        return result as MemoryRelationDTO | null;
+      },
+    },
+
+    consolidations: {
+      async list(
+        chatId: string,
+        options?: { tier?: number; userId?: string },
+      ): Promise<MemoryConsolidationDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_consolidations_list",
+          requestId,
+          chatId,
+          tier: options?.tier,
+          userId: options?.userId,
+        });
+        return result as MemoryConsolidationDTO[];
+      },
+      async latestArc(chatId: string, userId?: string): Promise<MemoryConsolidationDTO | null> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_consolidations_latest_arc",
+          requestId,
+          chatId,
+          userId,
+        });
+        return result as MemoryConsolidationDTO | null;
+      },
+      async run(chatId: string, userId?: string): Promise<void> {
+        assertMutationAllowed("spindle.memories.consolidations.run()");
+        const requestId = crypto.randomUUID();
+        await request({ type: "memories_consolidations_run", requestId, chatId, userId });
+      },
+    },
+
+    salience: {
+      async list(
+        chatId: string,
+        options?: { limit?: number; offset?: number; userId?: string },
+      ): Promise<MemorySalienceDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_salience_get",
+          requestId,
+          chatId,
+          limit: options?.limit,
+          offset: options?.offset,
+          userId: options?.userId,
+        });
+        return result as MemorySalienceDTO[];
+      },
+    },
+
+    vaults: {
+      async list(userId?: string): Promise<VaultDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_vaults_list", requestId, userId });
+        return result as VaultDTO[];
+      },
+      async get(vaultId: string, userId?: string): Promise<VaultWithContentsDTO | null> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_vaults_get", requestId, vaultId, userId });
+        return result as VaultWithContentsDTO | null;
+      },
+      async getChunks(vaultId: string, userId?: string): Promise<VaultChunkDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_vaults_get_chunks", requestId, vaultId, userId });
+        return result as VaultChunkDTO[];
+      },
+      async create(input: VaultCreateDTO, userId?: string): Promise<VaultDTO> {
+        assertMutationAllowed("spindle.memories.vaults.create()");
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_vaults_create", requestId, input, userId });
+        return result as VaultDTO;
+      },
+      async rename(vaultId: string, name: string, userId?: string): Promise<boolean> {
+        assertMutationAllowed("spindle.memories.vaults.rename()");
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_vaults_rename", requestId, vaultId, name, userId });
+        return result as boolean;
+      },
+      async delete(vaultId: string, userId?: string): Promise<boolean> {
+        assertMutationAllowed("spindle.memories.vaults.delete()");
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_vaults_delete", requestId, vaultId, userId });
+        return result as boolean;
+      },
+      async reindex(vaultId: string, userId?: string): Promise<VaultReindexResultDTO> {
+        assertMutationAllowed("spindle.memories.vaults.reindex()");
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_vaults_reindex", requestId, vaultId, userId });
+        return result as VaultReindexResultDTO;
+      },
+    },
+
+    links: {
+      async list(chatId: string, userId?: string): Promise<ChatLinkDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_links_list", requestId, chatId, userId });
+        return result as ChatLinkDTO[];
+      },
+      async attach(input: ChatLinkAttachDTO, userId?: string): Promise<ChatLinkDTO[]> {
+        assertMutationAllowed("spindle.memories.links.attach()");
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_links_attach", requestId, input, userId });
+        return result as ChatLinkDTO[];
+      },
+      async remove(chatId: string, linkId: string, userId?: string): Promise<boolean> {
+        assertMutationAllowed("spindle.memories.links.remove()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_links_remove",
+          requestId,
+          chatId,
+          linkId,
+          userId,
+        });
+        return result as boolean;
+      },
+      async toggle(chatId: string, linkId: string, enabled: boolean, userId?: string): Promise<boolean> {
+        assertMutationAllowed("spindle.memories.links.toggle()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_links_toggle",
+          requestId,
+          chatId,
+          linkId,
+          enabled,
+          userId,
+        });
+        return result as boolean;
+      },
+    },
+
+    chatMemory: {
+      async listChunks(chatId: string, userId?: string): Promise<ChatChunkDTO[]> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_chat_chunks_list", requestId, chatId, userId });
+        return result as ChatChunkDTO[];
+      },
+      async get(
+        chatId: string,
+        options?: { topK?: number; userId?: string },
+      ): Promise<ChatMemoryResultDTO> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_chat_memory_get",
+          requestId,
+          chatId,
+          topK: options?.topK,
+          userId: options?.userId,
+        });
+        return result as ChatMemoryResultDTO;
+      },
+      async warm(
+        chatId: string,
+        options?: { force?: boolean; userId?: string },
+      ): Promise<ChatMemoryWarmupResultDTO> {
+        assertMutationAllowed("spindle.memories.chatMemory.warm()");
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_chat_memory_warm",
+          requestId,
+          chatId,
+          force: options?.force,
+          userId: options?.userId,
+        });
+        return result as ChatMemoryWarmupResultDTO;
+      },
+      async invalidate(chatId: string, userId?: string): Promise<void> {
+        assertMutationAllowed("spindle.memories.chatMemory.invalidate()");
+        const requestId = crypto.randomUUID();
+        await request({ type: "memories_chat_memory_invalidate", requestId, chatId, userId });
+      },
+    },
+
+    stats: {
+      async usage(chatId: string, userId?: string): Promise<CortexUsageStatsDTO> {
+        const requestId = crypto.randomUUID();
+        const result = await request({ type: "memories_stats_usage", requestId, chatId, userId });
+        return result as CortexUsageStatsDTO;
+      },
+      async ingestionStatus(chatId: string, userId?: string): Promise<CortexIngestionStatusDTO | null> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_stats_ingestion_status",
+          requestId,
+          chatId,
+          userId,
+        });
+        return result as CortexIngestionStatusDTO | null;
+      },
+      async ingestionTelemetry(chatId: string, userId?: string): Promise<CortexIngestionTelemetryDTO> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "memories_stats_ingestion_telemetry",
+          requestId,
+          chatId,
+          userId,
+        });
+        return result as CortexIngestionTelemetryDTO;
       },
     },
   },

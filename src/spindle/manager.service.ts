@@ -25,6 +25,8 @@ import { join, resolve, dirname, sep } from "path";
 import { getUserExtensionPath } from "../auth/provision";
 import { spawnAsync } from "./spawn-async";
 import { normalizeSpindleHttpsUrl } from "./url-safety";
+export { withTemporarilyRelaxedBackendCapabilities } from "./capability-relaxation";
+import { withTemporarilyRelaxedBackendCapabilities } from "./capability-relaxation";
 
 export type InstallScope = "operator" | "user";
 type ManagedSpindlePermission = SpindlePermission | "databanks" | "presets";
@@ -533,7 +535,7 @@ async function assertSafeBackendBundle(
 
   const blocked = detectDangerousBackendCapabilities(
     await Bun.file(backendPath).text(),
-    declared,
+    withTemporarilyRelaxedBackendCapabilities(declared),
   );
   if (blocked.length === 0) return;
 

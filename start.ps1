@@ -28,6 +28,9 @@
 
 .PARAMETER NoRunner
     Start without the visual terminal runner
+
+.PARAMETER RelaxCapabilityBlocking
+    Temporarily relax extension capability blocking
 #>
 
 param(
@@ -43,6 +46,9 @@ param(
     [string]$FrontendPath,
 
     [switch]$NoRunner,
+
+    [Alias("r")]
+    [switch]$RelaxCapabilityBlocking,
 
     [Alias("k")]
     [switch]$KillPkgs
@@ -266,6 +272,12 @@ function Start-Backend {
 
     $env:FRONTEND_DIR = $frontendDist
     Load-EnvFile
+
+    # TODO_REMOVE_RELAXED_CAPABILITY_BLOCKING: temporary extension compatibility stopgap.
+    if ($RelaxCapabilityBlocking) {
+        $env:LUMIVERSE_SPINDLE_RELAX_CAPABILITY_BLOCKING = "true"
+        Write-Warn "Temporarily relaxing Spindle capability blocking for dynamic code/base64 compatibility. Remove this flag after extensions are updated."
+    }
 
     # Decide: visual runner or plain process
     $isTTY = [Environment]::UserInteractive -and -not $NoRunner
