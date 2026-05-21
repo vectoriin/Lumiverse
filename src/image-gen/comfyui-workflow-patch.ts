@@ -9,6 +9,9 @@ export type ComfyUIMappedFieldSemantic =
   | "width"
   | "height"
   | "checkpoint"
+  | "lora_name"
+  | "lora_strength_model"
+  | "lora_strength_clip"
   | "custom";
 
 export interface ComfyUIFieldMapping {
@@ -29,6 +32,9 @@ export interface ComfyUIPatchValues {
   width?: number;
   height?: number;
   checkpoint?: string;
+  lora_name?: string;
+  lora_strength_model?: number;
+  lora_strength_clip?: number;
   custom?: Record<string, unknown>;
 }
 
@@ -79,6 +85,12 @@ function resolveMappedValue(
       return values.height;
     case "checkpoint":
       return values.checkpoint;
+    case "lora_name":
+      return values.lora_name;
+    case "lora_strength_model":
+      return values.lora_strength_model;
+    case "lora_strength_clip":
+      return values.lora_strength_clip;
     case "custom":
       return values.custom?.[`${mapping.nodeId}:${mapping.fieldName}`];
     default:

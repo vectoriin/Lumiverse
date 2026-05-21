@@ -13,6 +13,26 @@ import type { ExpressionsImportInfo } from '@/components/modals/ExpressionsImpor
 import type { AlternateFieldsSummaryInfo } from '@/components/modals/AlternateFieldsSummaryModal'
 import { getEmbeddedCharacterBookEntryCount } from '@/utils/character-world-books'
 
+/**
+ * If a character carries a portable LoRA hint in `extensions.lumiverse_image_gen_lora`,
+ * surface it as a non-blocking toast so the user knows the original creator
+ * expects a specific LoRA. Never auto-fetches the source URL — Lumiverse
+ * displays only.
+ */
+function maybeShowImportedLoraHint(character: Character): void {
+  const raw = (character.extensions as any)?.lumiverse_image_gen_lora
+  if (!raw || typeof raw !== 'object') return
+  if (typeof raw.lora_filename !== 'string' || !raw.lora_filename) return
+  if (typeof raw.weight !== 'number' || !Number.isFinite(raw.weight)) return
+  const suffix = typeof raw.source_url === 'string' && raw.source_url
+    ? ' Source URL is visible in the Image LoRA tab.'
+    : ''
+  toast.info(
+    `${character.name} expects LoRA "${raw.lora_filename}" @ ${raw.weight}. Configure it in the character editor's Image LoRA tab.${suffix}`,
+    { duration: 8000 },
+  )
+}
+
 const SEARCH_DEBOUNCE_MS = 150
 
 export function useCharacterBrowser() {
@@ -309,6 +329,7 @@ export function useCharacterBrowser() {
             && !(result.character.extensions?.world_book_ids?.length > 0)) {
           setPendingLorebookImport(result.character)
         }
+        maybeShowImportedLoraHint(result.character)
       } catch (err: any) {
         const msg = err?.body?.message || err?.message || 'Import failed'
         setImportError(msg)
@@ -347,6 +368,7 @@ export function useCharacterBrowser() {
       if (unlinked.length > 0) {
         setPendingLorebooks(unlinked)
       }
+      for (const c of imported) maybeShowImportedLoraHint(c)
     },
     [addCharacters]
   )
@@ -400,6 +422,7 @@ export function useCharacterBrowser() {
             && !(result.character.extensions?.world_book_ids?.length > 0)) {
           setPendingLorebookImport(result.character)
         }
+        maybeShowImportedLoraHint(result.character)
       } catch (err: any) {
         const msg = err?.body?.message || err?.message || 'Import failed'
         setImportError(msg)

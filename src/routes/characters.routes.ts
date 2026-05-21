@@ -3,6 +3,7 @@ import * as svc from "../services/characters.service";
 import * as files from "../services/files.service";
 import * as images from "../services/images.service";
 import * as cardSvc from "../services/character-card.service";
+import * as characterLoraSvc from "../services/character-lora.service";
 import * as exportSvc from "../services/character-export.service";
 import * as gallerySvc from "../services/character-gallery.service";
 import * as regexSvc from "../services/regex-scripts.service";
@@ -511,6 +512,50 @@ app.post("/:id/duplicate", (c) => {
   const character = svc.duplicateCharacter(userId, c.req.param("id"));
   if (!character) return c.json({ error: "Not found" }, 404);
   return c.json(character, 201);
+});
+
+app.get("/:id/image-gen-lora", (c) => {
+  const userId = c.get("userId");
+  const characterId = c.req.param("id");
+  if (!svc.getCharacter(userId, characterId)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  return c.json({ binding: characterLoraSvc.getCharacterLora(userId, characterId) });
+});
+
+app.put("/:id/image-gen-lora", async (c) => {
+  const userId = c.get("userId");
+  const characterId = c.req.param("id");
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return c.json({ error: "Body must be a JSON object" }, 400);
+  }
+  if (typeof body.lora_name !== "string" || !body.lora_name.trim()) {
+    return c.json({ error: "lora_name is required" }, 400);
+  }
+  try {
+    const binding = characterLoraSvc.setCharacterLora(userId, characterId, {
+      lora_name: body.lora_name,
+      weight_model: body.weight_model,
+      weight_clip: body.weight_clip,
+      base_tags: typeof body.base_tags === "string" ? body.base_tags : undefined,
+      source_url: typeof body.source_url === "string" ? body.source_url : undefined,
+    });
+    return c.json({ binding });
+  } catch (err: any) {
+    if (err?.message === "Character not found") return c.json({ error: err.message }, 404);
+    return c.json({ error: err?.message || "Invalid binding" }, 400);
+  }
+});
+
+app.delete("/:id/image-gen-lora", (c) => {
+  const userId = c.get("userId");
+  const characterId = c.req.param("id");
+  if (!svc.getCharacter(userId, characterId)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  characterLoraSvc.deleteCharacterLora(userId, characterId);
+  return c.json({ success: true });
 });
 
 app.get("/:id/export", async (c) => {

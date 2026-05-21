@@ -38,6 +38,7 @@ import {
   setCharacterWorldBookIds,
 } from '@/utils/character-world-books'
 import ExpressionEditorTab from './ExpressionEditorTab'
+import CharacterLoraTab from './CharacterLoraTab'
 import AlternateFieldEditor from './AlternateFieldEditor'
 import AlternateAvatarManager from './AlternateAvatarManager'
 import type { AlternateAvatarEntry } from './AlternateAvatarManager'
@@ -50,7 +51,7 @@ import {
 
 const DEBOUNCE_MS = 2000
 
-type TabId = 'core' | 'system' | 'greetings' | 'identity' | 'gallery' | 'expressions' | 'voice' | 'advanced'
+type TabId = 'core' | 'system' | 'greetings' | 'identity' | 'gallery' | 'expressions' | 'voice' | 'imageLora' | 'advanced'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'core', label: 'Core Prompts' },
@@ -60,6 +61,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'gallery', label: 'Gallery' },
   { id: 'expressions', label: 'Expressions' },
   { id: 'voice', label: 'Voice' },
+  { id: 'imageLora', label: 'Image LoRA' },
   { id: 'advanced', label: 'Advanced' },
 ]
 
@@ -1226,6 +1228,10 @@ export default function CharacterEditorPage() {
                         }, true)
                       }}
                     />
+                  )}
+
+                  {activeTab === 'imageLora' && character && (
+                    <CharacterLoraTab characterId={character.id} />
                   )}
 
                   {activeTab === 'advanced' && (

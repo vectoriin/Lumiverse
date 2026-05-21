@@ -10,6 +10,7 @@ import * as secretsSvc from "./secrets.service";
 import * as imageGenConnSvc from "./image-gen-connections.service";
 import { imageGenConnectionSecretKey } from "./image-gen-connections.service";
 import * as imageGenBindingsSvc from "./image-gen-preset-bindings.service";
+import * as characterLoraSvc from "./character-lora.service";
 import { buildMacroEnvForChat } from "./chats.service";
 import { evaluate as evaluateMacros, registry as macroRegistry } from "../macros";
 import { eventBus } from "../ws/bus";
@@ -313,8 +314,21 @@ export async function generateSceneBackground(
       }
     }
 
+    // Resolve the active chat's character LoRA binding (if any) and weave it
+    // into the prompt + provider params. Done before provider-specific work so
+    // every provider that opts in sees the spliced prompt; only Comfy/Swarm
+    // actually consume the workflow/body LoRA params today.
+    const characterLora = resolveCharacterLoraForChat(userId, chatId);
+    if (characterLora?.base_tags) {
+      promptResult.prompt = composeWithBaseTags(characterLora.base_tags, promptResult.prompt);
+    }
+
     if (!promptResult.prompt.trim()) throw new Error("Image generation prompt is required");
     if (promptResult.negativePrompt) params.negativePrompt = promptResult.negativePrompt;
+
+    if (characterLora) {
+      applyCharacterLoraToParams(connection.provider, params, characterLora);
+    }
 
     // For NovelAI: pre-resolve director reference images (orchestration concern)
     if (connection.provider === "novelai") {
@@ -336,7 +350,7 @@ export async function generateSceneBackground(
     }
 
     if (connection.provider === "comfyui") {
-      await applyComfyUIWorkflowConfig(connection, params, promptResult.prompt, promptResult.negativePrompt);
+      await applyComfyUIWorkflowConfig(connection, params, promptResult.prompt, promptResult.negativePrompt, characterLora);
     }
 
     const generationTimeoutSecs = resolveTimeoutSeconds(opts?.generationTimeoutSeconds, settings.generationTimeoutSeconds ?? 300);
@@ -629,6 +643,7 @@ async function applyComfyUIWorkflowConfig(
   params: Record<string, any>,
   prompt: string,
   negativePrompt?: string,
+  characterLora?: characterLoraSvc.CharacterLoraBinding | null,
 ): Promise<void> {
   if (params.workflow && typeof params.workflow === "object") return;
 
@@ -667,6 +682,12 @@ async function applyComfyUIWorkflowConfig(
     custom: customValues,
   };
 
+  if (characterLora) {
+    patchValues.lora_name = characterLora.lora_name;
+    patchValues.lora_strength_model = characterLora.weight_model;
+    patchValues.lora_strength_clip = characterLora.weight_clip;
+  }
+
   const extraFieldValues = params.comfyui_field_values;
   if (extraFieldValues && typeof extraFieldValues === "object") {
     Object.assign(patchValues, extraFieldValues);
@@ -676,6 +697,59 @@ async function applyComfyUIWorkflowConfig(
   params.workflow = patchWorkflow(normalizedWorkflow.apiWorkflow, mappings, patchValues);
   params.workflowFormat = "api_prompt";
   params.preserveImportedWorkflow = true;
+}
+
+function resolveCharacterLoraForChat(
+  userId: string,
+  chatId: string,
+): characterLoraSvc.CharacterLoraBinding | null {
+  const chat = chatsSvc.getChat(userId, chatId);
+  if (!chat?.character_id) return null;
+  return characterLoraSvc.getCharacterLora(userId, chat.character_id);
+}
+
+/**
+ * Prepend per-character anchor tags to the assembled prompt. Tags toward the
+ * front carry the most weight in tag-style prompts (Booru/SD), so character
+ * identity stays stable across scene variation.
+ */
+function composeWithBaseTags(baseTags: string, prompt: string): string {
+  const trimmedTags = baseTags.trim();
+  const trimmedPrompt = prompt.trim();
+  if (!trimmedTags) return prompt;
+  if (!trimmedPrompt) return trimmedTags;
+  return `${trimmedTags}, ${trimmedPrompt}`;
+}
+
+/**
+ * Wire the per-character LoRA into provider-specific parameter slots.
+ * ComfyUI consumes them via patchWorkflow later in the pipeline; SwarmUI
+ * gets `loras` + `loraWeights` body params. Other providers ignore the
+ * binding (base tags still apply via the prompt prepend).
+ *
+ * Honors user-supplied values: if the connection's default_parameters already
+ * specify a LoRA (e.g. for a non-character image gen), the character binding
+ * is layered on top via comma-joined parameter strings — SwarmUI accepts
+ * multi-LoRA via parallel comma-separated lists.
+ */
+function applyCharacterLoraToParams(
+  provider: string,
+  params: Record<string, any>,
+  binding: characterLoraSvc.CharacterLoraBinding,
+): void {
+  if (provider === "swarmui") {
+    const existingNames = stringParam(params.loras);
+    const existingWeights = stringParam(params.loraWeights);
+    params.loras = existingNames ? `${existingNames},${binding.lora_name}` : binding.lora_name;
+    // SwarmUI requires parallel lists; we use weight_model as the SwarmUI
+    // weight (it has a single strength field, not separate model/clip).
+    params.loraWeights = existingWeights
+      ? `${existingWeights},${binding.weight_model}`
+      : String(binding.weight_model);
+    return;
+  }
+  // ComfyUI is handled by applyComfyUIWorkflowConfig which reads the binding
+  // directly. Other providers don't have a LoRA story to wire into.
 }
 
 function numberParam(value: unknown): number | undefined {

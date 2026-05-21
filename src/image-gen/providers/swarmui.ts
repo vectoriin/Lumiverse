@@ -104,6 +104,17 @@ const PARAMETERS: ImageParameterSchemaMap = {
     group: "models",
     modelSubtype: "text_encoders",
   },
+  loras: {
+    type: "string",
+    description: "Comma-separated LoRA model names to apply",
+    group: "models",
+    modelSubtype: "loras",
+  },
+  loraWeights: {
+    type: "string",
+    description: "Comma-separated LoRA strengths matching the loras parameter (e.g. 0.8,0.6)",
+    group: "models",
+  },
   rawRequestOverride: {
     type: "string",
     description: "Raw JSON merged into the request body for advanced usage",
@@ -228,6 +239,15 @@ export class SwarmUIImageProvider implements ImageProvider {
     if (p.mistralModel) body.mistralmodel = String(p.mistralModel)
     if (p.gemmaModel) body.gemmamodel = String(p.gemmaModel)
     if (p.llamaModel) body.llamamodel = String(p.llamaModel)
+
+    // LoRAs. SwarmUI accepts `loras` + `loraweights` as comma-separated strings.
+    // Callers may supply either an array (we join it) or a pre-joined string.
+    if (p.loras) body.loras = Array.isArray(p.loras) ? p.loras.join(",") : String(p.loras)
+    if (p.loraWeights) {
+      body.loraweights = Array.isArray(p.loraWeights)
+        ? p.loraWeights.map((v: unknown) => String(v)).join(",")
+        : String(p.loraWeights)
+    }
 
     return applyRawOverride(body, p.rawRequestOverride)
   }
@@ -406,6 +426,9 @@ export class SwarmUIImageProvider implements ImageProvider {
       case "text_encoders":
         // Text encoders live in the text_encoders/ folder regardless of base model subtype
         return this.fetchModelList(apiKey, apiUrl, { path: "text_encoders", depth: 10, subtype: "" })
+      case "loras":
+      case "lora":
+        return this.fetchModelList(apiKey, apiUrl, { path: "", depth: 10, subtype: "LoRA" })
       default:
         return []
     }

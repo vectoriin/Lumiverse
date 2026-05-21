@@ -125,4 +125,33 @@ export const charactersApi = {
       `/characters/${id}/resolved-fields`, params
     )
   },
+
+  getImageGenLora(id: string) {
+    return get<{ binding: CharacterLoraBinding | null }>(`/characters/${id}/image-gen-lora`)
+  },
+
+  setImageGenLora(id: string, input: SetCharacterLoraInput) {
+    return put<{ binding: CharacterLoraBinding }>(`/characters/${id}/image-gen-lora`, input)
+  },
+
+  deleteImageGenLora(id: string) {
+    return del<{ success: boolean }>(`/characters/${id}/image-gen-lora`)
+  },
+}
+
+export interface CharacterLoraBinding {
+  lora_name: string
+  weight_model: number
+  weight_clip: number
+  base_tags?: string
+  source_url?: string
+  bound_at: number
+}
+
+export interface SetCharacterLoraInput {
+  lora_name: string
+  weight_model?: number
+  weight_clip?: number
+  base_tags?: string
+  source_url?: string
 }
