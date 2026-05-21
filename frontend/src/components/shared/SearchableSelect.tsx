@@ -20,6 +20,16 @@ export interface SearchableSelectOption {
   /** Optional leading node (avatar, icon, swatch) rendered before the label in both the trigger and the option row. */
   leading?: ReactNode
   disabled?: boolean
+  /** Optional grouping key. Options sharing a group render under a shared header. Empty/undefined folds into "Uncategorized". Headers auto-hide when no option in the group matches the current search. */
+  group?: string
+}
+
+const UNCATEGORIZED_KEY = '__uncategorized__'
+const UNCATEGORIZED_LABEL = 'Uncategorized'
+
+function getGroupKey(opt: SearchableSelectOption): string {
+  const trimmed = (opt.group ?? '').trim()
+  return trimmed || UNCATEGORIZED_KEY
 }
 
 type SingleModeProps = {
@@ -96,14 +106,35 @@ export default function SearchableSelect(props: SearchableSelectProps) {
   const searchRef = useRef<HTMLInputElement>(null)
 
   const needle = search.trim().toLowerCase()
+  const hasGroups = useMemo(
+    () => options.some((o) => (o.group ?? '').trim().length > 0),
+    [options],
+  )
   const filtered = useMemo(() => {
-    if (!needle) return options
-    return options.filter(
-      (o) =>
-        o.label.toLowerCase().includes(needle) ||
-        (o.sublabel && o.sublabel.toLowerCase().includes(needle)),
-    )
-  }, [options, needle])
+    const base = needle
+      ? options.filter(
+          (o) =>
+            o.label.toLowerCase().includes(needle) ||
+            (o.sublabel && o.sublabel.toLowerCase().includes(needle)),
+        )
+      : options
+    if (!hasGroups) return base
+    // Group-sort: alphabetize buckets, Uncategorized last. Preserve input order inside each bucket.
+    const buckets = new Map<string, SearchableSelectOption[]>()
+    for (const opt of base) {
+      const key = getGroupKey(opt)
+      const bucket = buckets.get(key)
+      if (bucket) bucket.push(opt)
+      else buckets.set(key, [opt])
+    }
+    const namedKeys = Array.from(buckets.keys())
+      .filter((k) => k !== UNCATEGORIZED_KEY)
+      .sort((a, b) => a.localeCompare(b))
+    const orderedKeys = buckets.has(UNCATEGORIZED_KEY)
+      ? [...namedKeys, UNCATEGORIZED_KEY]
+      : namedKeys
+    return orderedKeys.flatMap((k) => buckets.get(k)!)
+  }, [options, needle, hasGroups])
 
   const isSelected = useCallback(
     (v: string) =>
@@ -352,40 +383,64 @@ export default function SearchableSelect(props: SearchableSelectProps) {
             {options.length === 0 ? emptyMessage : noResultsMessage}
           </div>
         ) : (
-          filtered.map((opt, i) => {
-            const selected = isSelected(opt.value)
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                data-opt-idx={i}
-                disabled={opt.disabled}
-                className={clsx(
-                  styles.option,
-                  selected && styles.optionActive,
-                  i === activeIdx && styles.optionHover,
-                  opt.disabled && styles.optionDisabled,
-                )}
-                onClick={() => !opt.disabled && toggleValue(opt.value)}
-                onMouseEnter={() => setActiveIdx(i)}
-                role="option"
-                aria-selected={selected}
-              >
-                <span className={styles.optionCheck}>{selected ? '✓' : ''}</span>
-                {opt.leading && (
-                  <span className={styles.optionLeading} aria-hidden>
-                    {opt.leading}
-                  </span>
-                )}
-                <span className={styles.optionTextWrap}>
-                  <span className={styles.optionLabel}>{opt.label}</span>
-                  {opt.sublabel && (
-                    <span className={styles.optionSublabel}>{opt.sublabel}</span>
+          (() => {
+            let lastGroupKey: string | null = null
+            const nodes: ReactNode[] = []
+            filtered.forEach((opt, i) => {
+              if (hasGroups) {
+                const key = getGroupKey(opt)
+                if (key !== lastGroupKey) {
+                  const headerLabel = key === UNCATEGORIZED_KEY
+                    ? UNCATEGORIZED_LABEL
+                    : (opt.group ?? '').trim()
+                  nodes.push(
+                    <div
+                      key={`__group__${key}`}
+                      className={styles.optionGroupHeader}
+                      role="presentation"
+                      aria-hidden
+                    >
+                      {headerLabel}
+                    </div>,
+                  )
+                  lastGroupKey = key
+                }
+              }
+              const selected = isSelected(opt.value)
+              nodes.push(
+                <button
+                  key={opt.value}
+                  type="button"
+                  data-opt-idx={i}
+                  disabled={opt.disabled}
+                  className={clsx(
+                    styles.option,
+                    selected && styles.optionActive,
+                    i === activeIdx && styles.optionHover,
+                    opt.disabled && styles.optionDisabled,
                   )}
-                </span>
-              </button>
-            )
-          })
+                  onClick={() => !opt.disabled && toggleValue(opt.value)}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  role="option"
+                  aria-selected={selected}
+                >
+                  <span className={styles.optionCheck}>{selected ? '✓' : ''}</span>
+                  {opt.leading && (
+                    <span className={styles.optionLeading} aria-hidden>
+                      {opt.leading}
+                    </span>
+                  )}
+                  <span className={styles.optionTextWrap}>
+                    <span className={styles.optionLabel}>{opt.label}</span>
+                    {opt.sublabel && (
+                      <span className={styles.optionSublabel}>{opt.sublabel}</span>
+                    )}
+                  </span>
+                </button>,
+              )
+            })
+            return nodes
+          })()
         )}
       </div>
     </div>

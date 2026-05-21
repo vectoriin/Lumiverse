@@ -447,6 +447,8 @@ export interface DrawerSettings {
   customPanelWidth: number
   showTabLabels: boolean
   hiddenTabIds: string[]
+  /** User-defined order of tab IDs. Unknown IDs are ignored; new tabs append in registry order. */
+  tabOrder: string[]
 }
 
 export interface SpindleSettings {

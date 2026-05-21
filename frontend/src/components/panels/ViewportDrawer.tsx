@@ -7,7 +7,7 @@ import ErrorBoundary from '@/components/shared/ErrorBoundary'
 import { CloseButton } from '@/components/shared/CloseButton'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
-import { DRAWER_TABS, adaptExtensionTabs, sanitizeHiddenDrawerTabIds } from '@/lib/drawer-tab-registry'
+import { DRAWER_TABS, adaptExtensionTabs, applyDrawerTabOrder, sanitizeDrawerTabOrder, sanitizeHiddenDrawerTabIds } from '@/lib/drawer-tab-registry'
 import styles from './ViewportDrawer.module.css'
 import DOMPurify from 'dompurify'
 import clsx from 'clsx'
@@ -71,6 +71,7 @@ export default function ViewportDrawer() {
   const showTabLabels = drawerSettings.showTabLabels ?? false
   const hiddenTabIds = sanitizeHiddenDrawerTabIds(drawerSettings.hiddenTabIds)
   const hiddenTabIdsSet = new Set(hiddenTabIds)
+  const tabOrder = sanitizeDrawerTabOrder(drawerSettings.tabOrder)
 
   const updateDrawer = useCallback(
     (partial: Partial<typeof drawerSettings>) => {
@@ -84,9 +85,12 @@ export default function ViewportDrawer() {
     ...entry,
     component: () => <ExtensionTabContent tabId={entry.id} />,
   }))
-  const visibleBuiltInTabs = DRAWER_TABS.filter((tab) => !hiddenTabIdsSet.has(tab.id))
-  const visibleDrawerTabs = drawerTabs.filter((tab) => !hiddenTabIdsSet.has(tab.id))
-  const visibleExtensionEntries = extensionEntries.filter((entry) => !hiddenTabIdsSet.has(entry.id))
+  const orderedBuiltInTabs = applyDrawerTabOrder(DRAWER_TABS, tabOrder)
+  const orderedDrawerTabs = applyDrawerTabOrder(drawerTabs, tabOrder)
+  const orderedExtensionEntries = applyDrawerTabOrder(extensionEntries, tabOrder)
+  const visibleBuiltInTabs = orderedBuiltInTabs.filter((tab) => !hiddenTabIdsSet.has(tab.id))
+  const visibleDrawerTabs = orderedDrawerTabs.filter((tab) => !hiddenTabIdsSet.has(tab.id))
+  const visibleExtensionEntries = orderedExtensionEntries.filter((entry) => !hiddenTabIdsSet.has(entry.id))
   const requestedActiveTab = drawerTab || 'profile'
   const allTabs = [...visibleBuiltInTabs, ...visibleExtensionEntries]
   const activeTab = allTabs.some((tab) => tab.id === requestedActiveTab) ? requestedActiveTab : 'profile'

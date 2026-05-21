@@ -79,6 +79,29 @@ export function sanitizeHiddenDrawerTabIds(hiddenTabIds?: string[] | null): stri
   return [...new Set(hiddenTabIds.filter((tabId): tabId is string => typeof tabId === 'string' && !isDrawerTabCore(tabId)))]
 }
 
+export function sanitizeDrawerTabOrder(tabOrder?: string[] | null): string[] {
+  if (!Array.isArray(tabOrder)) return []
+  return [...new Set(tabOrder.filter((tabId): tabId is string => typeof tabId === 'string' && tabId.length > 0))]
+}
+
+/**
+ * Order a list of tabs (built-in or extension) by the user's saved tabOrder.
+ * Tabs not present in `order` are appended in their original registry order.
+ */
+export function applyDrawerTabOrder<T extends { id: string }>(items: T[], order: string[]): T[] {
+  if (!order.length || items.length <= 1) return items
+  const orderIndex = new Map<string, number>()
+  order.forEach((id, idx) => { if (!orderIndex.has(id)) orderIndex.set(id, idx) })
+  const indexed = items.map((item, idx) => ({ item, originalIdx: idx }))
+  indexed.sort((a, b) => {
+    const ai = orderIndex.has(a.item.id) ? orderIndex.get(a.item.id)! : Number.POSITIVE_INFINITY
+    const bi = orderIndex.has(b.item.id) ? orderIndex.get(b.item.id)! : Number.POSITIVE_INFINITY
+    if (ai !== bi) return ai - bi
+    return a.originalIdx - b.originalIdx
+  })
+  return indexed.map((entry) => entry.item)
+}
+
 export const DRAWER_TABS: DrawerTabEntry[] = [
   {
     id: 'profile',

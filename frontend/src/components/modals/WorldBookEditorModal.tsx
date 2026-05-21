@@ -12,6 +12,8 @@ import WorldBookDiagnosticsModal from '@/components/panels/world-book/WorldBookD
 import { formatWorldBookReindexStatus } from '@/lib/worldBookVectorization'
 import WorldBookEntryEditor from '@/components/shared/WorldBookEntryEditor'
 import WorldBookEntriesSection from '@/components/shared/WorldBookEntriesSection'
+import FolderDropdown from '@/components/shared/FolderDropdown'
+import { useFolders } from '@/hooks/useFolders'
 import Pagination from '@/components/shared/Pagination'
 import type { WorldBook, WorldBookEntry, WorldBookVectorSummary } from '@/types/api'
 
@@ -53,7 +55,9 @@ export default function WorldBookEditorModal() {
   // Book editing state
   const [bookName, setBookName] = useState('')
   const [bookDescription, setBookDescription] = useState('')
+  const [bookFolder, setBookFolder] = useState('')
   const [vectorSummary, setVectorSummary] = useState<WorldBookVectorSummary | null>(null)
+  const { folders, createFolder } = useFolders('worldBookFolders', books)
 
   const [postImportBook, setPostImportBook] = useState<WorldBook | null>(null)
 
@@ -144,6 +148,7 @@ export default function WorldBookEditorModal() {
       if (book) {
         setBookName(book.name)
         setBookDescription(book.description)
+        setBookFolder(book.folder || '')
       }
       setEntrySearchFilter('')
       setSelectedEntryId(null)
@@ -227,6 +232,20 @@ export default function WorldBookEditorModal() {
           worldBooksApi.update(selectedBookId, { description: value })
         }
       }, 400)
+    },
+    [selectedBookId]
+  )
+
+  const handleBookFolderChange = useCallback(
+    (value: string) => {
+      const trimmed = value.trim()
+      setBookFolder(trimmed)
+      if (selectedBookId) {
+        worldBooksApi.update(selectedBookId, { folder: trimmed })
+        setBooks((prev) =>
+          prev.map((b) => (b.id === selectedBookId ? { ...b, folder: trimmed } : b))
+        )
+      }
     },
     [selectedBookId]
   )
@@ -456,6 +475,15 @@ export default function WorldBookEditorModal() {
                     className={styles.fieldInput}
                     value={bookDescription}
                     onChange={(e) => handleBookDescChange(e.target.value)}
+                  />
+                </div>
+                <div className={styles.fieldRow}>
+                  <label className={styles.fieldLabel}>Folder</label>
+                  <FolderDropdown
+                    folders={folders}
+                    selectedFolder={bookFolder}
+                    onSelect={handleBookFolderChange}
+                    onCreateFolder={createFolder}
                   />
                 </div>
                 {vectorSummary && (

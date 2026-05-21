@@ -782,7 +782,7 @@ CREATE TABLE world_books (
   metadata TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE);
+, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, folder TEXT NOT NULL DEFAULT '');
 
 CREATE INDEX idx_account_userId ON "account"(userId);
 

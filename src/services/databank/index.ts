@@ -20,6 +20,7 @@ export {
   getDocumentBySlug,
   searchDocumentsBySlug,
   deleteDocument,
+  updateDocumentFile,
   updateDocumentStatus,
   insertChunks,
   getChunksForDocument,
@@ -61,6 +62,9 @@ export { resolveMentions, formatMentionsAsAppendix } from "./mention-resolver.se
 
 // Web scraping
 export { scrapeUrl, ScrapeError, type ScrapedContent, type ScrapeErrorType } from "./web-scraper.service";
+
+// Fuse
+export { fuseDatabanks, FuseError, type FuseResult } from "./fuse.service";
 
 // Types
 export type {

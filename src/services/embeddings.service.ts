@@ -4268,6 +4268,76 @@ export async function deleteDatabankChunksByIds(userId: string, chunkIds: string
 }
 
 /**
+ * Re-point existing databank chunk vectors to a different owner (target databank).
+ *
+ * Used when fusing databanks: chunk IDs and vectors stay the same, only the
+ * owner_id (and metadata.databankId) changes so retrieval filtered by the new
+ * owner picks them up. mergeInsert by id preserves the existing vector — we
+ * fetch the row first to keep the embedding without re-vectorizing.
+ */
+export async function moveDatabankChunkVectorsToOwner(
+  userId: string,
+  chunkIds: string[],
+  newOwnerId: string,
+): Promise<void> {
+  if (chunkIds.length === 0) return;
+
+  await withWriteLock(async () => {
+    const table = await getTableIfExists(EMBEDDINGS_TABLE, true);
+    if (!table) return;
+
+    const BATCH = 500;
+    for (let i = 0; i < chunkIds.length; i += BATCH) {
+      const batch = chunkIds.slice(i, i + BATCH);
+      const ids = batch.map((id) => rowId(userId, "databank", id, 0));
+      const filter = `id IN (${ids.map((id) => sqlValue(id)).join(", ")})`;
+
+      const existing = await table
+        .query()
+        .where(filter)
+        .select(["id", "user_id", "source_type", "source_id", "chunk_index", "content", "vector", "metadata_json"])
+        .toArray();
+
+      if ((existing as any[]).length === 0) continue;
+
+      const now = Math.floor(Date.now() / 1000);
+      const updated: EmbeddingRow[] = (existing as any[]).map((row) => {
+        let meta: Record<string, unknown> = {};
+        try {
+          const raw = typeof row.metadata_json === "string" ? row.metadata_json : JSON.stringify(row.metadata_json ?? {});
+          meta = JSON.parse(raw || "{}");
+        } catch {
+          meta = {};
+        }
+        meta.databankId = newOwnerId;
+
+        return {
+          id: String(row.id),
+          user_id: String(row.user_id),
+          source_type: String(row.source_type),
+          source_id: String(row.source_id),
+          owner_id: newOwnerId,
+          chunk_index: Number(row.chunk_index ?? 0),
+          content: String(row.content || ""),
+          vector: coerceLanceVector(row.vector),
+          metadata_json: JSON.stringify(meta),
+          updated_at: now,
+        };
+      }).filter((r) => r.vector.length > 0);
+
+      if (updated.length === 0) continue;
+
+      await table
+        .mergeInsert("id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute(asLanceRows(updated));
+    }
+  });
+  scheduleOptimize();
+}
+
+/**
  * Search databank chunks in LanceDB by vector similarity.
  * Filters by source_type="databank" and owner_id IN (databankIds).
  */

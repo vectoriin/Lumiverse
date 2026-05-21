@@ -301,8 +301,8 @@ function Start-Backend {
 
     Install-Deps $BackendDir "backend"
 
-    # Clear Bun transpiler cache to avoid stale bytecode after updates
-    & bun --clear-cache 2>$null
+    # Clear Bun install cache to avoid stale tarballs after updates
+    & bun pm cache rm *> $null
 
     $env:FRONTEND_DIR = $frontendDist
     Load-EnvFile

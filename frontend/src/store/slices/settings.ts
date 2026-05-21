@@ -273,6 +273,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     customPanelWidth: 35,
     showTabLabels: false,
     hiddenTabIds: [],
+    tabOrder: [],
   },
   oocEnabled: true,
   lumiaOOCStyle: 'social',

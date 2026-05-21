@@ -1,11 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Database, Plus, Trash2, Upload, Search, FileText, RefreshCw, Globe, User, MessageSquare, X, ChevronDown, Check } from 'lucide-react'
+import { Database, Plus, Trash2, Upload, Search, FileText, RefreshCw, Globe, User, MessageSquare, X, ChevronDown, Check, Combine, ArrowLeft, Save } from 'lucide-react'
 import { useStore } from '@/store'
 import { databankApi } from '@/api/databank'
 import { settingsApi } from '@/api/settings'
 import { charactersApi } from '@/api/characters'
 import { chatsApi } from '@/api/chats'
 import NumericInput from '@/components/shared/NumericInput'
+import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
+import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import type { Databank, DatabankDocument } from '@/api/databank'
 import type { DatabankSettings } from '@/types/databank-settings'
 import styles from './DatabankPanel.module.css'
@@ -62,6 +64,15 @@ export default function DatabankPanel() {
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ── Document editor ──
+  const [editingDocId, setEditingDocId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [editingContent, setEditingContent] = useState('')
+  const [editingDirty, setEditingDirty] = useState(false)
+  const [editorLoading, setEditorLoading] = useState(false)
+  const [editorSaving, setEditorSaving] = useState(false)
+  const [editorError, setEditorError] = useState<string | null>(null)
 
   // ── Cross-reference: all user databanks (for selectors) ──
   const [allBanks, setAllBanks] = useState<Databank[]>([])
@@ -331,6 +342,45 @@ export default function DatabankPanel() {
     }
   }, [selectedDatabankId, databankDocuments, updateDatabankDocument, loadDocs])
 
+  // ── Fuse ──
+  const [fusePickerOpen, setFusePickerOpen] = useState(false)
+  const [fusing, setFusing] = useState(false)
+  const [fuseStatus, setFuseStatus] = useState<string | null>(null)
+  const [pendingFuse, setPendingFuse] = useState<{ sourceBankId: string; sourceName: string; sourceCount: number } | null>(null)
+
+  const requestFuse = useCallback((sourceBankId: string, sourceName: string, sourceCount: number) => {
+    if (!selectedDatabankId) return
+    setFusePickerOpen(false)
+    setPendingFuse({ sourceBankId, sourceName, sourceCount })
+  }, [selectedDatabankId])
+
+  const confirmFuse = useCallback(async () => {
+    if (!selectedDatabankId || !pendingFuse) return
+    setError(null)
+    setFuseStatus(null)
+    setFusing(true)
+    try {
+      const result = await databankApi.fuse(selectedDatabankId, pendingFuse.sourceBankId)
+      removeDatabank(pendingFuse.sourceBankId)
+      updateBankStore(selectedDatabankId, {
+        name: result.databank.name,
+        description: result.databank.description,
+        documentCount: result.databank.documentCount,
+      })
+      setFuseStatus(
+        `Fused: ${result.moved} moved, ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped`,
+      )
+      // Refresh document list and the cross-reference bank list
+      await loadDocs()
+      databankApi.list({ limit: 200 }).then((r) => setAllBanks(r.data)).catch(() => {})
+      setPendingFuse(null)
+    } catch (e: any) {
+      setError(e?.body?.error || e?.message || 'Failed to fuse databanks')
+    } finally {
+      setFusing(false)
+    }
+  }, [selectedDatabankId, pendingFuse, removeDatabank, updateBankStore, loadDocs])
+
   // ── Scrape URL ──
   const [scrapeUrl, setScrapeUrl] = useState('')
   const [scraping, setScraping] = useState(false)
@@ -349,6 +399,72 @@ export default function DatabankPanel() {
       setScraping(false)
     }
   }, [selectedDatabankId, scrapeUrl, addDatabankDocument])
+
+  // ── Open document editor ──
+  const handleOpenDocEditor = useCallback(async (doc: DatabankDocument) => {
+    if (!selectedDatabankId) return
+    setEditingDocId(doc.id)
+    setEditingName(doc.name)
+    setEditingContent('')
+    setEditingDirty(false)
+    setEditorError(null)
+    setEditorLoading(true)
+    try {
+      const result = await databankApi.getDocumentContent(selectedDatabankId, doc.id)
+      setEditingContent(result.content ?? '')
+    } catch (e: any) {
+      setEditorError(e?.body?.error || e?.message || 'Failed to load document content')
+    } finally {
+      setEditorLoading(false)
+    }
+  }, [selectedDatabankId])
+
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
+
+  const closeDocEditor = useCallback(() => {
+    setEditingDocId(null)
+    setEditingContent('')
+    setEditingName('')
+    setEditingDirty(false)
+    setEditorError(null)
+    setDiscardConfirmOpen(false)
+  }, [])
+
+  const handleCloseDocEditor = useCallback(() => {
+    if (editingDirty) {
+      setDiscardConfirmOpen(true)
+      return
+    }
+    closeDocEditor()
+  }, [editingDirty, closeDocEditor])
+
+  const handleSaveDocEditor = useCallback(async () => {
+    if (!selectedDatabankId || !editingDocId) return
+    setEditorError(null)
+    setEditorSaving(true)
+    try {
+      const updated = await databankApi.updateDocumentContent(selectedDatabankId, editingDocId, editingContent)
+      updateDatabankDocument(updated.id, {
+        fileSize: updated.fileSize,
+        contentHash: updated.contentHash,
+        mimeType: updated.mimeType,
+        filePath: updated.filePath,
+        status: updated.status,
+        errorMessage: updated.errorMessage,
+        totalChunks: updated.totalChunks,
+        updatedAt: updated.updatedAt,
+      })
+      setEditingDirty(false)
+      // Return to the list so the user sees the reprocessing badge tick over.
+      setEditingDocId(null)
+      setEditingContent('')
+      setEditingName('')
+    } catch (e: any) {
+      setEditorError(e?.body?.error || e?.message || 'Failed to save document')
+    } finally {
+      setEditorSaving(false)
+    }
+  }, [selectedDatabankId, editingDocId, editingContent, updateDatabankDocument])
 
   // ── Rename document ──
   const handleRenameDoc = useCallback(async (docId: string, newName: string) => {
@@ -376,6 +492,75 @@ export default function DatabankPanel() {
 
   const activeCharBanks = allBanks.filter((b) => charDatabankIds.includes(b.id))
   const activeChatBanks = allBanks.filter((b) => chatDatabankIds.includes(b.id))
+
+  // ── Document editor view ──
+  if (editingDocId) {
+    return (
+      <div className={styles.panel}>
+        <div className={styles.editorHeader}>
+          <button
+            type="button"
+            className={styles.actionBtn}
+            onClick={handleCloseDocEditor}
+            title="Back to documents"
+          >
+            <ArrowLeft size={14} />
+          </button>
+          <div className={styles.editorTitleGroup}>
+            <div className={styles.editorTitle}>{editingName || 'Untitled document'}</div>
+            <div className={styles.editorSubtitle}>
+              {editorLoading ? 'Loading content…' : editingDirty ? 'Unsaved changes' : 'Edits queue a re-chunk on save'}
+            </div>
+          </div>
+          <button
+            type="button"
+            className={styles.secondaryBtn}
+            onClick={handleSaveDocEditor}
+            disabled={editorSaving || editorLoading || !editingDirty}
+            title="Save and reprocess"
+          >
+            <Save size={13} />
+            <span>{editorSaving ? 'Saving…' : 'Save'}</span>
+          </button>
+        </div>
+        {editorError && (
+          <div style={{ color: 'var(--lumiverse-danger)', fontSize: 11, padding: '0 4px' }}>{editorError}</div>
+        )}
+        <div className={styles.editorBody}>
+          {editorLoading ? (
+            <div className={styles.emptyState}>
+              <RefreshCw size={20} className={`${styles.emptyIcon} ${styles.spin}`} />
+              <div className={styles.emptyText}>Loading document…</div>
+            </div>
+          ) : (
+            <ExpandableTextarea
+              className={styles.editorTextarea}
+              value={editingContent}
+              onChange={(value) => {
+                setEditingContent(value)
+                setEditingDirty(true)
+              }}
+              title={editingName || 'Document'}
+              placeholder="Edit document content…"
+              spellCheck={false}
+              markdownOnly
+            />
+          )}
+        </div>
+
+        <ConfirmationModal
+          isOpen={discardConfirmOpen}
+          onConfirm={closeDocEditor}
+          onCancel={() => setDiscardConfirmOpen(false)}
+          title="Discard changes?"
+          message="You have unsaved edits to this document. Closing the editor will throw them away."
+          variant="warning"
+          confirmText="Discard"
+          cancelText="Keep editing"
+        />
+      </div>
+    )
+  }
 
   return (
     <div className={styles.panel}>
@@ -603,12 +788,54 @@ export default function DatabankPanel() {
           <Plus size={14} />
         </button>
         {selectedDatabankId && (
-          <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={handleDeleteBank} title="Delete databank">
-            <Trash2 size={14} />
-          </button>
+          <>
+            <button
+              className={styles.actionBtn}
+              onClick={() => setFusePickerOpen((p) => !p)}
+              title="Fuse another databank into this one"
+              disabled={fusing}
+            >
+              <Combine size={14} className={fusing ? styles.spin : ''} />
+            </button>
+            <button className={`${styles.actionBtn} ${styles.deleteBtn}`} onClick={handleDeleteBank} title="Delete databank">
+              <Trash2 size={14} />
+            </button>
+          </>
         )}
       </div>
 
+      {selectedDatabankId && fusePickerOpen && (
+        <div className={styles.attachPicker}>
+          {(() => {
+            const candidates = allBanks.filter((b) => b.id !== selectedDatabankId)
+            if (candidates.length === 0) {
+              return <div className={styles.attachPickerEmpty}>No other databanks to fuse</div>
+            }
+            return (
+              <>
+                <div className={styles.fusePickerHint}>
+                  Pick the databank to absorb into <strong>{databanks.find((b) => b.id === selectedDatabankId)?.name}</strong>. It will be deleted.
+                </div>
+                {candidates.map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    className={styles.attachPickerItem}
+                    onClick={() => requestFuse(b.id, b.name, b.documentCount ?? 0)}
+                    disabled={fusing}
+                  >
+                    <span className={styles.attachCheck}><Combine size={11} /></span>
+                    <span className={styles.attachPickerName}>{b.name}</span>
+                    <span className={styles.attachPickerScope}>{b.documentCount ?? 0} docs &middot; {b.scope}</span>
+                  </button>
+                ))}
+              </>
+            )
+          })()}
+        </div>
+      )}
+
+      {fuseStatus && <div className={styles.fuseStatus}>{fuseStatus}</div>}
       {error && <div style={{ color: 'var(--lumiverse-danger)', fontSize: 11, padding: '0 4px' }}>{error}</div>}
 
       {/* Bank details */}
@@ -720,12 +947,19 @@ export default function DatabankPanel() {
       {selectedDatabankId && (
         <div className={styles.docList}>
           {filteredDocs.map((doc) => (
-            <div key={doc.id} className={styles.docRow}>
+            <div
+              key={doc.id}
+              className={styles.docRow}
+              onClick={() => handleOpenDocEditor(doc)}
+              title="Open document"
+              role="button"
+            >
               <FileText size={16} className={styles.docIcon} />
               <div className={styles.docInfo}>
                 <input
                   className={styles.docNameInput}
                   defaultValue={doc.name}
+                  onClick={(e) => e.stopPropagation()}
                   onBlur={(e) => {
                     const val = e.target.value.trim()
                     if (val && val !== doc.name) handleRenameDoc(doc.id, val)
@@ -781,6 +1015,30 @@ export default function DatabankPanel() {
           <div className={styles.emptyHint}>Upload text files to populate this databank.</div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={!!pendingFuse}
+        onConfirm={confirmFuse}
+        onCancel={() => { if (!fusing) setPendingFuse(null) }}
+        title="Fuse databanks?"
+        message={pendingFuse ? (
+          <>
+            <p style={{ margin: '0 0 8px' }}>
+              Move {pendingFuse.sourceCount} document{pendingFuse.sourceCount === 1 ? '' : 's'} from{' '}
+              <strong>{pendingFuse.sourceName}</strong> into{' '}
+              <strong>{databanks.find((b) => b.id === selectedDatabankId)?.name ?? 'this databank'}</strong>.
+            </p>
+            <p style={{ margin: 0 }}>
+              Duplicates (by content) are skipped, then <strong>{pendingFuse.sourceName}</strong> is deleted.
+              Characters and chats that referenced it will be rewired to the target.
+            </p>
+          </>
+        ) : ''}
+        variant="danger"
+        confirmText="Fuse"
+        loading={fusing}
+        loadingText="Fusing…"
+      />
     </div>
   )
 }

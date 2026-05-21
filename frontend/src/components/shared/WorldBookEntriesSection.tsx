@@ -339,7 +339,7 @@ export default function WorldBookEntriesSection({
     [books, selectedBookId],
   )
   const availableTargetBooks = useMemo(
-    () => books.filter((book) => book.id !== selectedBookId).map((book) => ({ value: book.id, label: book.name })),
+    () => books.filter((book) => book.id !== selectedBookId).map((book) => ({ value: book.id, label: book.name, group: book.folder || undefined })),
     [books, selectedBookId],
   )
   const allSelected = entries.length > 0 && selectedIds.length === entries.length

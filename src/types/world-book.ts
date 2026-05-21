@@ -2,6 +2,7 @@ export interface WorldBook {
   id: string;
   name: string;
   description: string;
+  folder: string;
   metadata: Record<string, any>;
   created_at: number;
   updated_at: number;
@@ -230,6 +231,7 @@ export interface WorldBookDiagnostics {
 export interface CreateWorldBookInput {
   name: string;
   description?: string;
+  folder?: string;
   metadata?: Record<string, any>;
 }
 

@@ -128,7 +128,7 @@ export default function CharacterEditorPage() {
   const [lorebookResult, setLorebookResult] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [galleryItems, setGalleryItems] = useState<CharacterGalleryItem[]>([])
-  const [worldBooks, setWorldBooks] = useState<Array<{ id: string; name: string }>>([])
+  const [worldBooks, setWorldBooks] = useState<Array<{ id: string; name: string; folder: string }>>([])
   const [galleryUploading, setGalleryUploading] = useState(false)
   const [extracting, setExtracting] = useState(false)
   const [galleryContextMenu, setGalleryContextMenu] = useState<{ pos: ContextMenuPos; item: CharacterGalleryItem } | null>(null)
@@ -218,13 +218,14 @@ export default function CharacterEditorPage() {
     loadRegexScripts().catch(() => {})
   }, [editingCharacterId, loadRegexScripts])
 
-  const upsertWorldBookOption = useCallback((book: { id: string; name: string }) => {
+  const upsertWorldBookOption = useCallback((book: { id: string; name: string; folder?: string }) => {
+    const normalized = { id: book.id, name: book.name, folder: book.folder ?? '' }
     setWorldBooks((prev) => {
       const existingIndex = prev.findIndex((item) => item.id === book.id)
-      if (existingIndex === -1) return [book, ...prev]
+      if (existingIndex === -1) return [normalized, ...prev]
 
       const next = [...prev]
-      next[existingIndex] = book
+      next[existingIndex] = normalized
       return next
     })
   }, [])
@@ -235,7 +236,7 @@ export default function CharacterEditorPage() {
       if (!editingCharacterId) return
       try {
         const res = await worldBooksApi.list({ limit: 200 })
-        if (!cancelled) setWorldBooks(res.data.map((b) => ({ id: b.id, name: b.name })))
+        if (!cancelled) setWorldBooks(res.data.map((b) => ({ id: b.id, name: b.name, folder: b.folder || '' })))
       } catch {
         // no-op
       }
@@ -1219,7 +1220,7 @@ export default function CharacterEditorPage() {
                             multi
                             value={attachedWorldBookIds}
                             onChange={(ids) => { void handleWorldBookIdsChange(ids) }}
-                            options={worldBooks.map((wb) => ({ value: wb.id, label: wb.name }))}
+                            options={worldBooks.map((wb) => ({ value: wb.id, label: wb.name, group: wb.folder || undefined }))}
                             placeholder="Add world books…"
                             triggerLabel="Add"
                             triggerIcon={<Plus size={11} />}
@@ -1275,7 +1276,7 @@ export default function CharacterEditorPage() {
                                 setLorebookImporting(true)
                                 try {
                                   const res = await worldBooksApi.importCharacterBook(editingCharacterId)
-                                  upsertWorldBookOption({ id: res.world_book.id, name: res.world_book.name })
+                                  upsertWorldBookOption({ id: res.world_book.id, name: res.world_book.name, folder: res.world_book.folder })
                                   mutateExtensions((ext) => {
                                     const currentIds = getCharacterWorldBookIds(ext)
                                     return setCharacterWorldBookIds(ext, [...currentIds, res.world_book.id])

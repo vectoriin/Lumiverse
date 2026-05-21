@@ -175,6 +175,12 @@ interface ExpandedTextEditorProps {
   macros?: MacroGroup[]
   onRefreshMacros?: () => void
   inline?: boolean
+  /**
+   * Render the syntax-highlight overlay (markdown + XML) without a macro
+   * catalog. Also hides the macro toggle. Use for free-text content that
+   * isn't a prompt template — e.g. databank document bodies.
+   */
+  markdownOnly?: boolean
 }
 
 export default function ExpandedTextEditor({
@@ -187,6 +193,7 @@ export default function ExpandedTextEditor({
   macros,
   onRefreshMacros,
   inline,
+  markdownOnly,
 }: ExpandedTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
@@ -198,7 +205,7 @@ export default function ExpandedTextEditor({
   const [showMacros, setShowMacros] = useState(false)
   const [macroSearch, setMacroSearch] = useState('')
   const [selfLoadedMacros, setSelfLoadedMacros] = useState<MacroGroup[] | null>(
-    () => macros ? null : getAvailableMacros(),
+    () => (macros || markdownOnly) ? null : getAvailableMacros(),
   )
 
   // Use caller-provided macros, or eagerly-loaded local catalog
@@ -303,9 +310,10 @@ export default function ExpandedTextEditor({
   }, [value, onChange])
 
   const hasMacros = resolvedMacros.length > 0
+  const showHighlight = hasMacros || !!markdownOnly
   const highlightNodes = useMemo(
-    () => hasMacros ? highlightSyntax(value) : null,
-    [value, hasMacros],
+    () => showHighlight ? highlightSyntax(value) : null,
+    [value, showHighlight],
   )
 
   const editorContent = (
@@ -313,13 +321,15 @@ export default function ExpandedTextEditor({
       <div className={s.header}>
         <div className={s.headerContent}>
           <h3 className={s.title}>{title}</h3>
-          <button
-            className={s.macroToggle}
-            onClick={() => { if (!showMacros) loadMacros(); setShowMacros(!showMacros) }}
-            type="button"
-          >
-            <Hash size={12} /> {showMacros ? 'Hide Macros' : 'Insert Macro'}
-          </button>
+          {!markdownOnly && (
+            <button
+              className={s.macroToggle}
+              onClick={() => { if (!showMacros) loadMacros(); setShowMacros(!showMacros) }}
+              type="button"
+            >
+              <Hash size={12} /> {showMacros ? 'Hide Macros' : 'Insert Macro'}
+            </button>
+          )}
         </div>
         <button className={s.closeBtn} onClick={onClose} title="Collapse editor" type="button">
           <Minimize2 size={18} />
@@ -356,7 +366,7 @@ export default function ExpandedTextEditor({
           </div>
         )}
         <div className={s.editorArea}>
-          {hasMacros ? (
+          {showHighlight ? (
             <div className={s.highlightContainer}>
               <div ref={highlightRef} className={s.highlightBackdrop} aria-hidden="true">
                 <pre className={s.highlightPre}>{highlightNodes}{'\n'}</pre>
@@ -417,6 +427,7 @@ export function ExpandableTextarea({
   spellCheck,
   macros,
   onRefreshMacros,
+  markdownOnly,
 }: {
   value: string
   onChange: (value: string) => void
@@ -427,6 +438,8 @@ export function ExpandableTextarea({
   spellCheck?: boolean
   macros?: MacroGroup[]
   onRefreshMacros?: () => void
+  /** Forwarded to the full-screen editor. See ExpandedTextEditor.markdownOnly. */
+  markdownOnly?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -495,6 +508,7 @@ export function ExpandableTextarea({
           initialCursorPos={cursorPosRef.current}
           macros={macros}
           onRefreshMacros={onRefreshMacros}
+          markdownOnly={markdownOnly}
         />
       )}
     </div>

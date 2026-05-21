@@ -65,7 +65,7 @@ function buildStoredEntryExtensions(raw: unknown, outletValue: unknown): string 
 }
 
 function rowToBook(row: any): WorldBook {
-  return { ...row, metadata: JSON.parse(row.metadata) };
+  return { ...row, folder: row.folder ?? "", metadata: JSON.parse(row.metadata) };
 }
 
 function normalizeVectorIndexStatus(row: any): WorldBookVectorIndexStatus {
@@ -421,8 +421,8 @@ export function createWorldBook(userId: string, input: CreateWorldBookInput): Wo
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   getDb()
-    .query("INSERT INTO world_books (id, user_id, name, description, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(id, userId, input.name, input.description || "", JSON.stringify(input.metadata || {}), now, now);
+    .query("INSERT INTO world_books (id, user_id, name, description, folder, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(id, userId, input.name, input.description || "", input.folder || "", JSON.stringify(input.metadata || {}), now, now);
   emitWorldBookChanged(userId, id);
   return getWorldBook(userId, id)!;
 }
@@ -436,6 +436,7 @@ export function updateWorldBook(userId: string, id: string, input: UpdateWorldBo
 
   if (input.name !== undefined) { fields.push("name = ?"); values.push(input.name); }
   if (input.description !== undefined) { fields.push("description = ?"); values.push(input.description); }
+  if (input.folder !== undefined) { fields.push("folder = ?"); values.push(input.folder); }
   if (input.metadata !== undefined) { fields.push("metadata = ?"); values.push(JSON.stringify(input.metadata)); }
 
   if (fields.length === 0) return existing;

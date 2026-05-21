@@ -576,8 +576,8 @@ start_backend() {
 
   install_deps "$BACKEND_DIR" "backend"
 
-  # Clear Bun transpiler cache to avoid stale bytecode after updates
-  _bun --clear-cache 2>/dev/null || true
+  # Clear Bun install cache to avoid stale tarballs after updates
+  _bun pm cache rm >/dev/null 2>&1 || true
 
   # Export FRONTEND_DIR for the backend process
   export FRONTEND_DIR="$frontend_dist"

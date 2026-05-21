@@ -16,6 +16,8 @@ import { formatWorldBookReindexStatus } from '@/lib/worldBookVectorization'
 import { filterWorldBooksForChatContextAttachment } from '@/lib/worldBookIndexPrompt'
 import { Button } from '@/components/shared/FormComponents'
 import SearchableSelect from '@/components/shared/SearchableSelect'
+import FolderDropdown from '@/components/shared/FolderDropdown'
+import { useFolders } from '@/hooks/useFolders'
 import Pagination from '@/components/shared/Pagination'
 import type { WorldBook, WorldBookEntry, WorldBookVectorSummary, WorldInfoSettings } from '@/types/api'
 
@@ -61,6 +63,8 @@ export default function WorldBookPanel() {
   const [bookFieldsOpen, setBookFieldsOpen] = useState(false)
   const [bookName, setBookName] = useState('')
   const [bookDescription, setBookDescription] = useState('')
+  const [bookFolder, setBookFolder] = useState('')
+  const { folders, createFolder } = useFolders('worldBookFolders', books)
   const [vectorStatus, setVectorStatus] = useState<string | null>(null)
   const [vectorSummary, setVectorSummary] = useState<WorldBookVectorSummary | null>(null)
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false)
@@ -160,6 +164,7 @@ export default function WorldBookPanel() {
       if (book) {
         setBookName(book.name)
         setBookDescription(book.description)
+        setBookFolder(book.folder || '')
       }
       setEntrySearchFilter('')
       setSelectedEntryId(null)
@@ -234,6 +239,20 @@ export default function WorldBookPanel() {
           worldBooksApi.update(selectedBookId, { description: value })
         }
       }, 2000)
+    },
+    [selectedBookId]
+  )
+
+  const handleBookFolderChange = useCallback(
+    (value: string) => {
+      const trimmed = value.trim()
+      setBookFolder(trimmed)
+      if (selectedBookId) {
+        worldBooksApi.update(selectedBookId, { folder: trimmed })
+        setBooks((prev) =>
+          prev.map((b) => (b.id === selectedBookId ? { ...b, folder: trimmed } : b))
+        )
+      }
     },
     [selectedBookId]
   )
@@ -500,7 +519,7 @@ export default function WorldBookPanel() {
             multi
             value={globalWorldBooks ?? []}
             onChange={(ids) => { void setGlobalBooks(ids) }}
-            options={books.map((b) => ({ value: b.id, label: b.name }))}
+            options={books.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
             triggerLabel="Add"
             triggerIcon={<Plus size={11} />}
             searchPlaceholder="Search world books…"
@@ -542,7 +561,7 @@ export default function WorldBookPanel() {
               multi
               value={chatWorldBookIds}
               onChange={(ids) => { void handleChatBooksChange(ids) }}
-              options={books.map((b) => ({ value: b.id, label: b.name }))}
+              options={books.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
               triggerLabel="Add"
               triggerIcon={<Plus size={11} />}
               searchPlaceholder="Search world books…"
@@ -604,7 +623,7 @@ export default function WorldBookPanel() {
         <SearchableSelect
           value={selectedBookId || ''}
           onChange={(v) => setSelectedBookId(v || null)}
-          options={books.map((b) => ({ value: b.id, label: b.name }))}
+          options={books.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
           placeholder="Select a book…"
           searchPlaceholder="Search world books…"
           emptyMessage="No world books available"
@@ -692,6 +711,15 @@ export default function WorldBookPanel() {
                   value={bookDescription}
                   onChange={(e) => handleBookDescChange(e.target.value)}
                   placeholder="Optional description..."
+                />
+              </div>
+              <div className={styles.fieldGroup}>
+                <label className={styles.fieldLabel}>Folder</label>
+                <FolderDropdown
+                  folders={folders}
+                  selectedFolder={bookFolder}
+                  onSelect={handleBookFolderChange}
+                  onCreateFolder={createFolder}
                 />
               </div>
               <Button variant="danger-ghost" size="sm" icon={<Trash2 size={11} />} onClick={() => setDeleteBookConfirm(selectedBookId)}>

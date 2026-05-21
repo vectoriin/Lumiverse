@@ -176,9 +176,9 @@ export async function applyUpdate(
   // Stop server before destructive operations
   await stopServer();
 
-  // Clear Bun transpiler cache
-  log("Clearing transpiler cache...");
-  Bun.spawnSync(["bun", "--clear-cache"], { cwd: PROJECT_ROOT, stdout: "ignore", stderr: "ignore" });
+  // Clear Bun install cache
+  log("Clearing install cache...");
+  Bun.spawnSync(["bun", "pm", "cache", "rm"], { cwd: PROJECT_ROOT, stdout: "ignore", stderr: "ignore" });
 
   // Delete frontend/dist to prevent git conflicts
   const frontendDir = join(PROJECT_ROOT, "frontend");
@@ -257,9 +257,9 @@ export async function switchBranch(
   // Stop server
   await stopServer();
 
-  // Clear transpiler cache
-  log("Clearing transpiler cache...");
-  Bun.spawnSync(["bun", "--clear-cache"], { cwd: PROJECT_ROOT, stdout: "ignore", stderr: "ignore" });
+  // Clear install cache
+  log("Clearing install cache...");
+  Bun.spawnSync(["bun", "pm", "cache", "rm"], { cwd: PROJECT_ROOT, stdout: "ignore", stderr: "ignore" });
 
   // Delete frontend/dist
   const frontendDir = join(PROJECT_ROOT, "frontend");

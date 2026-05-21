@@ -572,7 +572,7 @@ export default function PersonaEditor({
           <SearchableSelect
             value={persona.attached_world_book_id || ''}
             onChange={(value) => { void handleLorebookChange(value) }}
-            options={worldBooks.map((wb) => ({ value: wb.id, label: wb.name }))}
+            options={worldBooks.map((wb) => ({ value: wb.id, label: wb.name, group: wb.folder || undefined }))}
             placeholder="No lorebook"
             searchPlaceholder="Search world books…"
             emptyMessage="No world books available"
