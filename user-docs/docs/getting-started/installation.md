@@ -107,7 +107,7 @@ The start scripts accept flags to control behavior:
     | `--setup` | Run the setup wizard |
     | `--reset-password` | Reset the owner account password |
     | `-m`, `--migrate-st` | Run the [SillyTavern migration](#migrating-from-sillytavern) tool |
-    | `--no-runner` | Start without the visual terminal runner |
+    | `--no-runner` | Start without the runner (disables Operator Panel update/restart/branch-switch controls) |
 
 === "Windows (`start.ps1`)"
 
@@ -121,7 +121,7 @@ The start scripts accept flags to control behavior:
     | `-Mode setup` | Run the setup wizard |
     | `-Mode reset-password` | Reset the owner account password |
     | `-MigrateST` or `-m` | Run the SillyTavern migration tool |
-    | `-NoRunner` | Start without the visual runner |
+    | `-NoRunner` | Start without the runner (disables Operator Panel update/restart/branch-switch controls) |
 
 ---
 
@@ -266,22 +266,30 @@ API keys and account passwords are stored encrypted in the `data/` directory rat
 
 ## Updating
 
-=== "Visual Runner"
+The easiest way to update Lumiverse is from the **Operator Panel** in the running app — no terminal interaction needed.
 
-    If you're using the visual terminal runner (the default), press **U** twice to trigger an update. The runner pulls the latest code, reinstalls dependencies, and restarts automatically.
+### From the Operator Panel (recommended)
+
+1. Open **Settings → Operator Panel**.
+2. Click **Check for Updates**. The panel reports how many commits behind you are and previews the latest commit message.
+3. If an update is available, click **Apply Update**. Lumiverse pulls the latest code, reinstalls dependencies, rebuilds the frontend, and restarts the server. Your browser reconnects automatically when the new build is ready.
+
+The runner that the start scripts launch is what carries out the update on your behalf. It needs to be attached for the Operator Panel buttons to work — the panel shows **Runner IPC: Connected** when it is. If the badge reads _Unavailable_ (e.g. you launched with `--no-runner` / `-NoRunner`, or restarted the backend outside the runner), use the command-line flow below instead.
+
+### From the Command Line
 
 === "macOS / Linux"
 
     ```bash
     git pull
-    ./start.sh
+    ./start.sh --build
     ```
 
 === "Windows"
 
     ```powershell
     git pull
-    .\start.ps1
+    .\start.ps1 -Build
     ```
 
 === "Docker"
@@ -290,6 +298,8 @@ API keys and account passwords are stored encrypted in the `data/` directory rat
     docker-compose pull
     docker-compose up -d
     ```
+
+The `--build` / `-Build` flag rebuilds the frontend before launching — important on a fresh pull because the precompiled assets won't match the new source.
 
 Database migrations run automatically on startup — your data is preserved across updates.
 
@@ -308,7 +318,7 @@ You can move between branches at any time. Your `data/` folder is unaffected.
 
 ### From the Operator Panel (recommended)
 
-If you're running Lumiverse with the visual terminal runner (the default for the start scripts), you can switch branches without leaving the app:
+If you launched Lumiverse with one of the start scripts, the runner is attached by default and you can switch branches without leaving the app:
 
 1. Open **Settings → Operator Panel**.
 2. Look at the **Branch** card — it shows the branch you're on (`main` or `staging`).
