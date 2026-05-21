@@ -350,7 +350,7 @@ export default function BubbleMessageDefault({
 
         {!isUser && message.extra?.attachments && message.extra.attachments.length > 0 && !isEditing && (
           <div className={styles.content}>
-            <MessageAttachments attachments={message.extra.attachments} isUser={false} />
+            <MessageAttachments attachments={message.extra.attachments} isUser={false} chatId={chatId} messageId={message.id} />
           </div>
         )}
 
@@ -381,7 +381,7 @@ export default function BubbleMessageDefault({
 
         {isUser && message.extra?.attachments && message.extra.attachments.length > 0 && !isEditing && (
           <div className={styles.content}>
-            <MessageAttachments attachments={message.extra.attachments} isUser={true} />
+            <MessageAttachments attachments={message.extra.attachments} isUser={true} chatId={chatId} messageId={message.id} />
           </div>
         )}
 

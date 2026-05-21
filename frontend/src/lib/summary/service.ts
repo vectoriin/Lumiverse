@@ -6,7 +6,7 @@ import {
   FALLBACK_SUMMARIZATION_SYSTEM_PROMPT,
   FALLBACK_SUMMARIZATION_USER_PROMPT,
 } from './prompts'
-import { LOOM_SUMMARY_KEY, LOOM_LAST_SUMMARIZED_KEY } from './types'
+import { DEFAULT_SUMMARY_REQUEST_TIMEOUT_MS, LOOM_SUMMARY_KEY, LOOM_LAST_SUMMARIZED_KEY } from './types'
 import type { LastSummarizedInfo } from './types'
 
 interface GenerateSummaryOpts {
@@ -21,6 +21,16 @@ interface GenerateSummaryOpts {
   systemPromptOverride?: string | null
   /** Custom user prompt template; falls back to backend default when null/empty. */
   userPromptOverride?: string | null
+  /** Client request timeout for the summarize API call. */
+  requestTimeoutMs?: number
+}
+
+const MIN_SUMMARY_REQUEST_TIMEOUT_MS = 5_000
+
+function normalizeSummaryRequestTimeoutMs(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_SUMMARY_REQUEST_TIMEOUT_MS
+  return Math.max(MIN_SUMMARY_REQUEST_TIMEOUT_MS, Math.round(parsed))
 }
 
 /**
@@ -78,6 +88,7 @@ export async function generateSummary(opts: GenerateSummaryOpts): Promise<string
     groupMembers = [],
     systemPromptOverride,
     userPromptOverride,
+    requestTimeoutMs,
   } = opts
 
   const [chat, msgPage] = await Promise.all([
@@ -121,6 +132,8 @@ export async function generateSummary(opts: GenerateSummaryOpts): Promise<string
       { role: 'system', content: prompt.systemPrompt },
       { role: 'user', content: prompt.userPrompt },
     ],
+  }, {
+    timeout: normalizeSummaryRequestTimeoutMs(requestTimeoutMs),
   })
 
   const summaryText = result.content?.trim()

@@ -23,7 +23,7 @@ import {
   SYSTEM_PROMPT_PLACEHOLDERS,
   USER_PROMPT_PLACEHOLDERS,
 } from '@/lib/summary/prompts'
-import type { SummaryMode, SummaryApiSource } from '@/lib/summary/types'
+import { DEFAULT_SUMMARY_REQUEST_TIMEOUT_MS, type SummaryMode, type SummaryApiSource } from '@/lib/summary/types'
 import styles from './SummaryEditor.module.css'
 
 // ─── Shared sub-components ────────────────────────────────────────
@@ -206,10 +206,14 @@ function SummaryTextEditor() {
 // ─── Summarization Config ─────────────────────────────────────────
 
 function SummarizationConfig() {
-  const { summarization, setSummarization, profiles, activeProfileId } = useSummary()
+  const { summarization, setSummarization, profiles } = useSummary()
 
   const mode = summarization.mode
   const apiSource = summarization.apiSource
+  const updateRequestTimeoutMs = useCallback((value: number) => {
+    const next = Number.isFinite(value) ? value : DEFAULT_SUMMARY_REQUEST_TIMEOUT_MS
+    setSummarization({ requestTimeoutMs: Math.max(5_000, Math.round(next)) })
+  }, [setSummarization])
 
   const connectionOptions = profiles.map((p) => ({
     value: p.id,
@@ -318,6 +322,20 @@ function SummarizationConfig() {
               />
             </div>
           )}
+        </Section>
+      )}
+
+      {/* Request Timeout */}
+      {mode !== 'disabled' && (
+        <Section icon={<Clock size={16} />} title="Request Timeout">
+          <NumberField
+            id="sum-timeout" label="Timeout" hint="Milliseconds to wait for summary generation"
+            value={summarization.requestTimeoutMs}
+            onChange={updateRequestTimeoutMs}
+            min={5_000}
+            step={30_000}
+          />
+          <p className={styles.desc}>Default is {DEFAULT_SUMMARY_REQUEST_TIMEOUT_MS} ms. Increase this for slower models or larger summary contexts.</p>
         </Section>
       )}
 

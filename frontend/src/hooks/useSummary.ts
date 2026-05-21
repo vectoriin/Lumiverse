@@ -93,6 +93,7 @@ export function useSummary() {
         characterName,
         systemPromptOverride: summarization.systemPromptOverride,
         userPromptOverride: summarization.userPromptOverride,
+        requestTimeoutMs: summarization.requestTimeoutMs,
       })
 
       if (result) {

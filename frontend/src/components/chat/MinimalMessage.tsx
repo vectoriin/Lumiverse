@@ -329,7 +329,7 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
 
         {/* Inline attachments — before content for assistant */}
         {!isUser && message.extra?.attachments && message.extra.attachments.length > 0 && !isEditing && (
-          <MessageAttachments attachments={message.extra.attachments} isUser={false} />
+          <MessageAttachments attachments={message.extra.attachments} isUser={false} chatId={chatId} messageId={message.id} />
         )}
 
         {/* Content */}
@@ -358,7 +358,7 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
 
         {/* User attachments render after content */}
         {isUser && message.extra?.attachments && message.extra.attachments.length > 0 && !isEditing && (
-          <MessageAttachments attachments={message.extra.attachments} isUser={true} />
+          <MessageAttachments attachments={message.extra.attachments} isUser={true} chatId={chatId} messageId={message.id} />
         )}
 
         {/* Swipe controls — assistant messages only, except the greeting (index 0),

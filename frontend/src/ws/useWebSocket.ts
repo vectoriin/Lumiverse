@@ -569,7 +569,7 @@ export function useWebSocket() {
             })
             // Ping when a backgrounded chat finishes successfully
             if (!payload.error && state.chatHeadsEnabled && state.chatHeadsCompletionSoundEnabled) {
-              playNotificationPing()
+              playNotificationPing(state.chatHeadsCustomCompletionSound?.uploadedAt ?? null)
             }
           }
         }

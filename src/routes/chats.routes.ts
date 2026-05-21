@@ -610,6 +610,13 @@ app.delete("/:chatId/messages/:id", (c) => {
   return c.json({ success: true });
 });
 
+app.delete("/:chatId/messages/:id/attachments/:imageId", (c) => {
+  const userId = c.get("userId");
+  const updated = svc.removeMessageAttachment(userId, c.req.param("id"), c.req.param("imageId"));
+  if (!updated) return c.json({ error: "Message not found" }, 404);
+  return c.json(updated);
+});
+
 app.post("/:chatId/messages/:id/swipe", async (c) => {
   const userId = c.get("userId");
   const chatId = c.req.param("chatId");

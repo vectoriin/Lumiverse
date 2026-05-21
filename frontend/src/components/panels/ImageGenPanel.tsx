@@ -2,11 +2,18 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Image as ImageIcon, Settings2, Trash2, Plus, X, Workflow, Shuffle } from 'lucide-react'
 import { IconBrush } from '@tabler/icons-react'
 import { useStore } from '@/store'
-import { imageGenApi, type ComfyUICapabilities, type SceneData } from '@/api/image-gen'
+import { imageGenApi, imageGenPresetBindingsApi, type ComfyUICapabilities, type SceneData } from '@/api/image-gen'
 import { imageGenConnectionsApi } from '@/api/image-gen-connections'
+import ImageGenProgressBar from './ImageGenProgressBar'
 import { connectionsApi } from '@/api/connections'
 import { Toggle } from '@/components/shared/Toggle'
 import { Button, FormField, Select, TextInput, EditorSection, TextArea } from '@/components/shared/FormComponents'
+import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
+import ModelCombobox from './connection-manager/ModelCombobox'
+import SearchableSelect from '@/components/shared/SearchableSelect'
+import { getMacroCatalog } from '@/api/macros'
+import { getAvailableMacros } from '@/lib/loom/service'
+import type { MacroGroup } from '@/lib/loom/types'
 import ImageLightbox from '@/components/shared/ImageLightbox'
 import { WorkflowEditorModal } from '@/components/dream-weaver/visual-studio/comfyui/WorkflowEditorModal'
 import { buildMappedFieldControls, type ComfyMappedFieldControl } from '@/components/dream-weaver/visual-studio/comfyui/mapped-fields'
@@ -65,7 +72,11 @@ function parseComfyControlValue(control: ComfyMappedFieldControl, value: string)
   return value
 }
 
-/** Combobox for model-component fields backed by a live API fetch. */
+/**
+ * Image-gen variant of the shared ModelCombobox. Lazy-loads the model list
+ * from the provider via `imageGenConnectionsApi.modelsBySubtype` and surfaces
+ * the standard searchable combobox UI used by Connections / TTS / STT panels.
+ */
 function ModelComboField({
   label,
   hint,
@@ -83,9 +94,8 @@ function ModelComboField({
   value: any
   onChange: (key: string, value: any) => void
 }) {
-  const [models, setModels] = useState<Array<{ id: string; label: string }> | null>(null)
+  const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
   const [loading, setLoading] = useState(false)
-  const [open, setOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (!connectionId) return
@@ -93,7 +103,6 @@ function ModelComboField({
     try {
       const res = await imageGenConnectionsApi.modelsBySubtype(connectionId, modelSubtype)
       setModels(res.models ?? [])
-      setOpen(true)
     } catch {
       setModels([])
     } finally {
@@ -101,74 +110,29 @@ function ModelComboField({
     }
   }, [connectionId, modelSubtype])
 
+  const modelIds = useMemo(() => models.map((m) => m.id), [models])
+  const modelLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    for (const m of models) labels[m.id] = m.label
+    return labels
+  }, [models])
+
   return (
     <FormField label={label} hint={hint}>
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <TextInput
-          value={value ?? ''}
-          onChange={(v) => onChange(paramKey, v)}
-          placeholder="(default)"
-          style={{ flex: 1 }}
-        />
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading || !connectionId}
-          title="Browse available models"
-          style={{
-            flexShrink: 0,
-            padding: '0 8px',
-            height: 30,
-            background: 'var(--lumiverse-surface-raised)',
-            border: '1px solid var(--lumiverse-border)',
-            borderRadius: 4,
-            color: 'var(--lumiverse-text)',
-            cursor: 'pointer',
-            fontSize: 12,
-          }}
-        >
-          {loading ? '…' : '↓'}
-        </button>
-      </div>
-      {open && models !== null && (
-        <div
-          style={{
-            marginTop: 4,
-            border: '1px solid var(--lumiverse-border)',
-            borderRadius: 4,
-            background: 'var(--lumiverse-surface-raised)',
-            maxHeight: 160,
-            overflowY: 'auto',
-          }}
-        >
-          <div
-            style={{ padding: '4px 8px', cursor: 'pointer', fontSize: 12, color: 'var(--lumiverse-text-muted)' }}
-            onClick={() => { onChange(paramKey, ''); setOpen(false) }}
-          >
-            (clear / use default)
-          </div>
-          {models.length === 0 ? (
-            <div style={{ padding: '4px 8px', fontSize: 12, color: 'var(--lumiverse-text-muted)' }}>
-              No models found
-            </div>
-          ) : (
-            models.map((m) => (
-              <div
-                key={m.id}
-                style={{
-                  padding: '4px 8px',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  background: value === m.id ? 'var(--lumiverse-accent-muted)' : undefined,
-                }}
-                onClick={() => { onChange(paramKey, m.id); setOpen(false) }}
-              >
-                {m.label}
-              </div>
-            ))
-          )}
-        </div>
-      )}
+      <ModelCombobox
+        value={typeof value === 'string' ? value : ''}
+        onChange={(v) => onChange(paramKey, v || undefined)}
+        models={modelIds}
+        modelLabels={modelLabels}
+        loading={loading}
+        onRefresh={load}
+        autoRefreshOnFocus
+        refreshKey={connectionId ?? ''}
+        disabled={!connectionId}
+        placeholder="(workflow / connection default)"
+        appearance="standard"
+        emptyMessage={connectionId ? 'No models found. Refresh, or enter one manually.' : 'Pick a connection first.'}
+      />
     </FormField>
   )
 }
@@ -322,6 +286,9 @@ export default function ImageGenPanel() {
   const setImageGenSettings = useStore((s) => s.setImageGenSettings)
   const setSceneBackground = useStore((s) => s.setSceneBackground)
   const setSceneGenerating = useStore((s) => s.setSceneGenerating)
+  const openModal = useStore((s) => s.openModal)
+  const activeCharacterId = useStore((s) => s.activeCharacterId)
+  const activePersonaId = useStore((s) => s.activePersonaId)
 
   const imageGenProfiles = useStore((s) => s.imageGenProfiles)
   const activeImageGenConnectionId = useStore((s) => s.activeImageGenConnectionId)
@@ -335,8 +302,18 @@ export default function ImageGenPanel() {
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [generatedPreview, setGeneratedPreview] = useState<string | null>(null)
   const [llmConnections, setLlmConnections] = useState<ConnectionProfile[]>([])
-  const [parserModels, setParserModels] = useState<Array<{ id: string; label: string }>>([])
+  const [parserModels, setParserModels] = useState<string[]>([])
+  const [parserModelLabels, setParserModelLabels] = useState<Record<string, string>>({})
+  const [parserModelsLoading, setParserModelsLoading] = useState(false)
   const [presetName, setPresetName] = useState('')
+  const [availableMacros, setAvailableMacros] = useState<MacroGroup[]>(() => getAvailableMacros())
+  const [editTarget, setEditTarget] = useState<'main' | 'character' | 'persona'>('main')
+  const [draftPrompt, setDraftPrompt] = useState('')
+  const [draftNegative, setDraftNegative] = useState('')
+  const [loadedPresetId, setLoadedPresetId] = useState<string | null>(null)
+  const [characterPresetId, setCharacterPresetId] = useState<string | null>(null)
+  const [personaPresetId, setPersonaPresetId] = useState<string | null>(null)
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false)
   const [workflowConfig, setWorkflowConfig] = useState<ComfyUIWorkflowConfig | null>(null)
   const [workflowCapabilities, setWorkflowCapabilities] = useState<ComfyUICapabilities | null>(null)
@@ -359,16 +336,27 @@ export default function ImageGenPanel() {
     }).catch(() => {})
   }, [setImageGenProfiles, setImageGenProviders])
 
-  useEffect(() => {
+  const loadParserModels = useCallback(async () => {
     const connectionId = imageGeneration.promptParserConnectionId
     if (!connectionId) {
       setParserModels([])
+      setParserModelLabels({})
       return
     }
-    connectionsApi.models(connectionId).then((res) => {
-      setParserModels((res.models || []).map((m) => ({ id: m, label: m })))
-    }).catch(() => setParserModels([]))
+    setParserModelsLoading(true)
+    try {
+      const res = await connectionsApi.models(connectionId)
+      setParserModels(res.models || [])
+      setParserModelLabels(res.model_labels || {})
+    } catch {
+      setParserModels([])
+      setParserModelLabels({})
+    } finally {
+      setParserModelsLoading(false)
+    }
   }, [imageGeneration.promptParserConnectionId])
+
+  useEffect(() => { void loadParserModels() }, [loadParserModels])
 
   // Resolve active connection and its provider capabilities
   const activeConnection = useMemo(
@@ -521,52 +509,292 @@ export default function ImageGenPanel() {
   }, [genParams.comfyui_field_values])
 
   const promptPresets = imageGeneration.promptPresets || []
-  const activePromptPreset = promptPresets.find((p) => p.id === imageGeneration.activePromptPresetId) || null
+  const mainPresets = useMemo(() => promptPresets.filter((p) => (p.kind ?? 'main') === 'main'), [promptPresets])
+  const characterPresets = useMemo(() => promptPresets.filter((p) => p.kind === 'character'), [promptPresets])
+  const personaPresets = useMemo(() => promptPresets.filter((p) => p.kind === 'persona'), [promptPresets])
 
-  const applyPromptPreset = useCallback((presetId: string | null) => {
-    const preset = promptPresets.find((p) => p.id === presetId)
-    if (!preset) {
-      setImageGenSettings({ activePromptPresetId: null })
+  // Load this character's bound preset whenever the active character changes.
+  useEffect(() => {
+    if (!activeCharacterId) {
+      setCharacterPresetId(null)
       return
     }
-    setImageGenSettings({
-      activePromptPresetId: preset.id,
-      promptMode: preset.mode,
-      customPrompt: preset.prompt,
-      customNegativePrompt: preset.negativePrompt || '',
-      promptParserConnectionId: preset.parserConnectionId || null,
-      promptParserModel: preset.parserModel || '',
-      promptParserParameters: preset.parserParameters || {},
-    } as any)
-  }, [promptPresets, setImageGenSettings])
+    let cancelled = false
+    imageGenPresetBindingsApi
+      .getCharacterBinding(activeCharacterId)
+      .then((binding) => {
+        if (!cancelled) setCharacterPresetId(binding?.preset_id ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setCharacterPresetId(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeCharacterId])
 
+  // Load this persona's bound preset whenever the active persona changes.
+  useEffect(() => {
+    if (!activePersonaId) {
+      setPersonaPresetId(null)
+      return
+    }
+    let cancelled = false
+    imageGenPresetBindingsApi
+      .getPersonaBinding(activePersonaId)
+      .then((binding) => {
+        if (!cancelled) setPersonaPresetId(binding?.preset_id ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setPersonaPresetId(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activePersonaId])
+
+  const loadedPreset = useMemo(
+    () => (loadedPresetId ? promptPresets.find((p) => p.id === loadedPresetId) ?? null : null),
+    [loadedPresetId, promptPresets],
+  )
+
+  // Re-hydrate the editor textareas whenever the edit target (or its bindings)
+  // changes. For main, the editor mirrors the live customPrompt; for
+  // character/persona, it mirrors the bound preset (or stays blank).
+  useEffect(() => {
+    if (editTarget === 'main') {
+      const activeId = imageGeneration.activePromptPresetId || null
+      const activePreset = activeId ? mainPresets.find((p) => p.id === activeId) : null
+      setLoadedPresetId(activePreset?.id ?? null)
+      setDraftPrompt(imageGeneration.customPrompt || '')
+      setDraftNegative(imageGeneration.customNegativePrompt || '')
+    } else if (editTarget === 'character') {
+      const preset = characterPresetId ? characterPresets.find((p) => p.id === characterPresetId) : null
+      setLoadedPresetId(preset?.id ?? null)
+      setDraftPrompt(preset?.prompt || '')
+      setDraftNegative(preset?.negativePrompt || '')
+    } else {
+      const preset = personaPresetId ? personaPresets.find((p) => p.id === personaPresetId) : null
+      setLoadedPresetId(preset?.id ?? null)
+      setDraftPrompt(preset?.prompt || '')
+      setDraftNegative(preset?.negativePrompt || '')
+    }
+    setPresetName('')
+    // We intentionally exclude `imageGeneration.customPrompt`/`customNegativePrompt`
+    // from deps — the editor itself is the source of truth for those when on
+    // the 'main' target. Re-running on every keystroke would clobber the draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editTarget, imageGeneration.activePromptPresetId, characterPresetId, personaPresetId, promptPresets])
+
+  // Mirror the Loom builder pattern: ship the full backend macro catalog into
+  // the expandable editor so users can browse/insert macros that work inside
+  // image-gen prompts ({{user}}, {{char}}, etc.).
+  const refreshMacros = useCallback(() => {
+    getMacroCatalog()
+      .then((catalog) => {
+        const groups: MacroGroup[] = catalog.categories.map((c) => ({
+          category: c.category,
+          macros: c.macros.map((m) => ({
+            name: m.name,
+            syntax: m.syntax,
+            description: m.description,
+            args: m.args,
+            returns: m.returns,
+          })),
+        }))
+        const apiCategoryNames = new Set(groups.map((g) => g.category))
+        const localOnly = getAvailableMacros().filter((g) => !apiCategoryNames.has(g.category))
+        setAvailableMacros([...groups, ...localOnly])
+      })
+      .catch(() => {
+        // Keep the local fallback on failure.
+      })
+  }, [])
+
+  useEffect(() => { refreshMacros() }, [refreshMacros])
+
+  // Typing only updates local state — keystrokes do NOT touch the store, so
+  // the whole panel doesn't re-render mid-type. A debounced effect below
+  // flushes the draft to settings for persistence, and handleGenerate flushes
+  // synchronously before submitting.
+  const onDraftPromptChange = useCallback((value: string) => {
+    setDraftPrompt(value)
+  }, [])
+
+  const onDraftNegativeChange = useCallback((value: string) => {
+    setDraftNegative(value)
+  }, [])
+
+  // Persist main-mode drafts to settings after typing pauses. Keeps the prompt
+  // available on refresh / panel remount without causing per-keystroke
+  // store updates.
+  useEffect(() => {
+    if (editTarget !== 'main') return
+    const currentPrompt = imageGeneration.customPrompt || ''
+    const currentNeg = imageGeneration.customNegativePrompt || ''
+    if (draftPrompt === currentPrompt && draftNegative === currentNeg) return
+    const timer = setTimeout(() => {
+      setImageGenSettings({ customPrompt: draftPrompt, customNegativePrompt: draftNegative })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [draftPrompt, draftNegative, editTarget, imageGeneration.customPrompt, imageGeneration.customNegativePrompt, setImageGenSettings])
+
+  const bindCharacterPreset = useCallback(async (presetId: string | null) => {
+    if (!activeCharacterId) return
+    try {
+      if (!presetId) {
+        await imageGenPresetBindingsApi.deleteCharacterBinding(activeCharacterId).catch(() => {})
+        setCharacterPresetId(null)
+        return
+      }
+      const binding = await imageGenPresetBindingsApi.setCharacterBinding(activeCharacterId, presetId)
+      setCharacterPresetId(binding.preset_id)
+    } catch (err: any) {
+      setError(err?.body?.error || err?.message || 'Failed to update character preset binding')
+    }
+  }, [activeCharacterId])
+
+  const bindPersonaPreset = useCallback(async (presetId: string | null) => {
+    if (!activePersonaId) return
+    try {
+      if (!presetId) {
+        await imageGenPresetBindingsApi.deletePersonaBinding(activePersonaId).catch(() => {})
+        setPersonaPresetId(null)
+        return
+      }
+      const binding = await imageGenPresetBindingsApi.setPersonaBinding(activePersonaId, presetId)
+      setPersonaPresetId(binding.preset_id)
+    } catch (err: any) {
+      setError(err?.body?.error || err?.message || 'Failed to update persona preset binding')
+    }
+  }, [activePersonaId])
+
+  // Unified picker: switches active main preset (and panel content) when
+  // editing main, or binds/unbinds the active character/persona when editing
+  // those targets. Selecting null clears the binding / active selection and
+  // empties the editor for a fresh draft.
+  const pickPreset = useCallback((presetId: string | null) => {
+    if (!presetId) {
+      setLoadedPresetId(null)
+      if (editTarget === 'main') {
+        setImageGenSettings({ activePromptPresetId: null, customPrompt: '', customNegativePrompt: '' })
+        setDraftPrompt('')
+        setDraftNegative('')
+      } else if (editTarget === 'character') {
+        bindCharacterPreset(null)
+        setDraftPrompt('')
+        setDraftNegative('')
+      } else if (editTarget === 'persona') {
+        bindPersonaPreset(null)
+        setDraftPrompt('')
+        setDraftNegative('')
+      }
+      return
+    }
+    const preset = promptPresets.find((p) => p.id === presetId)
+    if (!preset) return
+    setLoadedPresetId(preset.id)
+    setDraftPrompt(preset.prompt)
+    setDraftNegative(preset.negativePrompt || '')
+    if (editTarget === 'main') {
+      setImageGenSettings({
+        activePromptPresetId: preset.id,
+        promptMode: preset.mode,
+        customPrompt: preset.prompt,
+        customNegativePrompt: preset.negativePrompt || '',
+        promptParserConnectionId: preset.parserConnectionId || null,
+        promptParserModel: preset.parserModel || '',
+        promptParserParameters: preset.parserParameters || {},
+      } as any)
+    } else if (editTarget === 'character') {
+      bindCharacterPreset(preset.id)
+    } else if (editTarget === 'persona') {
+      bindPersonaPreset(preset.id)
+    }
+  }, [editTarget, promptPresets, setImageGenSettings, bindCharacterPreset, bindPersonaPreset])
+
+  // Saves the textarea draft back to the loaded preset (or creates a new one
+  // if nothing is loaded). The save side-effects are scoped to the edit
+  // target: 'main' bumps the activePromptPresetId and writes to settings;
+  // 'character'/'persona' rebind the new id to the active actor.
   const savePromptPreset = useCallback(() => {
-    const name = presetName.trim() || activePromptPreset?.name || 'Image prompt'
-    const existingId = activePromptPreset?.id
+    const targetLabel = editTarget === 'main' ? 'Image prompt' : editTarget === 'character' ? 'Character preset' : 'Persona preset'
+    const name = presetName.trim() || loadedPreset?.name || targetLabel
+    const existingId = loadedPresetId
     const nextPreset: ImageGenPromptPreset = {
       id: existingId || crypto.randomUUID(),
       name,
       mode: imageGeneration.promptMode === 'parsed_custom' ? 'parsed_custom' : 'custom',
-      prompt: imageGeneration.customPrompt || '',
-      negativePrompt: imageGeneration.customNegativePrompt || '',
-      parserConnectionId: imageGeneration.promptParserConnectionId || null,
-      parserModel: imageGeneration.promptParserModel || '',
-      parserParameters: imageGeneration.promptParserParameters || {},
+      prompt: draftPrompt,
+      negativePrompt: draftNegative,
+      parserConnectionId: editTarget === 'main' ? (imageGeneration.promptParserConnectionId || null) : null,
+      parserModel: editTarget === 'main' ? (imageGeneration.promptParserModel || '') : '',
+      parserParameters: editTarget === 'main' ? (imageGeneration.promptParserParameters || {}) : {},
+      kind: editTarget,
     }
     const next = existingId
       ? promptPresets.map((p) => (p.id === existingId ? nextPreset : p))
       : [...promptPresets, nextPreset]
-    setImageGenSettings({ promptPresets: next, activePromptPresetId: nextPreset.id } as any)
+
+    const updates: Partial<typeof imageGeneration> = { promptPresets: next }
+    if (editTarget === 'main') {
+      ;(updates as any).activePromptPresetId = nextPreset.id
+      ;(updates as any).customPrompt = draftPrompt
+      ;(updates as any).customNegativePrompt = draftNegative
+    }
+    setImageGenSettings(updates as any)
+    setLoadedPresetId(nextPreset.id)
     setPresetName('')
-  }, [activePromptPreset, imageGeneration, presetName, promptPresets, setImageGenSettings])
+
+    if (editTarget === 'character' && activeCharacterId) {
+      void bindCharacterPreset(nextPreset.id)
+    } else if (editTarget === 'persona' && activePersonaId) {
+      void bindPersonaPreset(nextPreset.id)
+    }
+  }, [
+    activeCharacterId,
+    activePersonaId,
+    bindCharacterPreset,
+    bindPersonaPreset,
+    draftNegative,
+    draftPrompt,
+    editTarget,
+    imageGeneration,
+    loadedPreset,
+    loadedPresetId,
+    presetName,
+    promptPresets,
+    setImageGenSettings,
+  ])
 
   const deletePromptPreset = useCallback(() => {
-    if (!activePromptPreset) return
-    setImageGenSettings({
-      promptPresets: promptPresets.filter((p) => p.id !== activePromptPreset.id),
-      activePromptPresetId: null,
-    } as any)
-  }, [activePromptPreset, promptPresets, setImageGenSettings])
+    if (!loadedPresetId) return
+    const id = loadedPresetId
+    const next = promptPresets.filter((p) => p.id !== id)
+    const updates: Partial<typeof imageGeneration> = { promptPresets: next }
+    if (editTarget === 'main' && imageGeneration.activePromptPresetId === id) {
+      ;(updates as any).activePromptPresetId = null
+    }
+    setImageGenSettings(updates as any)
+    setLoadedPresetId(null)
+    setDraftPrompt('')
+    setDraftNegative('')
+    if (editTarget === 'character' && characterPresetId === id) {
+      void bindCharacterPreset(null)
+    } else if (editTarget === 'persona' && personaPresetId === id) {
+      void bindPersonaPreset(null)
+    }
+  }, [
+    bindCharacterPreset,
+    bindPersonaPreset,
+    characterPresetId,
+    editTarget,
+    imageGeneration.activePromptPresetId,
+    loadedPresetId,
+    personaPresetId,
+    promptPresets,
+    setImageGenSettings,
+  ])
 
   // Reference images are provider parameters and stay scoped to this connection.
   const currentRefs: RefImage[] = genParams.referenceImages || []
@@ -576,29 +804,38 @@ export default function ImageGenPanel() {
 
   const supportsRefs = providerName === 'novelai' || providerName === 'nanogpt'
 
-  const handleGenerate = async (forceGeneration = false) => {
-    if (!activeChatId) {
-      setError('Open a chat first to generate a scene background.')
-      return
-    }
-
-    setError(null)
+  const runGenerationCall = useCallback(async (input: {
+    chatId: string
+    forceGeneration: boolean
+    promptMode: 'scene' | 'custom' | 'parsed_custom'
+    prompt: string
+    negativePrompt: string
+    promptPresetId: string | null
+    outputTarget: 'background' | 'chat_attachment' | 'preview' | 'attach_to_message'
+    attachToMessageId?: string
+    skipParse?: boolean
+  }) => {
+    const jobId = crypto.randomUUID()
+    setCurrentJobId(jobId)
     setSceneGenerating(true)
     try {
       const res = await imageGenApi.generate({
-        chatId: activeChatId,
-        forceGeneration,
-        promptMode: imageGeneration.promptMode || 'scene',
-        prompt: imageGeneration.customPrompt || '',
-        negativePrompt: imageGeneration.customNegativePrompt || '',
-        promptPresetId: imageGeneration.activePromptPresetId || null,
-        outputTarget: imageGeneration.outputTarget || 'background',
+        chatId: input.chatId,
+        forceGeneration: input.forceGeneration,
+        promptMode: input.promptMode,
+        prompt: input.prompt,
+        negativePrompt: input.negativePrompt,
+        promptPresetId: input.promptPresetId,
+        outputTarget: input.outputTarget,
+        attachToMessageId: input.attachToMessageId,
+        skipParse: input.skipParse,
+        clientJobId: jobId,
         promptGenerationTimeoutSeconds: imageGeneration.promptGenerationTimeoutSeconds ?? DEFAULT_PROMPT_TIMEOUT_SECONDS,
         generationTimeoutSeconds: imageGeneration.generationTimeoutSeconds ?? DEFAULT_IMAGE_GEN_TIMEOUT_SECONDS,
       })
       setLastScene(res.scene || null)
       if (res.generated && res.imageDataUrl) {
-        if ((imageGeneration.outputTarget || 'background') === 'background') {
+        if (input.outputTarget === 'background') {
           setSceneBackground(res.imageDataUrl)
           setGeneratedPreview(null)
         } else {
@@ -610,7 +847,101 @@ export default function ImageGenPanel() {
       setError(err?.body?.error || err?.message || 'Image generation failed')
     } finally {
       setSceneGenerating(false)
+      setCurrentJobId(null)
     }
+  }, [imageGeneration.promptGenerationTimeoutSeconds, imageGeneration.generationTimeoutSeconds, setSceneBackground, setSceneGenerating])
+
+  const handleGenerate = async (forceGeneration = false) => {
+    if (!activeChatId) {
+      setError('Open a chat first to generate a scene background.')
+      return
+    }
+
+    setError(null)
+
+    const promptMode = (imageGeneration.promptMode || 'scene') as 'scene' | 'custom' | 'parsed_custom'
+    const outputTarget = (imageGeneration.outputTarget || 'background') as 'background' | 'chat_attachment' | 'preview' | 'attach_to_message'
+    const promptPresetId = imageGeneration.activePromptPresetId || null
+
+    // Capture "the latest message at click time" so the attach-to-message
+    // semantics are tied to what the user saw when they pressed Generate.
+    let attachToMessageId: string | undefined
+    if (outputTarget === 'attach_to_message') {
+      const messages = useStore.getState().messages
+      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+      if (!lastMessage) {
+        setError('No message to attach the generated image to.')
+        return
+      }
+      attachToMessageId = lastMessage.id
+    }
+
+    // Flush any pending draft text into settings before submitting so we never
+    // miss the user's latest keystrokes inside the 500ms debounce window.
+    if (editTarget === 'main') {
+      const needsFlush =
+        draftPrompt !== (imageGeneration.customPrompt || '') ||
+        draftNegative !== (imageGeneration.customNegativePrompt || '')
+      if (needsFlush) {
+        setImageGenSettings({ customPrompt: draftPrompt, customNegativePrompt: draftNegative })
+      }
+    }
+
+    const livePrompt = editTarget === 'main' ? draftPrompt : (imageGeneration.customPrompt || '')
+    const liveNegative = editTarget === 'main' ? draftNegative : (imageGeneration.customNegativePrompt || '')
+
+    const baseInput = {
+      chatId: activeChatId,
+      forceGeneration,
+      promptMode,
+      prompt: livePrompt,
+      negativePrompt: liveNegative,
+      promptPresetId,
+      outputTarget,
+      attachToMessageId,
+    }
+
+    // Optional preview-and-edit flow: ask the backend to resolve the outgoing
+    // prompt first, open the modal, then run generation with skipParse=true on
+    // confirm so the edited text is sent verbatim.
+    if (imageGeneration.previewPromptBeforeGenerate) {
+      setSceneGenerating(true)
+      try {
+        const previewRes = await imageGenApi.previewPrompt({
+          chatId: activeChatId,
+          promptMode,
+          prompt: livePrompt,
+          negativePrompt: liveNegative,
+          promptPresetId,
+          promptGenerationTimeoutSeconds: imageGeneration.promptGenerationTimeoutSeconds ?? DEFAULT_PROMPT_TIMEOUT_SECONDS,
+        })
+        setSceneGenerating(false)
+        openModal('imagePromptPreview', {
+          chatId: activeChatId,
+          initialPrompt: previewRes.prompt,
+          initialNegativePrompt: previewRes.negativePrompt || '',
+          initialPromptMode: promptMode,
+          initialPromptPresetId: promptPresetId,
+          promptGenerationTimeoutSeconds: imageGeneration.promptGenerationTimeoutSeconds,
+          onCancel: () => {},
+          onConfirm: (editedPrompt: string, editedNegative: string) => {
+            void runGenerationCall({
+              ...baseInput,
+              prompt: editedPrompt,
+              negativePrompt: editedNegative,
+              skipParse: true,
+            })
+          },
+        })
+        return
+      } catch (err: any) {
+        setSceneGenerating(false)
+        setError(err?.body?.error || err?.message || 'Prompt preview failed')
+        return
+      }
+    }
+
+    await runGenerationCall(baseInput)
   }
 
   const onPickRefs = () => refInputRef.current?.click()
@@ -633,22 +964,25 @@ export default function ImageGenPanel() {
     ...imageGenProfiles.map((p) => ({ value: p.id, label: p.name })),
   ], [imageGenProfiles])
 
-  const llmConnectionOptions = useMemo(() => [
-    { value: '', label: 'Use Council sidecar / select...' },
-    ...llmConnections.map((p) => ({ value: p.id, label: p.name })),
-  ], [llmConnections])
+  const llmConnectionOptions = useMemo(
+    () => llmConnections.map((p) => ({ value: p.id, label: p.name })),
+    [llmConnections],
+  )
 
-  const parserModelOptions = useMemo(() => {
-    const current = imageGeneration.promptParserModel || ''
-    const options = [{ value: '', label: 'Use connection default' }, ...parserModels.map((m) => ({ value: m.id, label: m.label }))]
-    if (current && !options.some((o) => o.value === current)) options.push({ value: current, label: current })
-    return options
-  }, [imageGeneration.promptParserModel, parserModels])
-
-  const promptPresetOptions = useMemo(() => [
+  const mainPresetOptions = useMemo(() => [
     { value: '', label: 'No saved prompt' },
-    ...promptPresets.map((p) => ({ value: p.id, label: p.name })),
-  ], [promptPresets])
+    ...mainPresets.map((p) => ({ value: p.id, label: p.name })),
+  ], [mainPresets])
+
+  const characterPresetOptions = useMemo(() => [
+    { value: '', label: 'No character preset' },
+    ...characterPresets.map((p) => ({ value: p.id, label: p.name })),
+  ], [characterPresets])
+
+  const personaPresetOptions = useMemo(() => [
+    { value: '', label: 'No persona preset' },
+    ...personaPresets.map((p) => ({ value: p.id, label: p.name })),
+  ], [personaPresets])
 
   // Resolve the model ID to a human-readable label
   const modelLabel = useMemo(() => {
@@ -698,13 +1032,14 @@ export default function ImageGenPanel() {
               />
             </FormField>
 
-            <FormField label="Output" hint="Choose whether the result becomes the chat background or is inserted as a chat image.">
+            <FormField label="Output" hint="Choose whether the result becomes the chat background, inserted as a new chat image, or attached to the latest existing message.">
               <Select
                 value={imageGeneration.outputTarget || 'background'}
                 onChange={(value) => updateTop({ outputTarget: value })}
                 options={[
                   { value: 'background', label: 'Set as background' },
                   { value: 'chat_attachment', label: 'Insert into chat' },
+                  { value: 'attach_to_message', label: 'Attach to last message' },
                   { value: 'preview', label: 'Preview only' },
                 ]}
               />
@@ -712,29 +1047,107 @@ export default function ImageGenPanel() {
 
             {(imageGeneration.promptMode === 'custom' || imageGeneration.promptMode === 'parsed_custom') && (
               <>
-                <FormField label="Saved Prompt">
+                <FormField
+                  label="Editing"
+                  hint="Switch which preset bucket the text fields below are editing. Main feeds the live prompt; Character/Persona define snippets that replace {{character_prompt}} / {{persona_prompt}} at generation time."
+                >
                   <Select
-                    value={imageGeneration.activePromptPresetId || ''}
-                    onChange={(value) => applyPromptPreset(value || null)}
-                    options={promptPresetOptions}
+                    value={editTarget}
+                    onChange={(value) => setEditTarget(value as 'main' | 'character' | 'persona')}
+                    options={[
+                      { value: 'main', label: 'Main preset' },
+                      { value: 'character', label: 'Character preset' },
+                      { value: 'persona', label: 'Persona preset' },
+                    ]}
                   />
                 </FormField>
 
-                <FormField label={imageGeneration.promptMode === 'parsed_custom' ? 'Parser Instructions' : 'Prompt'} hint={imageGeneration.promptMode === 'parsed_custom' ? 'Instructions for how the parser LLM should turn chat context into the final image prompt. This is not sent directly to the image provider.' : 'Sent directly to the image provider.'}>
-                  <TextArea
+                <FormField
+                  label={editTarget === 'main' ? 'Active Main Preset' : editTarget === 'character' ? 'Bound Character Preset' : 'Bound Persona Preset'}
+                  hint={
+                    editTarget === 'main'
+                      ? 'Pick a saved main preset to load it into the editor below. It also becomes the active prompt sent at generation time.'
+                      : editTarget === 'character'
+                        ? activeCharacterId
+                          ? 'Pick a character preset to load it into the editor and bind it to the current chat’s character.'
+                          : 'Open a chat to bind a preset to its character. Until then, picks won’t persist.'
+                        : activePersonaId
+                          ? 'Pick a persona preset to load it into the editor and bind it to the active persona.'
+                          : 'Select an active persona to bind a preset to it.'
+                  }
+                >
+                  <Select
+                    value={loadedPresetId || ''}
+                    onChange={(value) => pickPreset(value || null)}
+                    options={
+                      editTarget === 'main' ? mainPresetOptions : editTarget === 'character' ? characterPresetOptions : personaPresetOptions
+                    }
+                  />
+                </FormField>
+
+                <FormField
+                  label={
+                    editTarget === 'main'
+                      ? (imageGeneration.promptMode === 'parsed_custom' ? 'Parser Instructions' : 'Prompt')
+                      : editTarget === 'character' ? 'Character snippet' : 'Persona snippet'
+                  }
+                  hint={
+                    editTarget === 'main'
+                      ? (imageGeneration.promptMode === 'parsed_custom'
+                          ? 'Instructions for how the parser LLM should turn chat context into the final image prompt. This is not sent directly to the image provider.'
+                          : 'Sent directly to the image provider.')
+                      : editTarget === 'character'
+                        ? 'Text spliced in wherever {{character_prompt}} appears in the main preset.'
+                        : 'Text spliced in wherever {{persona_prompt}} appears in the main preset.'
+                  }
+                >
+                  <ExpandableTextarea
+                    className={styles.promptTextarea}
+                    value={draftPrompt}
+                    onChange={onDraftPromptChange}
+                    title={loadedPreset ? `Editing: ${loadedPreset.name}` : `${editTarget} prompt`}
+                    placeholder={
+                      editTarget === 'main'
+                        ? (imageGeneration.promptMode === 'parsed_custom'
+                            ? 'Example: Focus on the current pose, expressions, clothing, lighting, and room details. Use concise image-generation tags.'
+                            : 'Describe the image you want to generate...')
+                        : editTarget === 'character'
+                          ? '1girl, long red hair, leather jacket'
+                          : 'middle-aged man, glasses, beige coat'
+                    }
                     rows={5}
-                    value={imageGeneration.customPrompt || ''}
-                    onChange={(value) => updateTop({ customPrompt: value })}
-                    placeholder={imageGeneration.promptMode === 'parsed_custom' ? 'Example: Focus on the current pose, expressions, clothing, lighting, and room details. Use concise image-generation tags.' : 'Describe the image you want to generate...'}
+                    macros={availableMacros}
+                    onRefreshMacros={refreshMacros}
                   />
+                  {editTarget === 'main' && /\{\{\s*character_prompt\s*\}\}/i.test(draftPrompt) && (
+                    <div className={styles.editorTargetBanner}>
+                      <code>{'{{character_prompt}}'}</code> will be replaced with the bound character preset at generation time.
+                    </div>
+                  )}
+                  {editTarget === 'main' && /\{\{\s*persona_prompt\s*\}\}/i.test(draftPrompt) && (
+                    <div className={styles.editorTargetBanner}>
+                      <code>{'{{persona_prompt}}'}</code> will be replaced with the bound persona preset at generation time.
+                    </div>
+                  )}
                 </FormField>
 
-                <FormField label="Negative Prompt">
-                  <TextArea
-                    rows={3}
-                    value={imageGeneration.customNegativePrompt || ''}
-                    onChange={(value) => updateTop({ customNegativePrompt: value })}
+                <FormField
+                  label={editTarget === 'main' ? 'Negative Prompt' : `${editTarget === 'character' ? 'Character' : 'Persona'} negative snippet`}
+                  hint={
+                    editTarget === 'main'
+                      ? undefined
+                      : `Replaces {{${editTarget}_negative_prompt}} in the main preset’s negative prompt.`
+                  }
+                >
+                  <ExpandableTextarea
+                    className={styles.promptTextarea}
+                    value={draftNegative}
+                    onChange={onDraftNegativeChange}
+                    title={loadedPreset ? `Editing: ${loadedPreset.name} — Negative` : `${editTarget} negative prompt`}
                     placeholder="Optional negative prompt"
+                    rows={3}
+                    macros={availableMacros}
+                    onRefreshMacros={refreshMacros}
                   />
                 </FormField>
 
@@ -742,11 +1155,20 @@ export default function ImageGenPanel() {
                   <TextInput
                     value={presetName}
                     onChange={setPresetName}
-                    placeholder={activePromptPreset ? `Rename ${activePromptPreset.name}` : 'Preset name'}
+                    placeholder={loadedPreset ? `Rename ${loadedPreset.name}` : `New ${editTarget} preset name`}
                   />
-                  <Button variant="secondary" size="sm" onClick={savePromptPreset}>Save Prompt</Button>
-                  {activePromptPreset && <Button variant="danger" size="sm" onClick={deletePromptPreset}>Delete</Button>}
+                  <Button variant="secondary" size="sm" onClick={savePromptPreset}>
+                    {loadedPresetId ? 'Save Changes' : 'Save as New'}
+                  </Button>
+                  {loadedPresetId && <Button variant="danger" size="sm" onClick={deletePromptPreset}>Delete</Button>}
                 </div>
+                {loadedPreset && (
+                  <div className={styles.editorTargetBanner}>
+                    Editing <strong>{loadedPreset.name}</strong> ({editTarget})
+                    {editTarget === 'character' && activeCharacterId && ' · bound to active character'}
+                    {editTarget === 'persona' && activePersonaId && ' · bound to active persona'}
+                  </div>
+                )}
               </>
             )}
           </EditorSection>
@@ -754,18 +1176,37 @@ export default function ImageGenPanel() {
           {(imageGeneration.promptMode === 'scene' || imageGeneration.promptMode === 'parsed_custom') && (
             <EditorSection title="Prompt Parser" Icon={Settings2} defaultExpanded={imageGeneration.promptMode === 'parsed_custom'}>
               <FormField label="Parser Connection" hint="Overrides the Council sidecar for ImageGen scene/prompt parsing.">
-                <Select
+                <SearchableSelect
                   value={imageGeneration.promptParserConnectionId || ''}
                   onChange={(value) => updateTop({ promptParserConnectionId: value || null, promptParserModel: '' })}
                   options={llmConnectionOptions}
+                  placeholder="Use Council sidecar / select…"
+                  searchPlaceholder="Search connections…"
+                  emptyMessage={llmConnections.length === 0 ? 'No LLM connections configured' : 'No matching connections'}
+                  disabled={llmConnections.length === 0}
+                  ariaLabel="Parser Connection"
+                  portal
                 />
               </FormField>
 
               <FormField label="Parser Model">
-                <Select
+                <ModelCombobox
                   value={imageGeneration.promptParserModel || ''}
                   onChange={(value) => updateTop({ promptParserModel: value })}
-                  options={parserModelOptions}
+                  models={parserModels}
+                  modelLabels={parserModelLabels}
+                  loading={parserModelsLoading}
+                  onRefresh={loadParserModels}
+                  autoRefreshOnFocus
+                  refreshKey={imageGeneration.promptParserConnectionId || ''}
+                  placeholder="Use connection default"
+                  emptyMessage={
+                    imageGeneration.promptParserConnectionId
+                      ? 'No models returned. Refresh, or enter one manually.'
+                      : 'Pick a parser connection first.'
+                  }
+                  disabled={!imageGeneration.promptParserConnectionId}
+                  appearance="standard"
                 />
               </FormField>
 
@@ -1002,10 +1443,22 @@ export default function ImageGenPanel() {
             <ToggleRow checked={imageGeneration.autoGenerate !== false} onChange={(checked) => updateTop({ autoGenerate: checked })} label="Auto-Generate On Reply" />
             <ToggleRow checked={!!imageGeneration.forceGeneration} onChange={(checked) => updateTop({ forceGeneration: checked })} label="Ignore Scene Change Detection" />
             <ToggleRow
+              checked={!!imageGeneration.previewPromptBeforeGenerate}
+              onChange={(checked) => updateTop({ previewPromptBeforeGenerate: checked })}
+              label="Preview prompt before generating"
+              hint="When on, clicking Generate runs the parser and opens an editable preview of the outgoing prompt before sending it to the image provider."
+            />
+            <ToggleRow
               checked={!!imageGeneration.recycleGeneratedImages}
               onChange={(checked) => updateTop({ recycleGeneratedImages: checked })}
               label="Recycle Generated Images Into Context"
               hint="When off, ImageGen chat attachments stay visible in chat but are not re-sent to the LLM."
+            />
+            <ToggleRow
+              checked={imageGeneration.addToGallery !== false}
+              onChange={(checked) => updateTop({ addToGallery: checked })}
+              label="Add Generated Images to Character Gallery"
+              hint="When on, every generated image is also linked into the active chat's character gallery. Turn off to keep generations out of the gallery."
             />
             {imageGeneration.recycleGeneratedImages && (
               <FormField label="Generated Images To Re-Send" hint="Only the most recent generated images are included in multimodal context.">
@@ -1034,6 +1487,8 @@ export default function ImageGenPanel() {
               <input className={styles.slider} type="range" min={200} max={2000} step={100} value={imageGeneration.fadeTransitionMs || 800} onChange={(e) => updateTop({ fadeTransitionMs: Number(e.target.value) })} />
             </FormField>
           </EditorSection>
+
+          {currentJobId && <ImageGenProgressBar jobId={currentJobId} />}
 
           {previewSrc && <div className={styles.preview} onClick={() => setLightboxOpen(true)}><img src={previewSrc} alt="Generated preview" className={styles.previewImg} /></div>}
           {lastScene && <div className={styles.sceneInfo}><div><strong>Scene:</strong> {lastScene.environment}</div><div><strong>Time:</strong> {lastScene.time_of_day}</div><div><strong>Mood:</strong> {lastScene.mood}</div></div>}

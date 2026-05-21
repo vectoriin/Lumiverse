@@ -54,6 +54,7 @@ import { databankRoutes } from "./routes/databank.routes";
 import { globalAddonsRoutes } from "./routes/global-addons.routes";
 import { webSearchRoutes } from "./routes/web-search.routes";
 import { themeAssetsRoutes } from "./routes/theme-assets.routes";
+import { notificationSoundsRoutes } from "./routes/notification-sounds.routes";
 import { bootstrapRoutes } from "./routes/bootstrap.routes";
 import { wsHandler } from "./ws/handler";
 import { issueTicket } from "./ws/tickets";
@@ -137,6 +138,7 @@ app.use("/api/*", async (c, next) => {
     path.startsWith("/api/v1/world-books/import") ||
     path === "/api/v1/images" ||
     path === "/api/v1/theme-assets" ||
+    path === "/api/v1/notification-sounds/completion" ||
     path.endsWith("/expressions/upload-zip") ||
     path === "/api/v1/stt/transcribe" ||
     path === "/api/v1/chats/import" ||
@@ -385,6 +387,7 @@ app.route("/api/v1/openrouter", openrouterRoutes);
 app.route("/api/v1/files", filesRoutes);
 app.route("/api/v1/images", imagesRoutes);
 app.route("/api/v1/theme-assets", themeAssetsRoutes);
+app.route("/api/v1/notification-sounds", notificationSoundsRoutes);
 app.route("/api/v1/generate", generateRoutes);
 app.route("/api/v1/providers", providersRoutes);
 app.route("/api/v1/macros", macrosRoutes);

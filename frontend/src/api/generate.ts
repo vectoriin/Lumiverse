@@ -286,8 +286,8 @@ export const generateApi = {
     return post<QuietGenerateResponse>('/generate/quiet', request, LONG)
   },
 
-  summarize(request: QuietGenerateRequest) {
-    return post<QuietGenerateResponse>('/generate/summarize', request, LONG)
+  summarize(request: QuietGenerateRequest, options: RequestOptions = LONG) {
+    return post<QuietGenerateResponse>('/generate/summarize', request, options)
   },
 
   getSummarizationDefaults() {

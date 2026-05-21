@@ -9,6 +9,11 @@ import * as gallerySvc from "./character-gallery.service";
 import * as secretsSvc from "./secrets.service";
 import * as imageGenConnSvc from "./image-gen-connections.service";
 import { imageGenConnectionSecretKey } from "./image-gen-connections.service";
+import * as imageGenBindingsSvc from "./image-gen-preset-bindings.service";
+import { buildMacroEnvForChat } from "./chats.service";
+import { evaluate as evaluateMacros, registry as macroRegistry } from "../macros";
+import { eventBus } from "../ws/bus";
+import { EventType } from "../ws/events";
 import { getImageProvider, getImageProviderList } from "../image-gen/registry";
 import { getComfyUIObjectInfo } from "../image-gen/comfyui-discovery";
 import { normalizeComfyUIWorkflow } from "../image-gen/comfyui-import";
@@ -45,6 +50,8 @@ interface ImageGenSettings {
   recycleGeneratedImages: boolean;
   /** Maximum generated images to re-send when recycling is enabled. */
   recycledImageLimit: number;
+  /** When true, generated images are also linked into the active chat's character gallery. */
+  addToGallery?: boolean;
   backgroundOpacity: number;
   fadeTransitionMs: number;
   /** @deprecated Legacy global parameter bag. Provider parameters live on connection.default_parameters. */
@@ -84,6 +91,7 @@ const DEFAULT_IMAGE_SETTINGS: ImageGenSettings = {
   forceGeneration: false,
   recycleGeneratedImages: false,
   recycledImageLimit: 1,
+  addToGallery: true,
   backgroundOpacity: 0.35,
   fadeTransitionMs: 800,
   promptGenerationTimeoutSeconds: 60,
@@ -123,12 +131,20 @@ export interface ImageGenResult {
   imageId?: string;
   /** Public URL for the image (works without authentication) */
   imageUrl?: string;
-  /** Message created when outputTarget is chat_attachment. */
+  /** Message created (chat_attachment) or patched (attach_to_message) by this generation. */
   message?: Message;
+  /** Job id streamed alongside progress events so the frontend can correlate. */
+  jobId?: string;
 }
 
 export type ImageGenPromptMode = "scene" | "custom" | "parsed_custom";
-export type ImageGenOutputTarget = "background" | "chat_attachment" | "preview";
+export type ImageGenOutputTarget =
+  | "background"
+  | "chat_attachment"
+  | "preview"
+  | "attach_to_message";
+
+export type ImageGenPresetKind = "main" | "character" | "persona";
 
 export interface ImageGenPromptPreset {
   id: string;
@@ -139,6 +155,8 @@ export interface ImageGenPromptPreset {
   parserConnectionId?: string | null;
   parserModel?: string;
   parserParameters?: Record<string, any>;
+  /** Whether this preset is intended as a main scene preset or as a per-character snippet. Legacy entries default to "main". */
+  kind?: ImageGenPresetKind;
 }
 
 export interface GenerateImageOptions {
@@ -148,6 +166,12 @@ export interface GenerateImageOptions {
   negativePrompt?: string;
   promptPresetId?: string | null;
   outputTarget?: ImageGenOutputTarget;
+  /** Existing message to attach the generated image to (output target = attach_to_message). */
+  attachToMessageId?: string;
+  /** When true, the parser is skipped and `prompt`/`negativePrompt` are sent verbatim. Used after the preview-prompt modal. */
+  skipParse?: boolean;
+  /** Caller-supplied job id so the frontend can subscribe to progress events before the HTTP request returns. */
+  clientJobId?: string;
   promptGenerationTimeoutSeconds?: number;
   generationTimeoutSeconds?: number;
 }
@@ -236,10 +260,14 @@ export async function generateSceneBackground(
   }
   activeImageGenerations.set(registryKey, { controller, startedAt: Date.now() });
 
+  const jobId = opts?.clientJobId || crypto.randomUUID();
+
   try {
     const cacheKey = `${userId}:${chatId}`;
-    const promptInput = resolvePromptInput(settings, opts);
-    const promptMode = opts?.promptMode || settings.promptMode || "scene";
+    const promptInput = await resolvePromptInput(userId, chatId, settings, opts);
+    const promptMode = opts?.skipParse
+      ? "custom"
+      : opts?.promptMode || settings.promptMode || "scene";
     const outputTarget = opts?.outputTarget || settings.outputTarget || "background";
     const params = { ...connection.default_parameters };
     normalizeRandomSeed(params, !!provider.capabilities.parameters.seed);
@@ -327,8 +355,17 @@ export async function generateSceneBackground(
 
     let response: Awaited<ReturnType<typeof provider.generate>>;
     try {
-      response = await provider.generate(apiKey || "", connection.api_url || "", request);
+      response = await runProviderGeneration(provider, apiKey || "", connection.api_url || "", request, {
+        jobId,
+        chatId,
+        userId,
+      });
     } catch (err) {
+      eventBus.emit(
+        EventType.IMAGE_GEN_ERROR,
+        { assetId: jobId, chatId, message: err instanceof Error ? err.message : String(err) },
+        userId,
+      );
       throw resolveAbortReason(generationSignal.signal) ?? err;
     } finally {
       generationSignal.cleanup();
@@ -349,14 +386,20 @@ export async function generateSceneBackground(
         imageId = image.id;
         imageUrl = `/api/v1/image-gen/results/${image.id}`;
 
-        const chat = chatsSvc.getChat(userId, chatId);
-        if (chat?.character_id) {
-          try {
-            gallerySvc.addToGallery(userId, chat.character_id, image.id, "Generated image");
-          } catch {
-            // Gallery linkage is best-effort; the generated image itself was persisted.
-          }
-        }
+        const newAttachment = {
+          type: "image" as const,
+          image_id: image.id,
+          mime_type: image.mime_type,
+          original_filename: image.original_filename,
+          width: image.width ?? undefined,
+          height: image.height ?? undefined,
+        };
+        const imageGenMeta = {
+          provider: connection.provider,
+          prompt: promptResult.prompt,
+          negativePrompt: promptResult.negativePrompt,
+          mode: promptMode,
+        };
 
         if (outputTarget === "chat_attachment") {
           message = chatsSvc.createMessage(chatId, {
@@ -364,24 +407,42 @@ export async function generateSceneBackground(
             name: "ImageGen",
             content: "",
             extra: {
-              image_gen: {
-                provider: connection.provider,
-                prompt: promptResult.prompt,
-                negativePrompt: promptResult.negativePrompt,
-                mode: promptMode,
-              },
-              attachments: [
-                {
-                  type: "image",
-                  image_id: image.id,
-                  mime_type: image.mime_type,
-                  original_filename: image.original_filename,
-                  width: image.width ?? undefined,
-                  height: image.height ?? undefined,
-                },
-              ],
+              image_gen: imageGenMeta,
+              attachments: [newAttachment],
             },
           }, userId);
+        } else if (outputTarget === "attach_to_message") {
+          if (!opts?.attachToMessageId) {
+            throw new Error("attachToMessageId is required for the attach_to_message output target");
+          }
+          // Lighter path than updateMessage: 1 read + 1 update + 1 emit, no
+          // chat-memory cache invalidation, no second read-back.
+          const updated = chatsSvc.appendMessageAttachment(
+            userId,
+            opts.attachToMessageId,
+            newAttachment,
+            { image_gen: imageGenMeta },
+          );
+          if (!updated) {
+            throw new Error("Target message for image attachment was not found");
+          }
+          message = updated;
+        }
+
+        // Gallery linkage is best-effort and not on the response's critical
+        // path — defer to a microtask so the HTTP response (and the chat
+        // re-render that follows from MESSAGE_EDITED) lands sooner.
+        if (settings.addToGallery !== false) {
+          const characterId = chatsSvc.getChat(userId, chatId)?.character_id;
+          if (characterId) {
+            queueMicrotask(() => {
+              try {
+                gallerySvc.linkImageToGallery(userId, characterId, image.id, "Generated image");
+              } catch {
+                // Gallery linkage is best-effort; the image itself is already persisted.
+              }
+            });
+          }
         }
       } catch {
         // Persistence failure is non-fatal — the data URL is still returned
@@ -389,6 +450,9 @@ export async function generateSceneBackground(
     }
 
     if (promptResult.scene) sceneCacheSet(cacheKey, promptResult.scene);
+
+    eventBus.emit(EventType.IMAGE_GEN_COMPLETE, { assetId: jobId, chatId, imageId, imageUrl }, userId);
+
     return {
       generated: true,
       scene: promptResult.scene,
@@ -399,6 +463,7 @@ export async function generateSceneBackground(
       imageId,
       imageUrl,
       message,
+      jobId,
     };
   } finally {
     // Only clear the registry entry if it still points at our controller —
@@ -406,6 +471,114 @@ export async function generateSceneBackground(
     if (activeImageGenerations.get(registryKey)?.controller === controller) {
       activeImageGenerations.delete(registryKey);
     }
+  }
+}
+
+/**
+ * Runs a provider generation, preferring its streaming generator (Comfy/Swarm)
+ * so we can broadcast IMAGE_GEN_PROGRESS events as steps and previews arrive.
+ * Falls back to the plain `generate()` call for providers without streaming.
+ */
+async function runProviderGeneration(
+  provider: ReturnType<typeof getImageProvider>,
+  apiKey: string,
+  apiUrl: string,
+  request: ImageGenRequest,
+  ctx: { jobId: string; chatId: string; userId: string },
+): Promise<import("../image-gen/types").ImageGenResponse> {
+  if (!provider) throw new Error("Image provider not available");
+
+  // generateStream is optional on the ImageProvider interface; only Comfy/Swarm
+  // implement it today.
+  const stream = (provider as any).generateStream;
+  if (typeof stream === "function") {
+    const iter = stream.call(provider, apiKey, apiUrl, request) as AsyncGenerator<
+      { step?: number; totalSteps?: number; preview?: string; nodeId?: string },
+      import("../image-gen/types").ImageGenResponse,
+      unknown
+    >;
+    let lastStep = 0;
+    let lastTotal = 0;
+    while (true) {
+      const next = await iter.next();
+      if (next.done) {
+        return next.value;
+      }
+      const chunk = next.value;
+      if (typeof chunk.step === "number") lastStep = chunk.step;
+      if (typeof chunk.totalSteps === "number") lastTotal = chunk.totalSteps;
+      eventBus.emit(
+        EventType.IMAGE_GEN_PROGRESS,
+        {
+          assetId: ctx.jobId,
+          chatId: ctx.chatId,
+          step: typeof chunk.step === "number" ? chunk.step : lastStep,
+          totalSteps: typeof chunk.totalSteps === "number" ? chunk.totalSteps : lastTotal,
+          preview: chunk.preview,
+          nodeId: chunk.nodeId,
+        },
+        ctx.userId,
+      );
+    }
+  }
+
+  return provider.generate(apiKey, apiUrl, request);
+}
+
+/**
+ * Runs the prompt-resolution half of the pipeline (settings → preset → optional
+ * parser LLM call) without sending anything to the image provider. Used by the
+ * "Preview prompt before generating" flow so the user can edit the assembled
+ * prompt before committing to a generation.
+ */
+export async function previewImagePrompt(
+  userId: string,
+  chatId: string,
+  opts?: Omit<GenerateImageOptions, "outputTarget" | "attachToMessageId" | "skipParse" | "clientJobId" | "generationTimeoutSeconds" | "forceGeneration">,
+): Promise<{ prompt: string; negativePrompt?: string; scene?: SceneData; provider: string }> {
+  let settings = getImageGenSettings(userId);
+  await maybeAutoMigrate(userId, settings);
+  settings = getImageGenSettings(userId);
+
+  const connectionId = settings.activeImageGenConnectionId;
+  if (!connectionId) {
+    throw new Error("No image generation connection selected. Create one in Settings → Image Gen Connections.");
+  }
+  const connection = imageGenConnSvc.getConnection(userId, connectionId);
+  if (!connection) throw new Error("Image generation connection not found");
+
+  const params = { ...connection.default_parameters };
+  const promptInput = await resolvePromptInput(userId, chatId, settings, opts);
+  const promptMode = opts?.promptMode || settings.promptMode || "scene";
+  const promptTimeoutSecs = resolveTimeoutSeconds(opts?.promptGenerationTimeoutSeconds, settings.promptGenerationTimeoutSeconds ?? 60);
+
+  const controller = new AbortController();
+  const promptSignal = createPhaseTimeoutSignal(
+    controller.signal,
+    promptTimeoutSecs,
+    `Image prompt generation timed out after ${promptTimeoutSecs}s`,
+  );
+  try {
+    const promptResult = await resolveImagePrompt(
+      userId,
+      chatId,
+      settings,
+      promptMode,
+      promptInput,
+      params,
+      connection.provider,
+      promptSignal.signal,
+    );
+    return {
+      prompt: promptResult.prompt,
+      negativePrompt: promptResult.negativePrompt,
+      scene: promptResult.scene,
+      provider: connection.provider,
+    };
+  } catch (err) {
+    throw resolveAbortReason(promptSignal.signal) ?? err;
+  } finally {
+    promptSignal.cleanup();
   }
 }
 
@@ -542,19 +715,170 @@ function randomImageSeed(): number {
   return values[0] % range;
 }
 
-function resolvePromptInput(settings: ImageGenSettings, opts?: GenerateImageOptions): ImageGenPromptPreset {
-  const preset = (settings.promptPresets || []).find((p) => p.id === (opts?.promptPresetId || settings.activePromptPresetId));
-  const requestedMode = opts?.promptMode || preset?.mode || settings.promptMode || "custom";
+async function resolvePromptInput(
+  userId: string,
+  chatId: string,
+  settings: ImageGenSettings,
+  opts?: GenerateImageOptions,
+): Promise<ImageGenPromptPreset> {
+  const presets = settings.promptPresets || [];
+  const preset = presets.find((p) => p.id === (opts?.promptPresetId || settings.activePromptPresetId));
+  const requestedMode = opts?.skipParse
+    ? "custom"
+    : opts?.promptMode || preset?.mode || settings.promptMode || "custom";
+
+  let prompt = opts?.prompt ?? preset?.prompt ?? settings.customPrompt ?? "";
+  let negativePrompt = opts?.negativePrompt ?? preset?.negativePrompt ?? settings.customNegativePrompt ?? "";
+
+  // Skip character/persona splice when the caller passes a pre-resolved prompt
+  // (e.g. coming back from the preview modal). Standard macros still run below
+  // so {{user}}/{{char}} in the edited text are expanded.
+  if (!opts?.skipParse) {
+    const { prompt: expanded, negativePrompt: expandedNeg } = expandCharacterPromptMacro(
+      userId,
+      chatId,
+      presets,
+      prompt,
+      negativePrompt,
+    );
+    prompt = expanded;
+    negativePrompt = expandedNeg;
+  }
+
+  // Run the full macro engine last so the standard macro vocabulary —
+  // {{user}}, {{char}}, {{group}}, temporal/string helpers, etc. — works
+  // inside image-gen prompts (and inside any spliced character/persona text).
+  // Best-effort: failure here must not block generation.
+  if (prompt || negativePrompt) {
+    try {
+      const env = buildMacroEnvForChat(userId, chatId);
+      if (env) {
+        if (prompt) prompt = (await evaluateMacros(prompt, env, macroRegistry)).text;
+        if (negativePrompt) negativePrompt = (await evaluateMacros(negativePrompt, env, macroRegistry)).text;
+      }
+    } catch {
+      // Macros are a convenience; leave the raw text in place on failure.
+    }
+  }
+
   return {
     id: preset?.id || "inline",
     name: preset?.name || "Inline prompt",
     mode: requestedMode === "parsed_custom" ? "parsed_custom" : "custom",
-    prompt: opts?.prompt ?? preset?.prompt ?? settings.customPrompt ?? "",
-    negativePrompt: opts?.negativePrompt ?? preset?.negativePrompt ?? settings.customNegativePrompt ?? "",
+    prompt,
+    negativePrompt,
     parserConnectionId: preset?.parserConnectionId ?? settings.promptParserConnectionId ?? null,
     parserModel: preset?.parserModel ?? settings.promptParserModel ?? "",
     parserParameters: preset?.parserParameters ?? settings.promptParserParameters ?? {},
   };
+}
+
+/**
+ * Pure substitution helper — replaces {{character_prompt}} and
+ * {{character_negative_prompt}} placeholders with the bound character preset's
+ * text. Empty bound text removes the placeholder entirely. Exported for
+ * focused unit tests.
+ */
+export function substituteCharacterPromptMacro(
+  prompt: string,
+  negativePrompt: string,
+  characterPrompt: string,
+  characterNegativePrompt: string,
+): { prompt: string; negativePrompt: string } {
+  return {
+    prompt: prompt.replace(/\{\{\s*character_prompt\s*\}\}/gi, characterPrompt),
+    negativePrompt: negativePrompt.replace(/\{\{\s*character_negative_prompt\s*\}\}/gi, characterNegativePrompt),
+  };
+}
+
+/**
+ * Pure substitution helper for the persona macro — symmetric counterpart to
+ * substituteCharacterPromptMacro. Exported for unit tests.
+ */
+export function substitutePersonaPromptMacro(
+  prompt: string,
+  negativePrompt: string,
+  personaPrompt: string,
+  personaNegativePrompt: string,
+): { prompt: string; negativePrompt: string } {
+  return {
+    prompt: prompt.replace(/\{\{\s*persona_prompt\s*\}\}/gi, personaPrompt),
+    negativePrompt: negativePrompt.replace(/\{\{\s*persona_negative_prompt\s*\}\}/gi, personaNegativePrompt),
+  };
+}
+
+/**
+ * Looks up the active persona for a chat. Prefers the persona referenced by
+ * the most recent user message's `extra.persona_id`, then falls back to the
+ * user's default persona. Returns null if neither is available.
+ */
+function resolveActivePersonaId(userId: string, chatId: string): string | null {
+  const messages = chatsSvc.getMessages(userId, chatId);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    const pid = m?.is_user && (m.extra as any)?.persona_id;
+    if (typeof pid === "string" && pid) return pid;
+  }
+  const def = personasSvc.getDefaultPersona(userId);
+  return def?.id ?? null;
+}
+
+/**
+ * Resolves bound character and persona presets for the active chat context
+ * and threads them through `{{character_prompt}}` / `{{persona_prompt}}`
+ * placeholders in the main preset text. The two are independent — having one
+ * binding does not affect the other.
+ */
+function expandCharacterPromptMacro(
+  userId: string,
+  chatId: string,
+  presets: ImageGenPromptPreset[],
+  prompt: string,
+  negativePrompt: string,
+): { prompt: string; negativePrompt: string } {
+  const hasCharMacro = /\{\{\s*character_prompt\s*\}\}/i.test(prompt)
+    || /\{\{\s*character_negative_prompt\s*\}\}/i.test(negativePrompt);
+  const hasPersonaMacro = /\{\{\s*persona_prompt\s*\}\}/i.test(prompt)
+    || /\{\{\s*persona_negative_prompt\s*\}\}/i.test(negativePrompt);
+  if (!hasCharMacro && !hasPersonaMacro) return { prompt, negativePrompt };
+
+  let out = { prompt, negativePrompt };
+
+  if (hasCharMacro) {
+    const chat = chatsSvc.getChat(userId, chatId);
+    let charPrompt = "";
+    let charNegative = "";
+    if (chat?.character_id) {
+      const binding = imageGenBindingsSvc.getCharacterBinding(userId, chat.character_id);
+      if (binding) {
+        const bound = presets.find((p) => p.id === binding.preset_id && p.kind === "character");
+        if (bound) {
+          charPrompt = bound.prompt || "";
+          charNegative = bound.negativePrompt || "";
+        }
+      }
+    }
+    out = substituteCharacterPromptMacro(out.prompt, out.negativePrompt, charPrompt, charNegative);
+  }
+
+  if (hasPersonaMacro) {
+    const personaId = resolveActivePersonaId(userId, chatId);
+    let personaPrompt = "";
+    let personaNegative = "";
+    if (personaId) {
+      const binding = imageGenBindingsSvc.getPersonaBinding(userId, personaId);
+      if (binding) {
+        const bound = presets.find((p) => p.id === binding.preset_id && p.kind === "persona");
+        if (bound) {
+          personaPrompt = bound.prompt || "";
+          personaNegative = bound.negativePrompt || "";
+        }
+      }
+    }
+    out = substitutePersonaPromptMacro(out.prompt, out.negativePrompt, personaPrompt, personaNegative);
+  }
+
+  return out;
 }
 
 async function resolveImagePrompt(

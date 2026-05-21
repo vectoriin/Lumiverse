@@ -110,6 +110,7 @@ const DATA_KEYS: ReadonlySet<string> = new Set([
   'chatHeadsDirection',
   'chatHeadsOpacity',
   'chatHeadsCompletionSoundEnabled',
+  'chatHeadsCustomCompletionSound',
   'spindleSettings',
   'voiceSettings',
 ])
@@ -324,6 +325,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
   chatHeadsDirection: 'column' as const,
   chatHeadsOpacity: 1,
   chatHeadsCompletionSoundEnabled: true,
+  chatHeadsCustomCompletionSound: null,
   customCSS: { css: '', enabled: false, revision: 0, bundleId: null },
   componentOverrides: {},
   spindleSettings: {

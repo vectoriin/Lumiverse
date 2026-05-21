@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { RefreshCw, Loader } from 'lucide-react'
 import { FormField, TextInput, Select, Button } from '@/components/shared/FormComponents'
+import ModelCombobox from '../connection-manager/ModelCombobox'
 import { Toggle } from '@/components/shared/Toggle'
 import { imageGenConnectionsApi } from '@/api/image-gen-connections'
 import type {
@@ -40,6 +40,14 @@ export default function ImageGenConnectionForm({ providers, profile, onSave, onC
     if (models.length > 0) return models
     return capabilities?.staticModels || []
   }, [models, capabilities?.staticModels])
+
+  const modelIds = useMemo(() => modelOptions.map((m) => m.id), [modelOptions])
+  const modelLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    for (const m of modelOptions) labels[m.id] = m.label
+    return labels
+  }, [modelOptions])
+  const isDynamicModelList = capabilities?.modelListStyle !== 'static'
 
   const fetchModels = useCallback(async () => {
     setModelsLoading(true)
@@ -201,35 +209,20 @@ export default function ImageGenConnectionForm({ providers, profile, onSave, onC
         />
       </FormField>
 
-      <FormField label="Model" hint={capabilities?.modelListStyle !== 'static' ? 'Refresh uses the current form values, even before the connection is saved.' : undefined}>
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <Select
-            value={model}
-            onChange={setModel}
-            options={[
-              { value: '', label: 'Select model...' },
-              ...modelOptions.map((m) => ({ value: m.id, label: m.label })),
-            ]}
-          />
-          {capabilities?.modelListStyle !== 'static' && (
-            <button
-              type="button"
-              onClick={fetchModels}
-              disabled={modelsLoading}
-              title="Refresh models"
-              style={{
-                padding: 6,
-                border: 'none',
-                background: 'transparent',
-                cursor: modelsLoading ? 'progress' : 'pointer',
-                color: 'var(--lumiverse-text-muted)',
-                opacity: modelsLoading ? 0.7 : 1,
-              }}
-            >
-              {modelsLoading ? <Loader size={14} /> : <RefreshCw size={14} />}
-            </button>
-          )}
-        </div>
+      <FormField label="Model" hint={isDynamicModelList ? 'Refresh uses the current form values, even before the connection is saved.' : undefined}>
+        <ModelCombobox
+          value={model}
+          onChange={setModel}
+          models={modelIds}
+          modelLabels={modelLabels}
+          loading={modelsLoading}
+          onRefresh={isDynamicModelList ? fetchModels : undefined}
+          autoRefreshOnFocus={isDynamicModelList}
+          refreshKey={`${provider}:${apiUrl}`}
+          placeholder="Select model..."
+          emptyMessage={isDynamicModelList ? 'No models found. Refresh, or enter one manually.' : 'No models for this provider.'}
+          appearance="standard"
+        />
       </FormField>
 
       <FormField label="">

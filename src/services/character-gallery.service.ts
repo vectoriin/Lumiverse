@@ -56,6 +56,26 @@ export function addToGallery(
   return getGalleryItem(userId, id)!;
 }
 
+/**
+ * Lightweight insert used by background flows (image-gen auto-link) that do
+ * not need the resulting row read back. Saves a JOIN read on the hot path.
+ */
+export function linkImageToGallery(
+  userId: string,
+  characterId: string,
+  imageId: string,
+  caption?: string
+): void {
+  const id = crypto.randomUUID();
+  const now = Math.floor(Date.now() / 1000);
+  getDb()
+    .query(
+      `INSERT INTO character_gallery (id, user_id, character_id, image_id, caption, sort_order, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(id, userId, characterId, imageId, caption ?? "", 0, now);
+}
+
 export async function uploadToGallery(
   userId: string,
   characterId: string,

@@ -169,4 +169,8 @@ export const messagesApi = {
       { message_ids: messageIds }
     )
   },
+
+  removeAttachment(chatId: string, messageId: string, imageId: string) {
+    return del<Message>(`/chats/${chatId}/messages/${messageId}/attachments/${imageId}`)
+  },
 }

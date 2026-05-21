@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Spinner } from '@/components/shared/Spinner'
 
 interface LazyImageProps {
   src?: string | null
@@ -64,10 +64,9 @@ export default function LazyImage({
             justifyContent: 'center',
             color: 'var(--lumiverse-primary, #9370db)',
             opacity: 0.6,
-            animation: 'spin 1s linear infinite',
           }}
         >
-          <Loader2 size={spinnerSize} strokeWidth={1.5} />
+          <Spinner size={spinnerSize} />
         </div>
       )}
       <img

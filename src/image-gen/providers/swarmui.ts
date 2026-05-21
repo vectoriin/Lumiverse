@@ -389,7 +389,10 @@ export class SwarmUIImageProvider implements ImageProvider {
   }
 
   async listModels(apiKey: string, apiUrl: string): Promise<Array<{ id: string; label: string }>> {
-    return this.fetchModelList(apiKey, apiUrl, { path: "", depth: 2, subtype: "Stable-Diffusion" })
+    // depth=10 is generous enough to cover nested layouts like the HuggingFace
+    // Anima upload (`split_files/diffusion_models/anima-base-v10.safetensors`)
+    // without scanning unbounded user libraries.
+    return this.fetchModelList(apiKey, apiUrl, { path: "", depth: 10, subtype: "Stable-Diffusion" })
   }
 
   async listModelsBySubtype(
@@ -399,10 +402,10 @@ export class SwarmUIImageProvider implements ImageProvider {
   ): Promise<Array<{ id: string; label: string }>> {
     switch (subtype) {
       case "vae":
-        return this.fetchModelList(apiKey, apiUrl, { path: "", depth: 2, subtype: "VAE" })
+        return this.fetchModelList(apiKey, apiUrl, { path: "", depth: 10, subtype: "VAE" })
       case "text_encoders":
         // Text encoders live in the text_encoders/ folder regardless of base model subtype
-        return this.fetchModelList(apiKey, apiUrl, { path: "text_encoders", depth: 1, subtype: "" })
+        return this.fetchModelList(apiKey, apiUrl, { path: "text_encoders", depth: 10, subtype: "" })
       default:
         return []
     }

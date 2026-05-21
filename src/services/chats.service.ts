@@ -1235,6 +1235,81 @@ export function createMessage(chatId: string, input: CreateMessageInput, userId:
 }
 
 /**
+ * Lightweight attachment append for flows like image-gen "attach to last
+ * message". Does one read + one update + one MESSAGE_EDITED emit, skipping the
+ * extra read-back, chunk rebuild gate, and chat-memory cache invalidation that
+ * updateMessage performs. Returns the synthesized updated message so callers
+ * can include it in their response payload.
+ */
+export function appendMessageAttachment(
+  userId: string,
+  messageId: string,
+  attachment: Record<string, any>,
+  extraMeta?: Record<string, any>,
+): Message | null {
+  const existing = getMessage(userId, messageId);
+  if (!existing) return null;
+
+  const existingExtra: Record<string, any> = existing.extra && typeof existing.extra === "object"
+    ? existing.extra as Record<string, any>
+    : {};
+  const existingAttachments = Array.isArray(existingExtra.attachments) ? existingExtra.attachments : [];
+
+  const nextExtra = {
+    ...existingExtra,
+    ...(extraMeta || {}),
+    attachments: [...existingAttachments, attachment],
+  };
+  const normalizedExtra = normalizeStoredMessageExtra(nextExtra, existing.swipes.length, existing.swipe_id);
+
+  getDb()
+    .query("UPDATE messages SET extra = ? WHERE id = ? AND chat_id = ?")
+    .run(JSON.stringify(normalizedExtra), messageId, existing.chat_id);
+
+  const updated: Message = { ...existing, extra: normalizedExtra };
+  eventBus.emit(EventType.MESSAGE_EDITED, { chatId: updated.chat_id, message: updated }, userId);
+  return updated;
+}
+
+/**
+ * Removes a single attachment (by image_id) from a message's extra.attachments
+ * array. Returns the updated Message if the attachment was found and removed,
+ * null if the message doesn't exist, or the unchanged Message if the
+ * attachment wasn't present. Emits MESSAGE_EDITED so chat clients re-render.
+ */
+export function removeMessageAttachment(
+  userId: string,
+  messageId: string,
+  imageId: string,
+): Message | null {
+  const existing = getMessage(userId, messageId);
+  if (!existing) return null;
+
+  const existingExtra: Record<string, any> = existing.extra && typeof existing.extra === "object"
+    ? existing.extra as Record<string, any>
+    : {};
+  const existingAttachments = Array.isArray(existingExtra.attachments) ? existingExtra.attachments : [];
+  const nextAttachments = existingAttachments.filter(
+    (a: any) => a && typeof a === "object" && a.image_id !== imageId,
+  );
+  if (nextAttachments.length === existingAttachments.length) {
+    // Nothing to remove — caller asked for an image_id this message doesn't have.
+    return existing;
+  }
+
+  const nextExtra = { ...existingExtra, attachments: nextAttachments };
+  const normalizedExtra = normalizeStoredMessageExtra(nextExtra, existing.swipes.length, existing.swipe_id);
+
+  getDb()
+    .query("UPDATE messages SET extra = ? WHERE id = ? AND chat_id = ?")
+    .run(JSON.stringify(normalizedExtra), messageId, existing.chat_id);
+
+  const updated: Message = { ...existing, extra: normalizedExtra };
+  eventBus.emit(EventType.MESSAGE_EDITED, { chatId: updated.chat_id, message: updated }, userId);
+  return updated;
+}
+
+/**
  * Lightweight extra-only update that skips chunk rebuilds, cache invalidation,
  * and MESSAGE_EDITED events. Use only for housekeeping (clearing stale fields)
  * where a full updateMessage would trigger expensive background work.

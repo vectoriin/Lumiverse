@@ -407,6 +407,12 @@ export interface SettingsSlice {
   chatHeadsDirection: 'column' | 'row'
   chatHeadsOpacity: number
   chatHeadsCompletionSoundEnabled: boolean
+  chatHeadsCustomCompletionSound: {
+    filename: string
+    mimeType: string
+    byteSize: number
+    uploadedAt: number
+  } | null
   customCSS: CustomCSSSettings
   componentOverrides: Record<string, import('@/lib/componentOverrides').ComponentOverride>
   spindleSettings: SpindleSettings
@@ -612,8 +618,10 @@ export interface ImageGenSettings {
   promptParserConnectionId?: string | null
   promptParserModel?: string
   promptParserParameters?: Record<string, any>
-  outputTarget?: 'background' | 'chat_attachment' | 'preview'
+  outputTarget?: 'background' | 'chat_attachment' | 'preview' | 'attach_to_message'
   parameters?: Record<string, any>
+  /** When true, the resolved outgoing prompt is shown in an editable modal before generation runs. */
+  previewPromptBeforeGenerate?: boolean
   /** Maximum seconds for ImageGen scene/custom prompt parsing. 0 disables the timeout. */
   promptGenerationTimeoutSeconds?: number
   /** Maximum seconds for the image provider generation phase. 0 disables the timeout. */
@@ -623,6 +631,8 @@ export interface ImageGenSettings {
   forceGeneration: boolean
   recycleGeneratedImages: boolean
   recycledImageLimit: number
+  /** When true, generated images are linked into the active chat's character gallery. */
+  addToGallery?: boolean
   backgroundOpacity: number
   fadeTransitionMs: number
   /** @deprecated Legacy per-provider blocks — kept for auto-migration */
@@ -631,6 +641,8 @@ export interface ImageGenSettings {
   nanogpt?: Record<string, any>
   novelai?: Record<string, any>
 }
+
+export type ImageGenPresetKind = 'main' | 'character' | 'persona'
 
 export interface ImageGenPromptPreset {
   id: string
@@ -641,6 +653,8 @@ export interface ImageGenPromptPreset {
   parserConnectionId?: string | null
   parserModel?: string
   parserParameters?: Record<string, any>
+  /** Whether the preset is intended as a main scene preset or a per-character snippet. Legacy entries are treated as 'main'. */
+  kind?: ImageGenPresetKind
 }
 
 // ---- Spindle Slice ----
