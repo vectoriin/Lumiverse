@@ -13,6 +13,8 @@ import { connectionsApi } from '@/api/connections'
 import { embeddingsApi } from '@/api/embeddings'
 import { imagesApi } from '@/api/images'
 import { settingsApi } from '@/api/settings'
+import { notificationSoundsApi } from '@/api/notification-sounds'
+import { unlockNotificationAudio } from '@/lib/notificationAudio'
 import { webSearchApi, type WebSearchSettingsInput, type WebSearchTestResponse } from '@/api/web-search'
 import type { DrawerSettings, GuidedGeneration, QuickReplySet } from '@/types/store'
 import type { EmbeddingConfig, ChatMemorySettings } from '@/types/api'
@@ -164,7 +166,9 @@ function DisplaySettings() {
   const chatHeadsDirection = useStore((s) => s.chatHeadsDirection)
   const chatHeadsOpacity = useStore((s) => s.chatHeadsOpacity)
   const chatHeadsCompletionSoundEnabled = useStore((s) => s.chatHeadsCompletionSoundEnabled)
+  const chatHeadsCustomCompletionSound = useStore((s) => s.chatHeadsCustomCompletionSound)
   const setSetting = useStore((s) => s.setSetting)
+  const addToast = useStore((s) => s.addToast)
 
   const updateDrawer = (patch: Partial<DrawerSettings>) => {
     setSetting('drawerSettings', { ...drawerSettings, ...patch })
@@ -359,6 +363,14 @@ function DisplaySettings() {
         hint="Play a ding when a background chat head finishes generating"
       />
 
+      <CompletionSoundUploader
+        disabled={!chatHeadsCompletionSoundEnabled}
+        current={chatHeadsCustomCompletionSound}
+        onChange={(meta) => setSetting('chatHeadsCustomCompletionSound', meta)}
+        onError={(message) => addToast({ type: 'error', message })}
+        onSuccess={(message) => addToast({ type: 'success', message })}
+      />
+
       {chatHeadsEnabled && (
         <>
           <div className={styles.field}>
@@ -447,6 +459,142 @@ function DisplaySettings() {
         />
       </div>
 
+    </div>
+  )
+}
+
+interface CompletionSoundUploaderProps {
+  disabled: boolean
+  current: {
+    filename: string
+    mimeType: string
+    byteSize: number
+    uploadedAt: number
+  } | null
+  onChange: (meta: CompletionSoundUploaderProps['current']) => void
+  onError: (message: string) => void
+  onSuccess: (message: string) => void
+}
+
+const MAX_COMPLETION_SOUND_BYTES = 2 * 1024 * 1024
+
+function CompletionSoundUploader({ disabled, current, onChange, onError, onSuccess }: CompletionSoundUploaderProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+
+  const handleFile = async (file: File) => {
+    if (file.size > MAX_COMPLETION_SOUND_BYTES) {
+      onError('Audio file must be 2MB or smaller')
+      return
+    }
+    setUploading(true)
+    try {
+      const meta = await notificationSoundsApi.uploadCompletion(file)
+      onChange({
+        filename: meta.filename,
+        mimeType: meta.mimeType,
+        byteSize: meta.byteSize,
+        uploadedAt: meta.uploadedAt,
+      })
+      onSuccess('Custom completion sound saved')
+    } catch (err: any) {
+      onError(err?.body?.error || err?.message || 'Failed to upload sound')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  const handleRemove = async () => {
+    setRemoving(true)
+    try {
+      await notificationSoundsApi.deleteCompletion()
+      onChange(null)
+    } catch (err: any) {
+      // 404 just means there was no file server-side; treat as success
+      if (err?.status === 404) {
+        onChange(null)
+      } else {
+        onError(err?.body?.error || err?.message || 'Failed to remove sound')
+        return
+      }
+    } finally {
+      setRemoving(false)
+    }
+    onSuccess('Reverted to default sound')
+  }
+
+  const handlePreview = async () => {
+    if (!current) return
+    setPreviewing(true)
+    try {
+      const unlocked = await unlockNotificationAudio()
+      if (!unlocked) {
+        onError('Browser blocked audio playback — interact with the page first')
+        return
+      }
+      const url = notificationSoundsApi.completionUrl(current.uploadedAt)
+      const audio = new Audio(url)
+      audio.volume = 0.5
+      await audio.play().catch((err) => {
+        onError(err?.message || 'Failed to play sound')
+      })
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  return (
+    <div className={styles.field} style={{ opacity: disabled ? 0.5 : 1 }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg,audio/aac,audio/mp4,audio/x-m4a,.mp3,.wav,.ogg,.aac,.m4a"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) void handleFile(file)
+        }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={disabled || uploading}
+          loading={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {current ? 'Replace custom sound' : 'Upload custom sound'}
+        </Button>
+        {current && (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || previewing}
+              onClick={handlePreview}
+            >
+              Preview
+            </Button>
+            <Button
+              size="sm"
+              variant="danger-ghost"
+              disabled={disabled || removing}
+              loading={removing}
+              onClick={handleRemove}
+            >
+              Use default
+            </Button>
+          </>
+        )}
+      </div>
+      <p className={styles.helperText} style={{ marginTop: 6 }}>
+        {current
+          ? `Using ${current.filename} (${(current.byteSize / 1024).toFixed(1)} KB, ${current.mimeType})`
+          : 'Upload an MP3, WAV, OGG, AAC or M4A file (max 2MB) to replace the default ding.'}
+      </p>
     </div>
   )
 }
