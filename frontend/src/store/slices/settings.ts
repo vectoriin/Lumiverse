@@ -78,6 +78,7 @@ const DATA_KEYS: ReadonlySet<string> = new Set([
   // World info activation settings (budget, scan depth, recursion)
   'worldInfoSettings',
   'worldBookEntryViewPrefs',
+  'worldBookListSortDir',
   // Image generation settings
   'imageGeneration',
   // Summarization settings
@@ -311,6 +312,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     minPriority: 0,
   },
   worldBookEntryViewPrefs: {},
+  worldBookListSortDir: 'asc',
   promptBias: '',
   guidedGenerations: [],
   quickReplySets: [],

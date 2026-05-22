@@ -32,6 +32,7 @@ const TAILSCALE_TIMEOUT_MS = 2000;
 const SUGGESTIONS_CACHE_TTL_MS = 60_000;
 
 let networkInterfacesWarned = false;
+let malformedAddressWarned = false;
 let suggestionsCache: { value: TrustedHostsSuggestions; expiresAt: number } | null = null;
 let suggestionsInFlight: Promise<TrustedHostsSuggestions> | null = null;
 
@@ -47,6 +48,28 @@ function safeNetworkInterfaces(): ReturnType<typeof networkInterfaces> {
     }
     return {};
   }
+}
+
+// Bun 1.4.0 canary returns the placeholder `<addr family=N>` instead of the
+// real IPv6 address from os.networkInterfaces(). Reject anything that isn't a
+// syntactically plausible IP literal so we don't surface garbage in the
+// trusted-origins log or save it as an allowed host.
+const IPV4_LITERAL = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+const IPV6_LITERAL = /^[0-9a-f:.]+(?:%[a-z0-9._-]+)?$/i;
+
+function isPlausibleIpLiteral(address: unknown, family: "IPv4" | "IPv6"): address is string {
+  if (typeof address !== "string" || address.length === 0) return false;
+  if (family === "IPv4") return IPV4_LITERAL.test(address);
+  return IPV6_LITERAL.test(address) && address.includes(":");
+}
+
+function rejectMalformedAddress(address: unknown, family: "IPv4" | "IPv6"): void {
+  if (malformedAddressWarned) return;
+  malformedAddressWarned = true;
+  console.warn(
+    `[trusted-hosts] Ignoring malformed ${family} address from os.networkInterfaces(): ${String(address)}. ` +
+      `This is likely a Bun runtime bug — try downgrading to a stable release if ${family} LAN entries are expected.`,
+  );
 }
 
 export class InvalidTrustedHostError extends Error {
@@ -194,8 +217,16 @@ function baselineEntries(): TrustedHostEntry[] {
     for (const addr of iface) {
       if (addr.internal) continue;
       if (addr.family === "IPv4") {
+        if (!isPlausibleIpLiteral(addr.address, "IPv4")) {
+          rejectMalformedAddress(addr.address, "IPv4");
+          continue;
+        }
         add(`${addr.address}:${env.port}`, "lan-ip");
       } else if (addr.family === "IPv6") {
+        if (!isPlausibleIpLiteral(addr.address, "IPv6")) {
+          rejectMalformedAddress(addr.address, "IPv6");
+          continue;
+        }
         const clean = addr.address.split("%")[0];
         add(`[${clean}]:${env.port}`, "lan-ip");
       }
@@ -398,11 +429,19 @@ async function buildHostnameSuggestions(baseline?: TrustedHostEntry[]): Promise<
     for (const addr of iface) {
       if (addr.internal) continue;
       if (addr.family === "IPv4") {
+        if (!isPlausibleIpLiteral(addr.address, "IPv4")) {
+          rejectMalformedAddress(addr.address, "IPv4");
+          continue;
+        }
         if (!seenIps.has(addr.address)) {
           seenIps.add(addr.address);
           ips.push(addr.address);
         }
       } else if (addr.family === "IPv6") {
+        if (!isPlausibleIpLiteral(addr.address, "IPv6")) {
+          rejectMalformedAddress(addr.address, "IPv6");
+          continue;
+        }
         const ip = `[${addr.address.split("%")[0]}]`;
         if (!seenIps.has(ip)) {
           seenIps.add(ip);

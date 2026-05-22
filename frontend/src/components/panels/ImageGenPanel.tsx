@@ -9,6 +9,7 @@ import { connectionsApi } from '@/api/connections'
 import { Toggle } from '@/components/shared/Toggle'
 import { Button, FormField, Select, TextInput, EditorSection, TextArea } from '@/components/shared/FormComponents'
 import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
+import { LabeledRangeSlider } from '@/components/shared/RangeSlider'
 import ModelCombobox from './connection-manager/ModelCombobox'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import { getMacroCatalog } from '@/api/macros'
@@ -198,19 +199,20 @@ function ParamField({
     case 'integer':
       if (schema.min !== undefined && schema.max !== undefined) {
         const numValue = value ?? schema.default ?? schema.min
-        const formatted = schema.type === 'integer' ? numValue : Number(numValue).toFixed(schema.step && schema.step < 1 ? 2 : 1)
+        const step = schema.step ?? (schema.type === 'integer' ? 1 : 0.1)
+        const isInt = schema.type === 'integer'
         return (
-          <FormField label={`${displayName} (${formatted})`} hint={schema.description}>
-            <input
-              className={styles.slider}
-              type="range"
-              min={schema.min}
-              max={schema.max}
-              step={schema.step ?? (schema.type === 'integer' ? 1 : 0.1)}
-              value={numValue}
-              onChange={(e) => onChange(paramKey, schema.type === 'integer' ? parseInt(e.target.value) : parseFloat(e.target.value))}
-            />
-          </FormField>
+          <LabeledRangeSlider
+            label={displayName}
+            hint={schema.description}
+            min={schema.min}
+            max={schema.max}
+            step={step}
+            integer={isInt}
+            value={numValue}
+            formatValue={(v) => isInt ? String(v) : v.toFixed(step < 1 ? 2 : 1)}
+            onCommit={(v) => onChange(paramKey, isInt ? Math.round(v) : v)}
+          />
         )
       }
       if (schema.type === 'integer' && paramKey.toLowerCase() === 'seed') {
@@ -1210,29 +1212,25 @@ export default function ImageGenPanel() {
                 />
               </FormField>
 
-              <FormField label={`Parser Temperature (${imageGeneration.promptParserParameters?.temperature ?? 0.4})`}>
-                <input
-                  className={styles.slider}
-                  type="range"
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  value={imageGeneration.promptParserParameters?.temperature ?? 0.4}
-                  onChange={(e) => updateTop({ promptParserParameters: { ...(imageGeneration.promptParserParameters || {}), temperature: Number(e.target.value) } })}
-                />
-              </FormField>
+              <LabeledRangeSlider
+                label="Parser Temperature"
+                min={0}
+                max={2}
+                step={0.05}
+                value={imageGeneration.promptParserParameters?.temperature ?? 0.4}
+                formatValue={(v) => v.toFixed(2)}
+                onCommit={(v) => updateTop({ promptParserParameters: { ...(imageGeneration.promptParserParameters || {}), temperature: v } })}
+              />
 
-              <FormField label={`Parser Top P (${imageGeneration.promptParserParameters?.top_p ?? 1})`}>
-                <input
-                  className={styles.slider}
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={imageGeneration.promptParserParameters?.top_p ?? 1}
-                  onChange={(e) => updateTop({ promptParserParameters: { ...(imageGeneration.promptParserParameters || {}), top_p: Number(e.target.value) } })}
-                />
-              </FormField>
+              <LabeledRangeSlider
+                label="Parser Top P"
+                min={0}
+                max={1}
+                step={0.05}
+                value={imageGeneration.promptParserParameters?.top_p ?? 1}
+                formatValue={(v) => v.toFixed(2)}
+                onCommit={(v) => updateTop({ promptParserParameters: { ...(imageGeneration.promptParserParameters || {}), top_p: v } })}
+              />
 
               <FormField label="Parser Max Tokens">
                 <TextInput
@@ -1369,15 +1367,33 @@ export default function ImageGenPanel() {
                         label="Include Persona Avatar"
                         hint="Send persona avatar as director reference"
                       />
-                      <FormField label={`Reference Strength (${(genParams.referenceStrength ?? 0.5).toFixed(2)})`}>
-                        <input className={styles.slider} type="range" min={0} max={1} step={0.05} value={genParams.referenceStrength ?? 0.5} onChange={(e) => updateParam('referenceStrength', Number(e.target.value))} />
-                      </FormField>
-                      <FormField label={`Information Extracted (${(genParams.referenceInfoExtracted ?? 1).toFixed(2)})`}>
-                        <input className={styles.slider} type="range" min={0} max={1} step={0.05} value={genParams.referenceInfoExtracted ?? 1} onChange={(e) => updateParam('referenceInfoExtracted', Number(e.target.value))} />
-                      </FormField>
-                      <FormField label={`Reference Fidelity (${(genParams.referenceFidelity ?? 1).toFixed(2)})`}>
-                        <input className={styles.slider} type="range" min={0} max={1} step={0.05} value={genParams.referenceFidelity ?? 1} onChange={(e) => updateParam('referenceFidelity', Number(e.target.value))} />
-                      </FormField>
+                      <LabeledRangeSlider
+                        label="Reference Strength"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={genParams.referenceStrength ?? 0.5}
+                        formatValue={(v) => v.toFixed(2)}
+                        onCommit={(v) => updateParam('referenceStrength', v)}
+                      />
+                      <LabeledRangeSlider
+                        label="Information Extracted"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={genParams.referenceInfoExtracted ?? 1}
+                        formatValue={(v) => v.toFixed(2)}
+                        onCommit={(v) => updateParam('referenceInfoExtracted', v)}
+                      />
+                      <LabeledRangeSlider
+                        label="Reference Fidelity"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={genParams.referenceFidelity ?? 1}
+                        formatValue={(v) => v.toFixed(2)}
+                        onCommit={(v) => updateParam('referenceFidelity', v)}
+                      />
 
                       {(genParams.includeCharacterAvatar || genParams.includePersonaAvatar) && (
                         <FormField label="Avatar Reference Type">
@@ -1474,18 +1490,38 @@ export default function ImageGenPanel() {
                 />
               </FormField>
             )}
-            <FormField label={`Scene Change Sensitivity (${imageGeneration.sceneChangeThreshold || 2})`}>
-              <input className={styles.slider} type="range" min={1} max={5} step={1} value={imageGeneration.sceneChangeThreshold || 2} onChange={(e) => updateTop({ sceneChangeThreshold: Number(e.target.value) })} />
-            </FormField>
+            <LabeledRangeSlider
+              label="Scene Change Sensitivity"
+              min={1}
+              max={5}
+              step={1}
+              integer
+              value={imageGeneration.sceneChangeThreshold || 2}
+              onCommit={(v) => updateTop({ sceneChangeThreshold: v })}
+            />
           </EditorSection>
 
           <EditorSection title="Background Display" Icon={ImageIcon} defaultExpanded={false}>
-            <FormField label={`Opacity (${Math.round((imageGeneration.backgroundOpacity || 0.35) * 100)}%)`}>
-              <input className={styles.slider} type="range" min={5} max={90} step={5} value={Math.round((imageGeneration.backgroundOpacity || 0.35) * 100)} onChange={(e) => updateTop({ backgroundOpacity: Number(e.target.value) / 100 })} />
-            </FormField>
-            <FormField label={`Fade Duration (${imageGeneration.fadeTransitionMs || 800}ms)`}>
-              <input className={styles.slider} type="range" min={200} max={2000} step={100} value={imageGeneration.fadeTransitionMs || 800} onChange={(e) => updateTop({ fadeTransitionMs: Number(e.target.value) })} />
-            </FormField>
+            <LabeledRangeSlider
+              label="Opacity"
+              min={5}
+              max={90}
+              step={5}
+              integer
+              value={Math.round((imageGeneration.backgroundOpacity || 0.35) * 100)}
+              formatValue={(v) => `${v}%`}
+              onCommit={(v) => updateTop({ backgroundOpacity: v / 100 })}
+            />
+            <LabeledRangeSlider
+              label="Fade Duration"
+              min={200}
+              max={2000}
+              step={100}
+              integer
+              value={imageGeneration.fadeTransitionMs || 800}
+              formatValue={(v) => `${v}ms`}
+              onCommit={(v) => updateTop({ fadeTransitionMs: v })}
+            />
           </EditorSection>
 
           {currentJobId && <ImageGenProgressBar jobId={currentJobId} />}

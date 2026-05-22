@@ -56,6 +56,7 @@ import {
 import clsx from 'clsx'
 import ExpandedTextEditor, { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
 import { ModalShell } from '@/components/shared/ModalShell'
+import { RangeSlider } from '@/components/shared/RangeSlider'
 import { resolveMacros as resolveMacrosApi } from '@/api/macros'
 import { useLoomBuilder } from '@/hooks/useLoomBuilder'
 import { usePresetProfiles } from '@/hooks/usePresetProfiles'
@@ -695,12 +696,6 @@ function SamplerSlider({ param, value, onChange }: SamplerSliderProps) {
   const isSet = isSamplerParamSet(param, value)
   const hasIncludeToggle = !!param.includeToggle
   const isIncluded = hasIncludeToggle ? isSet : true
-  const trackRef = useRef<HTMLDivElement>(null)
-  const dragging = useRef(false)
-  const dragValueRef = useRef<number | null>(null)
-
-  const [localValue, setLocalValue] = useState<number | null>(null)
-  const currentValue = localValue !== null ? localValue : (isSet ? value! : param.defaultHint)
 
   const [localInput, setLocalInput] = useState(isSet ? String(value) : '')
   const inputTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -712,45 +707,11 @@ function SamplerSlider({ param, value, onChange }: SamplerSliderProps) {
 
   useEffect(() => () => { if (inputTimerRef.current) clearTimeout(inputTimerRef.current) }, [])
 
-  const snap = useCallback((raw: number) => {
-    const clamped = Math.min(param.max, Math.max(param.min, raw))
-    const stepped = Math.round((clamped - param.min) / param.step) * param.step + param.min
+  const formatForInput = useCallback((val: number) => {
+    if (param.type === 'int') return String(Math.round(val))
     const decimals = (String(param.step).split('.')[1] || '').length
-    return param.type === 'int' ? Math.round(stepped) : parseFloat(stepped.toFixed(decimals))
-  }, [param.min, param.max, param.step, param.type])
-
-  const posToValue = useCallback((clientX: number) => {
-    const rect = trackRef.current?.getBoundingClientRect()
-    if (!rect || rect.width === 0) return currentValue
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-    return snap(param.min + ratio * (param.max - param.min))
-  }, [param.min, param.max, currentValue, snap])
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault()
-    dragging.current = true
-    trackRef.current?.setPointerCapture(e.pointerId)
-    const val = posToValue(e.clientX)
-    dragValueRef.current = val
-    setLocalValue(val)
-  }, [posToValue])
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return
-    const val = posToValue(e.clientX)
-    dragValueRef.current = val
-    setLocalValue(val)
-  }, [posToValue])
-
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return
-    dragging.current = false
-    trackRef.current?.releasePointerCapture(e.pointerId)
-    const final = dragValueRef.current
-    dragValueRef.current = null
-    setLocalValue(null)
-    if (final !== null) onChange(param.key, final)
-  }, [param.key, onChange])
+    return val.toFixed(decimals)
+  }, [param.type, param.step])
 
   const commitInput = useCallback((raw: string) => {
     inputEditingRef.current = false
@@ -783,7 +744,23 @@ function SamplerSlider({ param, value, onChange }: SamplerSliderProps) {
     onChange(param.key, nextValue)
   }, [hasIncludeToggle, onChange, param.defaultHint, param.key, value])
 
-  const pct = ((currentValue - param.min) / (param.max - param.min)) * 100
+  // RangeSlider commit → propagate to parent. onDragValue mirrors the live
+  // drag value into the number input so the field tracks the thumb in real
+  // time; on cancel without commit (null), the useEffect above will resync
+  // localInput from the unchanged value prop.
+  const handleSliderCommit = useCallback((val: number) => {
+    onChange(param.key, val)
+  }, [onChange, param.key])
+
+  const handleSliderDragValue = useCallback((val: number | null) => {
+    if (val === null) {
+      setLocalInput(isSet ? String(value) : '')
+    } else {
+      setLocalInput(formatForInput(val))
+    }
+  }, [formatForInput, isSet, value])
+
+  const sliderValue = isSet ? value! : param.defaultHint
 
   return (
     <div className={s.sliderRow}>
@@ -812,19 +789,20 @@ function SamplerSlider({ param, value, onChange }: SamplerSliderProps) {
         />
       </div>
       <div
-        ref={trackRef}
-        className={s.sliderTrackArea}
-        onPointerDown={isIncluded ? handlePointerDown : undefined}
-        onPointerMove={isIncluded ? handlePointerMove : undefined}
-        onPointerUp={isIncluded ? handlePointerUp : undefined}
         onDoubleClick={() => onChange(param.key, null)}
         title="Double-click to reset"
         style={{ opacity: !isIncluded ? 0.2 : isSet ? 1 : 0.4 }}
       >
-        <div className={s.sliderTrack}>
-          <div className={s.sliderFill} style={{ width: `${pct}%` }} />
-          <div className={s.sliderThumb} style={{ left: `${pct}%` }} />
-        </div>
+        <RangeSlider
+          min={param.min}
+          max={param.max}
+          step={param.step}
+          integer={param.type === 'int'}
+          value={sliderValue}
+          disabled={!isIncluded}
+          onCommit={handleSliderCommit}
+          onDragValue={handleSliderDragValue}
+        />
       </div>
     </div>
   )

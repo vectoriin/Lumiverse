@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, BookOpen, Maximize2, ChevronDown, Upload, Download, Globe, X, User, FileUp, Settings, Search, MessageSquare, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Trash2, BookOpen, Maximize2, ChevronDown, Upload, Download, Globe, X, User, FileUp, Settings, Search, MessageSquare, ArrowUpDown, ArrowUp, ArrowDown, ArrowDownAZ, ArrowDownZA } from 'lucide-react'
 import { useStore } from '@/store'
 import useIsMobile from '@/hooks/useIsMobile'
 import { worldBooksApi } from '@/api/world-books'
@@ -42,12 +42,23 @@ export default function WorldBookPanel() {
   const activeChatId = useStore((s) => s.activeChatId)
   const globalWorldBooks = useStore((s) => s.globalWorldBooks)
   const worldInfoSettings = useStore((s) => s.worldInfoSettings)
+  const worldBookListSortDir = useStore((s) => s.worldBookListSortDir)
   const setSetting = useStore((s) => s.setSetting)
   const [wiSettingsOpen, setWiSettingsOpen] = useState(false)
 
   // Book list state
   const [books, setBooks] = useState<WorldBook[]>([])
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
+  // Books are presented alphabetically (case-insensitive) in every selector;
+  // the backend returns them in updated_at order which made navigation tedious
+  // once there were more than a handful.
+  const sortedBooks = useMemo(() => {
+    const dir = worldBookListSortDir === 'desc' ? -1 : 1
+    return [...books].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) * dir)
+  }, [books, worldBookListSortDir])
+  const toggleBookListSortDir = useCallback(() => {
+    setSetting('worldBookListSortDir', worldBookListSortDir === 'asc' ? 'desc' : 'asc')
+  }, [setSetting, worldBookListSortDir])
 
   // Entry state
   const [entries, setEntries] = useState<WorldBookEntry[]>([])
@@ -484,7 +495,13 @@ export default function WorldBookPanel() {
       const next = !prev
       if (next && exportBtnRef.current) {
         const rect = exportBtnRef.current.getBoundingClientRect()
-        setExportPopoverPos({ top: rect.bottom + 4, left: rect.right })
+        // Portaled popover lives inside `body > *` (CSS zoom: --lumiverse-ui-scale);
+        // rect is post-zoom but inline top/left are interpreted pre-zoom, so divide
+        // by the scale so the popover anchors to the button at any UI scale.
+        const uiScale = parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue('--lumiverse-ui-scale'),
+        ) || 1
+        setExportPopoverPos({ top: (rect.bottom + 4) / uiScale, left: rect.right / uiScale })
       }
       return next
     })
@@ -519,7 +536,7 @@ export default function WorldBookPanel() {
             multi
             value={globalWorldBooks ?? []}
             onChange={(ids) => { void setGlobalBooks(ids) }}
-            options={books.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
+            options={sortedBooks.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
             triggerLabel="Add"
             triggerIcon={<Plus size={11} />}
             searchPlaceholder="Search world books…"
@@ -561,7 +578,7 @@ export default function WorldBookPanel() {
               multi
               value={chatWorldBookIds}
               onChange={(ids) => { void handleChatBooksChange(ids) }}
-              options={books.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
+              options={sortedBooks.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
               triggerLabel="Add"
               triggerIcon={<Plus size={11} />}
               searchPlaceholder="Search world books…"
@@ -623,7 +640,7 @@ export default function WorldBookPanel() {
         <SearchableSelect
           value={selectedBookId || ''}
           onChange={(v) => setSelectedBookId(v || null)}
-          options={books.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
+          options={sortedBooks.map((b) => ({ value: b.id, label: b.name, group: b.folder || undefined }))}
           placeholder="Select a book…"
           searchPlaceholder="Search world books…"
           emptyMessage="No world books available"
@@ -631,6 +648,13 @@ export default function WorldBookPanel() {
           className={styles.bookSelectWrapper}
           clearable
           clearLabel="None"
+        />
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          onClick={toggleBookListSortDir}
+          title={worldBookListSortDir === 'asc' ? 'Sorted A–Z — click for Z–A' : 'Sorted Z–A — click for A–Z'}
+          icon={worldBookListSortDir === 'asc' ? <ArrowDownAZ size={14} /> : <ArrowDownZA size={14} />}
         />
         {(() => {
           const sel = books.find((b) => b.id === selectedBookId)

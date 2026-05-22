@@ -216,12 +216,33 @@ export default function SearchableSelect(props: SearchableSelectProps) {
 
   const reposition = useCallback(() => {
     if (!triggerRef.current) return
+    // `body > *` carries `zoom: var(--lumiverse-ui-scale)` (see theme/reset.css), so
+    // any portaled popover is rendered inside a zoomed layout context. getBoundingClientRect
+    // returns post-zoom (rendered) coords, but the inline `top/left` we set are interpreted
+    // in pre-zoom (layout) space — without compensating, the popover drifts off the trigger
+    // and can slide partly off the viewport at scales >= 1.10.
+    const uiScale = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--lumiverse-ui-scale'),
+    ) || 1
     const r = triggerRef.current.getBoundingClientRect()
-    const width = Math.max(r.width, minWidth ?? 240)
+    // r.width is rendered; minWidth is specified in design units (pre-zoom).
+    const layoutWidth = Math.max(r.width / uiScale, minWidth ?? 240)
+    const renderedWidth = layoutWidth * uiScale
+    let renderedLeft = align === 'right' ? r.right - renderedWidth : r.left
+    const renderedTop = r.bottom + 4
+    // Clamp horizontally so the popover stays on screen at any UI scale.
+    const vw = window.innerWidth
+    const margin = 8
+    if (renderedLeft + renderedWidth > vw - margin) {
+      renderedLeft = vw - margin - renderedWidth
+    }
+    if (renderedLeft < margin) {
+      renderedLeft = margin
+    }
     setPos({
-      top: r.bottom + 4,
-      left: align === 'right' ? r.right - width : r.left,
-      width,
+      top: renderedTop / uiScale,
+      left: renderedLeft / uiScale,
+      width: layoutWidth,
     })
   }, [align, minWidth])
 
