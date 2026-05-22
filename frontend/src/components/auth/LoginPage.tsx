@@ -14,6 +14,9 @@ export default function LoginPage() {
   const [subtitle] = useState(() => (Math.random() < 0.076 ? 'Enter the goon' : 'Enter the loom'))
   const login = useStore((s) => s.login)
   const authError = useStore((s) => s.authError)
+  const isAuthenticated = useStore((s) => s.isAuthenticated)
+  const isAuthLoading = useStore((s) => s.isAuthLoading)
+  const checkSession = useStore((s) => s.checkSession)
   const navigate = useNavigate()
   const formRef = useRef<HTMLFormElement>(null)
   const visibleError = error ?? authError
@@ -33,6 +36,19 @@ export default function LoginPage() {
     }
   }
 
+  // Verify any existing session on mount — if valid, skip the form
+  useEffect(() => {
+    if (!isAuthenticated) {
+      checkSession()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/', { replace: true })
+    }
+  }, [isAuthenticated, navigate])
+
   // Scroll focused input into view on mobile virtual keyboard
   useEffect(() => {
     if (!focused) return
@@ -50,6 +66,15 @@ export default function LoginPage() {
       window.visualViewport?.removeEventListener('resize', scrollFocusedInput)
     }
   }, [focused])
+
+  // Don't flash the form while we're verifying the session, or if we're about to redirect
+  if (isAuthLoading || isAuthenticated) {
+    return (
+      <div className={styles.checking} role="status" aria-live="polite" aria-busy="true">
+        <div className={styles.checkingSpinner} aria-label="Checking session" />
+      </div>
+    )
+  }
 
   return (
     <LazyMotion features={domAnimation} strict={false}>
