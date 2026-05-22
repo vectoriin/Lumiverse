@@ -245,6 +245,11 @@
 
 .input::placeholder {
   color: var(--lumiverse-text-hint);
+  text-transform: none;
+}
+
+.inputLowercase {
+  text-transform: lowercase;
 }
 
 /* ─── Submit button ──────────────────────────────────────────────────── */

@@ -120,10 +120,10 @@ export default function LoginPage() {
                 <input
                   id="username"
                   name="username"
-                  className={styles.input}
+                  className={clsx(styles.input, styles.inputLowercase)}
                   type="text"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
                   onFocus={() => setFocused('username')}
                   onBlur={() => setFocused(null)}
                   autoComplete="username"
