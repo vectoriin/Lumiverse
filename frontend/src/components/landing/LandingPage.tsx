@@ -350,6 +350,7 @@ export default function LandingPage() {
   const navigate = useNavigate()
   const landingPageChatsDisplayed = useStore((s) => s.landingPageChatsDisplayed)
   const landingPageLayoutMode = useStore((s) => s.landingPageLayoutMode)
+  const settingsLoaded = useStore((s) => s.settingsLoaded)
   const openModal = useStore((s) => s.openModal)
   const logout = useStore((s) => s.logout)
   const authUser = useStore((s) => s.user)
@@ -367,6 +368,7 @@ export default function LandingPage() {
   useScrollGate(scrollRef)
 
   const fetchChats = useCallback(async () => {
+    if (!settingsLoaded) return
     setLoading(true)
     setError(null)
     try {
@@ -379,7 +381,7 @@ export default function LandingPage() {
     } finally {
       setLoading(false)
     }
-  }, [landingPageChatsDisplayed])
+  }, [landingPageChatsDisplayed, settingsLoaded])
 
   const loadMore = useCallback(async () => {
     if (loadingMore || items.length >= total) return
@@ -572,7 +574,9 @@ export default function LandingPage() {
         {/* Main grid */}
         <main className={styles.main}>
           <AnimatePresence mode="wait">
-            {loading && items.length === 0 ? (
+            {!settingsLoaded ? (
+              <motion.div key="awaiting-settings" />
+            ) : loading && items.length === 0 ? (
               <motion.div
                 key={`loading-${landingPageLayoutMode}`}
                 className={landingPageLayoutMode === 'compact' ? styles.compactList : styles.gridCards}

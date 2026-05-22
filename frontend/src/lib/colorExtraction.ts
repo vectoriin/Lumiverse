@@ -98,7 +98,13 @@ export function rgbToHsl(r: number, g: number, b: number): { h: number; s: numbe
   const l = (max + min) / 2
   if (max === min) return { h: 0, s: 0, l: Math.round(l * 100) }
   const d = max - min
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max - min)
+  // Standard HSL: saturation = d / (max + min) on the dark side, d / (2 - max - min) on the light.
+  // The previous expression used d / (max - min) which is just d/d = 1, so every color with
+  // lightness ≤ 50% was reported as 100% saturated. That falsely-saturated reading then drove
+  // tuneAccentForSurface / deriveSecondaryTone / ensureContrast / constrainLuminance to walk
+  // lightness on a pure-saturation hue — producing the neon-blue / neon-orange / cyan blow-outs
+  // we see on dark cards.
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
   let h = 0
   if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
   else if (max === g) h = ((b - r) / d + 2) / 6
