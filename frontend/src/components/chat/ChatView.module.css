@@ -384,6 +384,25 @@
   border-left: none;
 }
 
+/* Mobile drawer backdrop — fades behind the portrait panel and dismisses on tap.
+   Stacks below the panel (9991) but above chat content. Matches the visual
+   weight used by ViewportDrawer's backdrop. */
+.portraitBackdrop {
+  position: fixed;
+  inset: 0;
+  height: var(--app-scaled-viewport-height, calc(100vh / var(--lumiverse-ui-scale, 1)));
+  width: var(--app-scaled-viewport-width, calc(100vw / var(--lumiverse-ui-scale, 1)));
+  bottom: calc(0px - var(--ios-viewport-offset, 0px));
+  z-index: 9990;
+  background: var(--lumiverse-fill-heavy);
+  animation: portraitBackdropFadeIn 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes portraitBackdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @media (max-width: 600px) {
   .noticeDock,
   .cortexNoticeDock {
@@ -409,7 +428,21 @@
     font-size: calc(10px * var(--lumiverse-font-scale, 1));
   }
 
-  .portraitSide {
-    display: none;
+  /* Mobile: wrapper collapses to just the slim tab button width.
+     The PortraitPanel itself is rendered at ChatView root level as a
+     fixed-position drawer (see .panelOuterMobile in PortraitPanel.module.css). */
+  .portraitSide,
+  .portraitSideOpen {
+    width: var(--lumiverse-btn-icon);
+    /* Skip the expand animation on mobile — the drawer slides instead. */
+    transition: none;
+    /* Empty area around the slim tab passes clicks through to chat widgets
+       (e.g. ScrollToBottom near the right edge). The tab button below
+       re-enables pointer events on itself. */
+    pointer-events: none;
+  }
+
+  .portraitTab {
+    pointer-events: auto;
   }
 }

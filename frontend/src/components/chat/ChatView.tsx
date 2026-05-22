@@ -17,6 +17,7 @@ import { resolveAutoPersonaBinding } from '@/store/slices/personas'
 import type { WallpaperRef } from '@/types/store'
 import useSwipeKeyboard from '@/hooks/useSwipeKeyboard'
 import useEditKeyboard from '@/hooks/useEditKeyboard'
+import useIsMobile from '@/hooks/useIsMobile'
 import { councilSourceToTarget } from '@/hooks/useCouncilProfiles'
 import MessageList from './MessageList'
 import MessageSelectBar from './MessageSelectBar'
@@ -183,6 +184,8 @@ export default function ChatView() {
   const portraitPanelOpen = useStore((s) => s.portraitPanelOpen)
   const togglePortraitPanel = useStore((s) => s.togglePortraitPanel)
   const portraitPanelSide = useStore((s) => s.portraitPanelSide)
+  const isMobile = useIsMobile()
+  const portraitBackdropVisible = isMobile && portraitPanelOpen && portraitPanelSide !== 'none'
   const sceneBackground = useStore((s) => s.sceneBackground)
   const imageGeneration = useStore((s) => s.imageGeneration)
   const wallpaper = useStore((s) => s.wallpaper)
@@ -693,7 +696,7 @@ export default function ChatView() {
       <div className={styles.body} {...(chatWidthMode !== 'full' ? { 'data-chat-constrained': '' } : {})}>
         {portraitPanelSide !== 'none' && portraitPanelSide === 'left' && (
           <div className={clsx(styles.portraitSide, styles.portraitSideLeft, portraitPanelOpen && styles.portraitSideOpen)}>
-            <PortraitPanel side="left" />
+            {!isMobile && <PortraitPanel side="left" />}
             <button
               type="button"
               className={clsx(styles.portraitTab, styles.portraitTabLeft, portraitPanelOpen && styles.portraitTabActive)}
@@ -765,10 +768,24 @@ export default function ChatView() {
             >
               <UserRound size={14} />
             </button>
-            <PortraitPanel side="right" />
+            {!isMobile && <PortraitPanel side="right" />}
           </div>
         )}
       </div>
+      {isMobile && portraitPanelSide !== 'none' && (
+        <PortraitPanel
+          side={portraitPanelSide}
+          mobileDrawer
+          open={portraitPanelOpen}
+        />
+      )}
+      {portraitBackdropVisible && (
+        <div
+          className={styles.portraitBackdrop}
+          onClick={togglePortraitPanel}
+          aria-hidden="true"
+        />
+      )}
       <ExpressionDisplay />
       <FloatingAvatarViewer />
     </div>

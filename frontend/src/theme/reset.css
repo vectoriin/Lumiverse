@@ -4,6 +4,10 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  /* iOS Safari paints a grey overlay on any tappable element on touch,
+     which persists for the full duration of a long-press. Killed globally
+     since no part of the app relies on this affordance for feedback. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 :root {
@@ -68,6 +72,20 @@ canvas,
 svg {
   display: block;
   max-width: 100%;
+  /* Suppress the iOS Safari long-press image lift / callout so custom
+     hold-to-action handlers (see useLongPress) win the gesture. Opt back in
+     per-element with data-allow-lift / explicit -webkit-touch-callout styles. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+[data-allow-lift] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: auto;
+  user-select: auto;
+  -webkit-user-drag: auto;
 }
 
 input,
@@ -87,6 +105,17 @@ select {
   select {
     font-size: max(16px, 1em) !important;
   }
+}
+
+button,
+a,
+[role="button"] {
+  /* Interactive elements: suppress the iOS long-press text-selection magnifier
+     and callout. Cards (rendered as <button>) on the landing page were the
+     primary offender — holding selected their inner h3/p text. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 button {

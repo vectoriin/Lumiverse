@@ -19,6 +19,8 @@ import clsx from 'clsx'
 
 interface PortraitPanelProps {
   side?: 'left' | 'right'
+  mobileDrawer?: boolean
+  open?: boolean
 }
 
 interface GalleryMosaicCellProps {
@@ -49,7 +51,7 @@ function GalleryMosaicCell({ item, className, onOpen, onPreview }: GalleryMosaic
   )
 }
 
-export default function PortraitPanel({ side = 'right' }: PortraitPanelProps) {
+export default function PortraitPanel({ side = 'right', mobileDrawer = false, open = false }: PortraitPanelProps) {
   const activeCharacterId = useStore((s) => s.activeCharacterId)
   const activeChatId = useStore((s) => s.activeChatId)
   const activeChatAvatarId = useStore((s) => s.activeChatAvatarId)
@@ -159,7 +161,13 @@ export default function PortraitPanel({ side = 'right' }: PortraitPanelProps) {
 
   return (
     <div
-      className={clsx(styles.panelOuter, side === 'left' ? styles.panelOuterLeft : styles.panelOuterRight)}
+      className={clsx(
+        styles.panelOuter,
+        side === 'left' ? styles.panelOuterLeft : styles.panelOuterRight,
+        mobileDrawer && styles.panelOuterMobile,
+        mobileDrawer && (side === 'left' ? styles.panelOuterMobileLeft : styles.panelOuterMobileRight),
+        mobileDrawer && open && styles.panelOuterMobileOpen,
+      )}
     >
       <div className={styles.panel}>
         <CloseButton onClick={togglePortraitPanel} iconSize={14} className={styles.closeBtn} />

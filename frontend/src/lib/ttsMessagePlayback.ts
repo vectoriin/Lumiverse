@@ -127,7 +127,11 @@ export function startMessageTtsPlayback(args: {
   if (args.preempt !== false) stop()
   unlockTTSAudio()
   setTTSVolume(voiceSettings.ttsVolume)
-  setTTSSpeed(voiceSettings.ttsSpeed)
+  // Speed is delivered to the provider per segment via the synth call below
+  // (voice.parameters.speed, falling back to the global ttsSpeed). Force the
+  // playback rate to 1.0 so we don't double-apply on top of provider-side
+  // speed — and so any live-tune state the test slider left behind is wiped.
+  setTTSSpeed(1.0)
 
   const concurrency = Math.min(MAX_CONCURRENT_SYNTH, plan.length)
   const slots: Array<Promise<ArrayBuffer | null>> = new Array(plan.length)

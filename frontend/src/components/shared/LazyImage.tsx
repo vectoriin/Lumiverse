@@ -72,6 +72,7 @@ export default function LazyImage({
       <img
         src={src}
         alt={alt}
+        draggable={false}
         style={{
           width: '100%',
           height: '100%',
