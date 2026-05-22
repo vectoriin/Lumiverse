@@ -308,6 +308,8 @@ export interface ReasoningSettings {
 /** Reasoning settings snapshot bound to a connection profile. */
 export interface ReasoningBindings {
   settings: ReasoningSettings
+  /** Optional "Start Reply With" assistant prefill captured alongside the reasoning snapshot. */
+  promptBias?: string
 }
 
 export interface GuidedGeneration {

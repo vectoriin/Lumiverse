@@ -37,6 +37,7 @@ export default function PresetManager() {
   const activeProvider = activeProfile?.provider
   const activeModel = activeProfile?.model
   const activeBinding = activeProfile?.metadata?.reasoningBindings?.settings
+  const activeBindingPromptBias = activeProfile?.metadata?.reasoningBindings?.promptBias
   const normalizedActiveBinding = activeBinding
     ? normalizeReasoningSettingsForProvider(activeBinding, activeProvider, activeModel)
     : null
@@ -47,6 +48,7 @@ export default function PresetManager() {
   const isAnthropic = activeProvider === 'anthropic'
   const activeBindingMatchesPanel = normalizedActiveBinding
     ? areReasoningSettingsEqual(normalizedActiveBinding, reasoningSettings)
+      && (typeof activeBindingPromptBias !== 'string' || activeBindingPromptBias === promptBias)
     : false
 
   const updateReasoning = useCallback(
@@ -76,7 +78,7 @@ export default function PresetManager() {
           <div className={styles.bindingBanner}>
             <div className={styles.bindingBannerTitle}>Saved on {activeProfile?.name}</div>
             <div className={styles.bindingBannerText}>
-              {getReasoningBindingSummary(normalizedActiveBinding)}
+              {getReasoningBindingSummary(normalizedActiveBinding, activeBindingPromptBias)}
             </div>
             {!activeBindingMatchesPanel && (
               <div className={styles.bindingBannerHint}>

@@ -58,7 +58,14 @@ export {
 export { resolveActiveDatabankIds } from "./scope-resolver.service";
 
 // Mention resolution
-export { resolveMentions, formatMentionsAsAppendix } from "./mention-resolver.service";
+export {
+  extractMentionSlugs,
+  stripMentions,
+  lookupSlugsInScope,
+  resolveSlugContent,
+  formatMentionsAsAppendix,
+  clearResolveCache,
+} from "./mention-resolver.service";
 
 // Web scraping
 export { scrapeUrl, ScrapeError, type ScrapedContent, type ScrapeErrorType } from "./web-scraper.service";

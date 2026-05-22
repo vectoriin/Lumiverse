@@ -197,11 +197,12 @@ export default function ConnectionItem({ profile, isActive, providers, onSelect,
 
   const providerColor = PROVIDER_COLORS[profile.provider] || PROVIDER_COLORS.custom
   const boundReasoning = profile.metadata?.reasoningBindings?.settings
+  const boundPromptBias = profile.metadata?.reasoningBindings?.promptBias
   const normalizedBoundReasoning = boundReasoning
     ? normalizeReasoningSettingsForProvider(boundReasoning, profile.provider, profile.model)
     : null
-  const boundReasoningSummary = normalizedBoundReasoning ? getReasoningBindingSummary(normalizedBoundReasoning) : null
-  const boundReasoningTitle = normalizedBoundReasoning ? getReasoningBindingTitle(normalizedBoundReasoning) : undefined
+  const boundReasoningSummary = normalizedBoundReasoning ? getReasoningBindingSummary(normalizedBoundReasoning, boundPromptBias) : null
+  const boundReasoningTitle = normalizedBoundReasoning ? getReasoningBindingTitle(normalizedBoundReasoning, boundPromptBias) : undefined
   const anthropicCachingSummary = profile.provider === 'anthropic'
     ? formatAnthropicPromptCachingSummary(profile.metadata?.prompt_caching)
     : null

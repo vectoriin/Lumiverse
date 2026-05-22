@@ -1686,13 +1686,14 @@ export async function assemblePrompt(
 
   // ---- Resolve #mentions in user messages ----
   phaseStartedAt = performance.now();
-  // 1. Strip #tags from ALL user messages so raw tags never reach the LLM.
-  // 2. Resolve + build the document appendix only from the LAST user message's tags.
-  // This handles queued messages, regen, swipe, and dry-run correctly.
+  // Two-phase, deduped across history:
+  //   1. Extract slugs from every user message (pure regex, no I/O).
+  //   2. Single sync batch lookup: which slugs map to valid docs in active scope.
+  //   3. Strip resolved #tags from every user message.
+  //   4. Expensive content fetch + vector search runs ONCE, only for the LAST
+  //      user message's slugs (the only ones that contribute to the appendix).
   let databankMentionAppendix = "";
   {
-    // Isolated chats don't resolve character-scoped document mentions either —
-    // the user can still reference chat-scoped or global docs by slug.
     const charIds = databankCharIds;
     let lastUserIdx = -1;
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1701,38 +1702,65 @@ export async function assemblePrompt(
         break;
       }
     }
-    let mentionYieldCounter = 0;
+
+    const perMessageSlugs: Array<Set<string> | null> = new Array(messages.length).fill(null);
+    const allSlugs = new Set<string>();
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
       if (!msg.is_user || !msg.content.includes("#")) continue;
-      if ((mentionYieldCounter++ & 15) === 0) {
-        await yieldAndCheckAbort(ctx.signal);
-      } else if (ctx.signal?.aborted) {
-        throw ctx.signal.reason ?? new DOMException("Aborted", "AbortError");
-      }
+      const slugs = databankSvc.extractMentionSlugs(msg.content);
+      if (slugs.size === 0) continue;
+      perMessageSlugs[i] = slugs;
+      for (const s of slugs) allSlugs.add(s);
+    }
+
+    if (allSlugs.size > 0) {
       try {
-        const isLast = i === lastUserIdx;
-        const mentionResult = await databankSvc.resolveMentions(
+        const { validSlugs, docs } = databankSvc.lookupSlugsInScope(
           ctx.userId,
-          msg.content,
+          allSlugs,
           ctx.chatId,
           charIds,
-          isLast
-            ? messages
+        );
+
+        if (validSlugs.size > 0) {
+          let mentionYieldCounter = 0;
+          for (let i = 0; i < messages.length; i++) {
+            const slugs = perMessageSlugs[i];
+            if (!slugs) continue;
+            if ((mentionYieldCounter++ & 15) === 0) {
+              await yieldAndCheckAbort(ctx.signal);
+            } else if (ctx.signal?.aborted) {
+              throw ctx.signal.reason ?? new DOMException("Aborted", "AbortError");
+            }
+            const stripped = databankSvc.stripMentions(messages[i].content, validSlugs);
+            if (stripped !== messages[i].content) {
+              messages[i].content = stripped;
+            }
+          }
+
+          const lastSlugs = lastUserIdx >= 0 ? perMessageSlugs[lastUserIdx] : null;
+          if (lastSlugs && lastSlugs.size > 0) {
+            const lastValid = new Set<string>();
+            for (const s of lastSlugs) if (validSlugs.has(s)) lastValid.add(s);
+            if (lastValid.size > 0) {
+              const queryContext = messages
                 .slice(-6)
                 .map((m) => m.content)
-                .join(" ")
-            : undefined,
-        );
-        // Always strip tags from the in-memory content
-        if (mentionResult.cleanedContent !== msg.content) {
-          msg.content = mentionResult.cleanedContent;
-        }
-        // Only build appendix from the last user message
-        if (isLast && mentionResult.resolvedDocuments.length > 0) {
-          databankMentionAppendix = databankSvc.formatMentionsAsAppendix(
-            mentionResult.resolvedDocuments,
-          );
+                .join(" ");
+              const resolved = await databankSvc.resolveSlugContent(
+                ctx.userId,
+                ctx.chatId,
+                lastValid,
+                docs,
+                queryContext,
+                ctx.signal,
+              );
+              if (resolved.length > 0) {
+                databankMentionAppendix = databankSvc.formatMentionsAsAppendix(resolved);
+              }
+            }
+          }
         }
       } catch (err) {
         console.warn(
@@ -1742,7 +1770,9 @@ export async function assemblePrompt(
       }
     }
   }
+  profiler.addPhase("databank-mentions", performance.now() - phaseStartedAt);
 
+  phaseStartedAt = performance.now();
   await resolveWorldInfoOutlets(
     mergedWorldInfo.activatedEntries,
     macroEnv,
@@ -2611,7 +2641,14 @@ export async function assemblePrompt(
   // Collect assistant prefill: promptBias (Start Reply With) + assistantPrefill/assistantImpersonation
   const prefillParts: string[] = [];
 
-  const promptBiasVal = settingsMap.get("promptBias");
+  // A connection profile can bind its own Start Reply With value alongside its
+  // reasoning settings (metadata.reasoningBindings.promptBias). When present,
+  // it overrides the global promptBias setting — even when set to an empty
+  // string, which means "explicitly suppress the global prefill".
+  const boundPromptBias = connection?.metadata?.reasoningBindings?.promptBias;
+  const promptBiasVal = typeof boundPromptBias === "string"
+    ? boundPromptBias
+    : settingsMap.get("promptBias");
   if (
     promptBiasVal &&
     typeof promptBiasVal === "string" &&

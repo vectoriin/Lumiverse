@@ -54,4 +54,4 @@ Current time: 14:30 on Wednesday.
 | **Formatting** | `{{bullets}}`, `{{numbered}}` | [Formatting macros](../presets/macros-reference.md#formatting) |
 | **Council & Lumia** | `{{lumiaCouncilDeliberation}}`, `{{loomStyle}}` | [Council macros](../presets/macros-reference.md#lumia-council) |
 
-Lumiverse has **180+ built-in macros** across 20+ categories. See the [full reference](../presets/macros-reference.md) for the complete list.
+Lumiverse ships **180+ built-in macros** across roughly 20 categories. See the [full reference](../presets/macros-reference.md) for the complete list.

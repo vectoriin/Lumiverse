@@ -67,8 +67,15 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
   )
   const [bindReasoning, setBindReasoning] = useState(!!profile?.metadata?.reasoningBindings)
   const reasoningSettings = useStore((s) => s.reasoningSettings)
+  const promptBias = useStore((s) => s.promptBias)
   const [boundReasoningSettings, setBoundReasoningSettings] = useState<ReasoningSettings>(
     () => ({ ...(profile?.metadata?.reasoningBindings?.settings || reasoningSettings) })
+  )
+  const [boundPromptBias, setBoundPromptBias] = useState<string>(
+    () => {
+      const stored = profile?.metadata?.reasoningBindings?.promptBias
+      return typeof stored === 'string' ? stored : promptBias
+    }
   )
   const [models, setModels] = useState<string[]>([])
   const [modelLabels, setModelLabels] = useState<Record<string, string>>({})
@@ -229,10 +236,13 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
   const normalizedBoundReasoningSettings = normalizeReasoningSettingsForProvider(boundReasoningSettings, provider, model)
   const normalizedCurrentReasoningSettings = normalizeReasoningSettingsForProvider(reasoningSettings, provider, model)
   const bindingMatchesCurrent = areReasoningSettingsEqual(normalizedBoundReasoningSettings, normalizedCurrentReasoningSettings)
+    && boundPromptBias === promptBias
 
   useEffect(() => {
     setBindReasoning(!!profile?.metadata?.reasoningBindings)
     setBoundReasoningSettings({ ...(profile?.metadata?.reasoningBindings?.settings || reasoningSettings) })
+    const storedPromptBias = profile?.metadata?.reasoningBindings?.promptBias
+    setBoundPromptBias(typeof storedPromptBias === 'string' ? storedPromptBias : promptBias)
     setAnthropicPromptCachingSettings(parseAnthropicPromptCachingSettings(profile?.metadata?.prompt_caching))
   }, [profile?.id])
 
@@ -309,7 +319,10 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
       delete metadata.prompt_caching
     }
     if (bindReasoning) {
-      metadata.reasoningBindings = { settings: normalizedBoundReasoningSettings }
+      metadata.reasoningBindings = {
+        settings: normalizedBoundReasoningSettings,
+        promptBias: boundPromptBias,
+      }
     } else {
       delete metadata.reasoningBindings
     }
@@ -345,7 +358,7 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
       is_default: isDefault,
       metadata,
     })
-  }, [name, provider, apiKey, apiUrl, model, isDefault, useResponsesApi, showResponsesApiToggle, useSubscriptionApi, showSubscriptionApiToggle, useZaiCodingPlanEndpoint, showZaiCodingPlanToggle, showAnthropicPromptCachingToggle, anthropicPromptCachingSettings, bindReasoning, boundReasoningSettings, profile?.metadata, onSave, isVertexAI, vertexRegion, saFileName, isOpenRouter, openrouterSettings])
+  }, [name, provider, apiKey, apiUrl, model, isDefault, useResponsesApi, showResponsesApiToggle, useSubscriptionApi, showSubscriptionApiToggle, useZaiCodingPlanEndpoint, showZaiCodingPlanToggle, showAnthropicPromptCachingToggle, anthropicPromptCachingSettings, bindReasoning, boundReasoningSettings, boundPromptBias, profile?.metadata, onSave, isVertexAI, vertexRegion, saFileName, isOpenRouter, openrouterSettings])
 
   return (
     <div className={styles.form}>
@@ -532,19 +545,22 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
         />
       )}
       <FormField label="">
-        <Toggle.Checkbox checked={bindReasoning} onChange={setBindReasoning} label="Bind reasoning settings" hint="Save current reasoning settings and auto-apply when this connection is selected" />
+        <Toggle.Checkbox checked={bindReasoning} onChange={setBindReasoning} label="Bind reasoning settings" hint='Save current reasoning settings (including "Start Reply With") and auto-apply when this connection is selected' />
       </FormField>
       {bindReasoning && (
         <div className={styles.bindingCard}>
           <div className={styles.bindingCardHeader}>
             <div>
               <div className={styles.bindingCardTitle}>Saved reasoning snapshot</div>
-              <div className={styles.bindingCardSummary}>{getReasoningBindingSummary(normalizedBoundReasoningSettings)}</div>
+              <div className={styles.bindingCardSummary}>{getReasoningBindingSummary(normalizedBoundReasoningSettings, boundPromptBias)}</div>
             </div>
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setBoundReasoningSettings({ ...reasoningSettings })}
+              onClick={() => {
+                setBoundReasoningSettings({ ...reasoningSettings })
+                setBoundPromptBias(promptBias)
+              }}
               title={bindingMatchesCurrent ? 'Snapshot already matches the current reasoning settings' : 'Replace the saved snapshot with the current reasoning settings'}
             >
               {bindingMatchesCurrent ? 'Captured' : 'Capture Current'}

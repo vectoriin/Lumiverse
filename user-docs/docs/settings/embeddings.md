@@ -56,7 +56,7 @@ Enable vectorization for the content types you want:
 | Content | Setting | What It Does |
 |---------|---------|-------------|
 | **World Book Entries** | `vectorize_world_books` | Enables semantic search for lorebook entries — activates entries by meaning, not just keywords |
-| **Chat Documents** | `vectorize_chat_documents` | Indexes [databank](../chatting/memory.md) and chat-attached documents for `#slug` mentions and document RAG |
+| **Chat Documents** | `vectorize_chat_documents` | Indexes [databank](../chatting/databank.md) and chat-attached documents for `#slug` mentions and document RAG |
 | **Chat Messages** | `vectorize_chat_messages` | Enables [long-term memory](../chatting/memory.md) — recalls relevant past messages during generation |
 
 When chat-message vectorization is enabled, the **Memory Retrieval Mode** (`chat_memory_mode`) controls how aggressively past messages are recalled:

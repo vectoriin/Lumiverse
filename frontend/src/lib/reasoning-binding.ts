@@ -164,7 +164,7 @@ export function getReasoningPresetLabel(settings: ReasoningSettings): string | n
   ))?.label ?? null
 }
 
-export function getReasoningBindingSummary(settings: ReasoningSettings): string {
+export function getReasoningBindingSummary(settings: ReasoningSettings, promptBias?: string | null): string {
   const parts: string[] = []
   const presetLabel = getReasoningPresetLabel(settings)
 
@@ -186,15 +186,23 @@ export function getReasoningBindingSummary(settings: ReasoningSettings): string 
   if (!settings.autoParse) parts.push('manual parse')
   if (settings.thinkingDisplay !== 'auto') parts.push(`display ${settings.thinkingDisplay}`)
 
+  if (typeof promptBias === 'string') {
+    parts.push(promptBias.trim() ? `prefill ${formatTagValue(promptBias)}` : 'no prefill')
+  }
+
   return parts.join(' · ')
 }
 
-export function getReasoningBindingTitle(settings: ReasoningSettings): string {
-  return [
-    getReasoningBindingSummary(settings),
+export function getReasoningBindingTitle(settings: ReasoningSettings, promptBias?: string | null): string {
+  const lines = [
+    getReasoningBindingSummary(settings, promptBias),
     `Prefix: ${formatTagValue(settings.prefix)}`,
     `Suffix: ${formatTagValue(settings.suffix)}`,
-  ].join('\n')
+  ]
+  if (typeof promptBias === 'string') {
+    lines.push(`Start Reply With: ${formatTagValue(promptBias)}`)
+  }
+  return lines.join('\n')
 }
 
 export function areReasoningSettingsEqual(a: ReasoningSettings, b: ReasoningSettings): boolean {

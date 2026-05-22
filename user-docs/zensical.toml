@@ -48,6 +48,7 @@ nav = [
     { "Loom Summary" = "chatting/loom-summary.md" },
     { "Long-Term Memory" = "chatting/memory.md" },
     { "Memory Cortex" = "chatting/memory-cortex.md" },
+    { "Databank" = "chatting/databank.md" },
     { "Guided Generation" = "chatting/guided-generation.md" },
     { "Quick Replies" = "chatting/quick-replies.md" },
     { "Regen Feedback" = "chatting/regen-feedback.md" },
