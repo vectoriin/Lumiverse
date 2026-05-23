@@ -3,11 +3,21 @@ import { BASE_URL } from '@/api/client'
 
 type EventHandler = (payload: any) => void
 
+/** Internal client-only event names — not part of the backend protocol. */
+export const WS_OPEN = '__ws_open'
+export const WS_CLOSE = '__ws_close'
+export const WS_PONG = '__ws_pong'
+export const WS_AUTH_ERROR = '__ws_auth_error'
+
+/** If we send a ping and don't see a pong within this window, treat the socket as dead. */
+const PONG_TIMEOUT_MS = 10_000
+
 export class WebSocketClient {
   private ws: WebSocket | null = null
   private handlers = new Map<string, Set<EventHandler>>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
+  private pongWatchdog: ReturnType<typeof setTimeout> | null = null
   private url: string
   private shouldReconnect = true
   private visibilityCleanup: Array<() => void> = []
@@ -40,16 +50,22 @@ export class WebSocketClient {
       }
       this.startPing()
       this.startVisibilityTracking()
+      this.emit(WS_OPEN, {})
       this.emit(EventType.CONNECTED, {})
     }
 
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        if (data.type === 'pong') return
+        if (data.type === 'pong') {
+          this.clearPongWatchdog()
+          this.emit(WS_PONG, {})
+          return
+        }
         if (data.event === 'AUTH_ERROR') {
           console.warn('[WS] Auth error — will not reconnect')
           this.shouldReconnect = false
+          this.emit(WS_AUTH_ERROR, data.payload ?? {})
           return
         }
         const eventName = data.event || data.type
@@ -66,6 +82,7 @@ export class WebSocketClient {
     this.ws.onclose = (e) => {
       console.log('[WS] Closed:', e.code, e.reason)
       this.stopPing()
+      this.emit(WS_CLOSE, { code: e.code, reason: e.reason })
       // Only reconnect if this is still the active socket — a newer socket
       // may have already replaced us (e.g. server-side session eviction).
       if (this.shouldReconnect && this.ws === thisSocket) {
@@ -115,9 +132,7 @@ export class WebSocketClient {
   private startPing() {
     this.stopPing()
     this.pingTimer = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'ping' }))
-      }
+      this.sendPingNow()
     }, 30000)
   }
 
@@ -126,6 +141,40 @@ export class WebSocketClient {
       clearInterval(this.pingTimer)
       this.pingTimer = null
     }
+    this.clearPongWatchdog()
+  }
+
+  private sendPingNow() {
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    this.ws.send(JSON.stringify({ type: 'ping' }))
+    this.armPongWatchdog()
+  }
+
+  private armPongWatchdog() {
+    this.clearPongWatchdog()
+    this.pongWatchdog = setTimeout(() => {
+      this.pongWatchdog = null
+      console.warn('[WS] Pong timeout — forcing close to trigger reconnect')
+      // Force-close the socket. onclose will fire, which both emits WS_CLOSE
+      // (so the UI shows the overlay) and triggers the standard reconnect path.
+      try {
+        this.ws?.close()
+      } catch {
+        /* noop */
+      }
+    }, PONG_TIMEOUT_MS)
+  }
+
+  private clearPongWatchdog() {
+    if (this.pongWatchdog) {
+      clearTimeout(this.pongWatchdog)
+      this.pongWatchdog = null
+    }
+  }
+
+  /** Send a ping immediately and arm the pong watchdog. Used after CONNECTED to verify round-trip. */
+  forcePing() {
+    this.sendPingNow()
   }
 
   private visibilityHandler: (() => void) | null = null
