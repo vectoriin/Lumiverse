@@ -297,10 +297,11 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
     // Tool call accumulation for Responses API function_call streaming
     const fnCallBuffer: Map<string, { name: string; argsJson: string; callId: string }> = new Map();
 
+    let streamDoneNaturally = false;
     try {
     while (true) {
       const { done, value } = await readWithAbort(reader, request.signal);
-      if (done) break;
+      if (done) { streamDoneNaturally = !request.signal?.aborted; break; }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -405,7 +406,7 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
       }
     }
     } finally {
-      await reader.cancel().catch(() => {});
+      if (!streamDoneNaturally) await reader.cancel().catch(() => {});
     }
   }
 }

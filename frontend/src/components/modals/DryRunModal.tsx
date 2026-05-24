@@ -10,6 +10,7 @@ import type { DryRunResponse, DryRunMessage } from '@/api/generate'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { dryRunToRawPromptInput, formatRawPrompt, type RawPromptView } from '@/lib/formatRawPrompt'
 import { getAnthropicBreakdownCacheHints, getAnthropicCacheUsageSummary } from '@/lib/anthropic-breakdown-cache'
+import { getNanoGptCacheUsageSummary } from '@/lib/nanogpt-breakdown-cache'
 import styles from './DryRunModal.module.css'
 import clsx from 'clsx'
 
@@ -217,6 +218,10 @@ export default function DryRunModal() {
     () => getAnthropicCacheUsageSummary(provider, modalProps.usage),
     [provider, modalProps.usage],
   )
+  const nanoGptCacheUsage = useMemo(
+    () => getNanoGptCacheUsageSummary(provider, modalProps.usage),
+    [provider, modalProps.usage],
+  )
 
   const parametersJson = useMemo(
     () => JSON.stringify(parameters, null, 2),
@@ -356,6 +361,15 @@ export default function DryRunModal() {
                             read {anthropicCacheUsage.cacheReadInputTokens.toLocaleString()} • write {anthropicCacheUsage.cacheCreationInputTokens.toLocaleString()}
                             {anthropicCacheUsage.cacheCreation5mInputTokens > 0 && ` • 5m ${anthropicCacheUsage.cacheCreation5mInputTokens.toLocaleString()}`}
                             {anthropicCacheUsage.cacheCreation1hInputTokens > 0 && ` • 1h ${anthropicCacheUsage.cacheCreation1hInputTokens.toLocaleString()}`}
+                          </span>
+                        )}
+                        {nanoGptCacheUsage && (
+                          <span className={styles.breakdownSource}>
+                            {[
+                              nanoGptCacheUsage.cacheReadInputTokens > 0 && `read ${nanoGptCacheUsage.cacheReadInputTokens.toLocaleString()}`,
+                              nanoGptCacheUsage.cacheCreationInputTokens > 0 && `write ${nanoGptCacheUsage.cacheCreationInputTokens.toLocaleString()}`,
+                              nanoGptCacheUsage.cachedTokensOpenAiStyle > 0 && `cached ${nanoGptCacheUsage.cachedTokensOpenAiStyle.toLocaleString()}`,
+                            ].filter(Boolean).join(' • ')}
                           </span>
                         )}
                       </div>

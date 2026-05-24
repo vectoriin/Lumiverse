@@ -489,7 +489,7 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
               checked={nanogptCachingSettings.enabled}
               onChange={(checked) => setNanogptCachingSettings((current) => ({ ...current, enabled: checked }))}
               label="Enable Prompt Caching"
-              hint="Route to cache-capable providers and pass NanoGPT's prompt_caching helper. Avoids stale responses when upstream caches collide."
+              hint="Sends NanoGPT's prompt_caching helper for Claude routes. Non-Claude models (GLM, GPT, Gemini, etc.) keep using NanoGPT's automatic implicit caching — no flags needed and subscription routing stays intact."
             />
           </FormField>
           {nanogptCachingSettings.enabled && (
@@ -507,6 +507,55 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
                   onChange={(checked) => setNanogptCachingSettings((current) => ({ ...current, stickyProvider: checked }))}
                   label="Sticky Provider"
                   hint="Prefer the previously recorded upstream provider for cache hits. NanoGPT returns 503 on failover instead of switching providers, preserving cache integrity."
+                />
+              </FormField>
+              <FormField
+                label="Cache Cutoff Message Index"
+                hint="Optional. Pin the cache boundary to a specific message index (0-based). Everything up to and including this index is eligible for caching. Leave blank to let NanoGPT decide."
+              >
+                <TextInput
+                  value={
+                    typeof nanogptCachingSettings.cutAfterMessageIndex === 'number'
+                      ? String(nanogptCachingSettings.cutAfterMessageIndex)
+                      : ''
+                  }
+                  onChange={(raw) => setNanogptCachingSettings((current) => {
+                    const trimmed = raw.trim()
+                    if (trimmed === '') {
+                      const { cutAfterMessageIndex: _drop, ...rest } = current
+                      return rest
+                    }
+                    const parsed = Number(trimmed)
+                    if (!Number.isInteger(parsed) || parsed < 0) return current
+                    return { ...current, cutAfterMessageIndex: parsed }
+                  })}
+                  placeholder="e.g. 4"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                />
+              </FormField>
+              <FormField label="">
+                <Toggle.Checkbox
+                  checked={nanogptCachingSettings.explicitCacheControl === true}
+                  onChange={(checked) => setNanogptCachingSettings((current) => {
+                    if (checked) return { ...current, explicitCacheControl: true }
+                    const { explicitCacheControl: _drop, ...rest } = current
+                    return rest
+                  })}
+                  label="Explicit Cache Control"
+                  hint="Trust inline cache_control markers in the request body instead of letting NanoGPT auto-inject breakpoints. Advanced — only enable if you know your prompts already carry their own markers."
+                />
+              </FormField>
+              <FormField label="">
+                <Toggle.Checkbox
+                  checked={nanogptCachingSettings.forceCacheCapableRouting === true}
+                  onChange={(checked) => setNanogptCachingSettings((current) => {
+                    if (checked) return { ...current, forceCacheCapableRouting: true }
+                    const { forceCacheCapableRouting: _drop, ...rest } = current
+                    return rest
+                  })}
+                  label="Force Cache-Capable Routing (advanced)"
+                  hint="⚠️ Sends top-level caching:true so NanoGPT picks a cache-capable upstream regardless of model. Per NanoGPT docs this MAY bypass subscription coverage and bill the request as pay-as-you-go. Leave off unless you specifically need cache hits on a model that isn't getting them via implicit caching."
                 />
               </FormField>
             </>

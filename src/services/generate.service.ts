@@ -97,6 +97,7 @@ import {
 } from "./council/tool-runtime";
 import { toolRegistry } from "../spindle/tool-registry";
 import { executeHostCouncilTool } from "./council/host-tools";
+import { applyPromptCaching } from "./caching";
 import {
   applyPersonaAddonStates,
   getChatPersonaAddonStates,
@@ -217,32 +218,6 @@ function injectConnectionMetadataFlags(
     params.use_responses_api = true;
   }
 
-  if (connection.provider === "anthropic") {
-    const cacheSetting = connection.metadata?.prompt_caching;
-    if (
-      cacheSetting === true ||
-      (cacheSetting && typeof cacheSetting === "object" && !Array.isArray(cacheSetting))
-    ) {
-      params.prompt_caching = cacheSetting;
-    }
-  }
-
-  if (connection.provider === "nanogpt") {
-    const cacheSetting = connection.metadata?.nanogpt_caching;
-    if (
-      cacheSetting &&
-      typeof cacheSetting === "object" &&
-      !Array.isArray(cacheSetting) &&
-      cacheSetting.enabled === true
-    ) {
-      const ttl = cacheSetting.ttl === "1h" ? "1h" : "5m";
-      const stickyProvider = cacheSetting.stickyProvider !== false;
-      params.caching = true;
-      params.stickyProvider = stickyProvider;
-      params.prompt_caching = { enabled: true, ttl, stickyProvider };
-    }
-  }
-
   if (
     connection.provider === "openrouter" &&
     connection.metadata?.openrouter
@@ -251,90 +226,8 @@ function injectConnectionMetadataFlags(
   }
 }
 
-type AnthropicPromptCachingConfig = {
-  enabled: boolean;
-  automatic: boolean;
-  cacheControl?: Record<string, unknown>;
-  breakpoints: {
-    tools: boolean;
-    system: boolean;
-    messages: boolean;
-  };
-};
-
-function resolveAnthropicPromptCachingConfig(
-  metadata: Record<string, any> | undefined,
-): AnthropicPromptCachingConfig {
-  const raw = metadata?.prompt_caching;
-  if (raw !== true && (!raw || typeof raw !== "object" || Array.isArray(raw))) {
-    return {
-      enabled: false,
-      automatic: false,
-      breakpoints: { tools: false, system: false, messages: false },
-    };
-  }
-
-  const record = raw === true ? { type: "ephemeral" } : raw;
-  const breakpoints =
-    record.breakpoints && typeof record.breakpoints === "object" && !Array.isArray(record.breakpoints)
-      ? record.breakpoints
-      : {};
-
-  return {
-    enabled: true,
-    automatic: record.automatic !== false,
-    cacheControl: {
-      type: "ephemeral",
-      ...(record.ttl === "1h" ? { ttl: "1h" } : {}),
-    },
-    breakpoints: {
-      tools: breakpoints.tools === true,
-      system: breakpoints.system === true,
-      messages: breakpoints.messages === true,
-    },
-  };
-}
-
-function applyAnthropicCacheBreakpointsToMessages(
-  messages: LlmMessage[],
-  config: AnthropicPromptCachingConfig,
-): LlmMessage[] {
-  if (!config.enabled) return messages;
-  const lastConversationIdx = config.breakpoints.messages
-    ? (() => {
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role !== "system") return i;
-        }
-        return -1;
-      })()
-    : -1;
-  return messages.map((message, index) => {
-    const shouldCacheSystem = config.breakpoints.system && message.role === "system";
-    const shouldCacheMessage = index === lastConversationIdx;
-    if (!shouldCacheSystem && !shouldCacheMessage) return message;
-    return {
-      ...message,
-      cache_control: config.cacheControl,
-    };
-  });
-}
-
-function applyAnthropicCacheBreakpointsToTools(
-  tools: ToolDefinition[] | undefined,
-  config: AnthropicPromptCachingConfig,
-): ToolDefinition[] | undefined {
-  if (!tools || !config.enabled || !config.breakpoints.tools) return tools;
-  return tools.map((tool) => ({
-    ...tool,
-    cache_control: config.cacheControl,
-  }));
-}
-
 export const __test__ = {
   injectConnectionMetadataFlags,
-  resolveAnthropicPromptCachingConfig,
-  applyAnthropicCacheBreakpointsToMessages,
-  applyAnthropicCacheBreakpointsToTools,
 };
 
 export interface RawGenerateInput {
@@ -798,6 +691,13 @@ const activeGenerations = new Map<
     userId: string;
     chatId: string;
     startedAt: number;
+    /** Resolves when the generation's streaming continuation finishes
+     *  (success, error, or abort). Used by the per-chat lock to wait for
+     *  teardown before starting a replacement generation — this prevents
+     *  two HTTP operations (the old cancel and the new connect) from
+     *  overlapping on Bun's HTTPThread, which has a known null-callback
+     *  race on concurrent cancel+start. */
+    completion?: Promise<void>;
   }
 >();
 
@@ -1480,6 +1380,17 @@ export async function startGeneration(
         input.chat_id,
       );
       existing.controller.abort();
+      // Wait for the previous generation's streaming teardown to complete
+      // before starting the new one. This serializes the HTTP abort+connect
+      // sequence, preventing two fetch operations from overlapping on Bun's
+      // HTTPThread which has a known race on concurrent cancel+start. Bounded
+      // at 2s so a hung generation can't deadlock regeneration permanently.
+      if (existing.completion) {
+        await Promise.race([
+          existing.completion,
+          new Promise<void>((r) => setTimeout(r, 2000)),
+        ]);
+      }
     }
     activeGenerations.delete(existingGenId);
     activeChatGenerations.delete(chatKey);
@@ -1771,8 +1682,9 @@ export async function startGeneration(
     //
     // The remaining heavy work (council → assembly → streaming) runs as a
     // detached async continuation. Errors are surfaced via GENERATION_ENDED
-    // with an error payload.
-    void (async () => {
+    // with an error payload. The promise is stored on activeGenerations so a
+    // replacement generation (regenerate) can await teardown before starting.
+    const generationWork = (async () => {
       // Yield to the macro task queue IMMEDIATELY so that the HTTP response
       // (`return { generationId, status: "streaming" }` below) is sent before
       // any assembly work begins.  Without this, JavaScript's async execution
@@ -2364,8 +2276,8 @@ export async function startGeneration(
         );
 
         let { messages } = pipeline;
+        let { parameters: mergedParams } = pipeline;
         const {
-          parameters: mergedParams,
           breakdown,
           activatedWorldInfo,
           deliberationHandledByMacro,
@@ -2437,17 +2349,17 @@ export async function startGeneration(
 
         injectConnectionMetadataFlags(connection, mergedParams);
 
-        const anthropicCaching = resolveAnthropicPromptCachingConfig(
-          connection.metadata,
+        const cached = applyPromptCaching(
+          {
+            provider: provider.name,
+            model: connection.model,
+            metadata: connection.metadata,
+          },
+          { params: mergedParams, messages, tools: inlineTools },
         );
-        messages = applyAnthropicCacheBreakpointsToMessages(
-          messages,
-          anthropicCaching,
-        );
-        inlineTools = applyAnthropicCacheBreakpointsToTools(
-          inlineTools,
-          anthropicCaching,
-        );
+        mergedParams = cached.params;
+        messages = cached.messages;
+        inlineTools = cached.tools;
 
         // Resolve preset name for breakdown display
         const presetId = input.preset_id || connection.preset_id;
@@ -2548,6 +2460,11 @@ export async function startGeneration(
         );
       }
     })();
+
+    // Store the work promise so a replacement gen (regenerate) can await
+    // its teardown before starting a new HTTP call.
+    const entry = activeGenerations.get(generationId);
+    if (entry) entry.completion = generationWork;
 
     return { generationId, status: "streaming" };
   } catch (err: any) {
@@ -3874,26 +3791,22 @@ async function prepareRawCall(
     parameters,
     input.reasoning,
   );
-  if (provider.name === "anthropic" && reasoningConnection?.metadata) {
-    injectConnectionMetadataFlags(reasoningConnection, parameters);
-  }
+  if (reasoningConnection) injectConnectionMetadataFlags(reasoningConnection, parameters);
+
+  const cached = applyPromptCaching(
+    {
+      provider: provider.name,
+      model: input.model,
+      metadata: reasoningConnection?.metadata,
+    },
+    { params: parameters, messages: input.messages, tools: input.tools },
+  );
+
   const request: GenerationRequest = {
-    messages:
-      provider.name === "anthropic"
-        ? applyAnthropicCacheBreakpointsToMessages(
-            input.messages,
-            resolveAnthropicPromptCachingConfig(reasoningConnection?.metadata),
-          )
-        : input.messages,
+    messages: cached.messages,
     model: input.model,
-    parameters,
-    tools:
-      provider.name === "anthropic"
-        ? applyAnthropicCacheBreakpointsToTools(
-            input.tools,
-            resolveAnthropicPromptCachingConfig(reasoningConnection?.metadata),
-          )
-        : input.tools,
+    parameters: cached.params,
+    tools: cached.tools,
     signal: input.signal,
   };
   return { provider, apiKey, apiUrl, request };
@@ -3927,35 +3840,34 @@ async function prepareQuietCall(
     input.reasoning,
   );
 
-  injectConnectionMetadataFlags(connection, mergedParams);
-
-  const anthropicCaching = resolveAnthropicPromptCachingConfig(
-    connection.metadata,
-  );
-
   // Allow callers (e.g. Memory Cortex sidecar) to override the model without
   // swapping connection profiles. Strip the key from parameters so it doesn't
-  // leak into provider-specific request bodies as an unknown field.
+  // leak into provider-specific request bodies as an unknown field. Resolved
+  // before caching dispatch so model-gated strategies see the actual model
+  // that will be sent.
   const paramModel =
     typeof (mergedParams as any).model === "string"
       ? (mergedParams as any).model.trim()
       : "";
   if ("model" in mergedParams) delete (mergedParams as any).model;
 
+  injectConnectionMetadataFlags(connection, mergedParams);
+
+  const resolvedModel = paramModel || connection.model;
+  const cached = applyPromptCaching(
+    {
+      provider: provider.name,
+      model: resolvedModel,
+      metadata: connection.metadata,
+    },
+    { params: mergedParams, messages: input.messages, tools: input.tools },
+  );
+
   const request: GenerationRequest = {
-    messages:
-      provider.name === "anthropic"
-        ? applyAnthropicCacheBreakpointsToMessages(
-            input.messages,
-            anthropicCaching,
-          )
-        : input.messages,
-    model: paramModel || connection.model,
-    parameters: mergedParams,
-    tools:
-      provider.name === "anthropic"
-        ? applyAnthropicCacheBreakpointsToTools(input.tools, anthropicCaching)
-        : input.tools,
+    messages: cached.messages,
+    model: resolvedModel,
+    parameters: cached.params,
+    tools: cached.tools,
     signal: input.signal,
   };
 
@@ -4107,10 +4019,6 @@ export async function summarizeGenerate(
 
     injectConnectionMetadataFlags(connection, mergedParams);
 
-    const anthropicCaching = resolveAnthropicPromptCachingConfig(
-      connection.metadata,
-    );
-
     applyEffectiveReasoningSettings(
       userId,
       connection,
@@ -4119,20 +4027,21 @@ export async function summarizeGenerate(
       mergedParams,
     );
 
+    const resolvedModel = sidecarModel || connection.model;
+    const cached = applyPromptCaching(
+      {
+        provider: provider.name,
+        model: resolvedModel,
+        metadata: connection.metadata,
+      },
+      { params: mergedParams, messages: input.messages, tools: input.tools },
+    );
+
     const request: GenerationRequest = {
-      messages:
-        provider.name === "anthropic"
-          ? applyAnthropicCacheBreakpointsToMessages(
-              input.messages,
-              anthropicCaching,
-            )
-          : input.messages,
-      model: sidecarModel || connection.model,
-      parameters: mergedParams,
-      tools:
-        provider.name === "anthropic"
-          ? applyAnthropicCacheBreakpointsToTools(input.tools, anthropicCaching)
-          : input.tools,
+      messages: cached.messages,
+      model: resolvedModel,
+      parameters: cached.params,
+      tools: cached.tools,
     };
 
     // Use streaming when tools are present — some providers only emit tool call

@@ -9,6 +9,7 @@ import type { BreakdownCacheEntry } from '@/types/store'
 import { groupBreakdownEntries, getBlockDisplayColor } from '@/lib/prompt-breakdown'
 import type { BreakdownGroup } from '@/lib/prompt-breakdown'
 import { getAnthropicBreakdownCacheHints, getAnthropicCacheUsageSummary } from '@/lib/anthropic-breakdown-cache'
+import { getNanoGptCacheUsageSummary } from '@/lib/nanogpt-breakdown-cache'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { dryRunToRawPromptInput, formatRawPrompt, type RawPromptView } from '@/lib/formatRawPrompt'
 import { shouldForceLoomRuntimePreset } from '@/lib/loom/runtimeProfile'
@@ -199,6 +200,10 @@ export default function PromptItemizerModal() {
     () => data ? getAnthropicCacheUsageSummary(data.provider, data.usage) : null,
     [data],
   )
+  const nanoGptCacheUsage = useMemo(
+    () => data ? getNanoGptCacheUsageSummary(data.provider, data.usage) : null,
+    [data],
+  )
   const cacheHintsByKey = useMemo(() => {
     const map = new Map<string, { kind: 'cached' | 'miss'; label: string }>()
     flatEntries.forEach((item, index) => {
@@ -279,6 +284,20 @@ export default function PromptItemizerModal() {
                     )}
                     {anthropicCacheUsage.cacheCreation1hInputTokens > 0 && (
                       <span className={styles.cacheSummaryMetric}>1h {anthropicCacheUsage.cacheCreation1hInputTokens.toLocaleString()}</span>
+                    )}
+                  </div>
+                )}
+                {nanoGptCacheUsage && (
+                  <div className={styles.cacheSummary}>
+                    <span>NanoGPT cache</span>
+                    {nanoGptCacheUsage.cacheReadInputTokens > 0 && (
+                      <span className={styles.cacheSummaryMetric}>read {nanoGptCacheUsage.cacheReadInputTokens.toLocaleString()}</span>
+                    )}
+                    {nanoGptCacheUsage.cacheCreationInputTokens > 0 && (
+                      <span className={styles.cacheSummaryMetric}>write {nanoGptCacheUsage.cacheCreationInputTokens.toLocaleString()}</span>
+                    )}
+                    {nanoGptCacheUsage.cachedTokensOpenAiStyle > 0 && (
+                      <span className={styles.cacheSummaryMetric}>cached {nanoGptCacheUsage.cachedTokensOpenAiStyle.toLocaleString()}</span>
                     )}
                   </div>
                 )}

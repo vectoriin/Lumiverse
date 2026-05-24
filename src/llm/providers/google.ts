@@ -125,10 +125,11 @@ export class GoogleProvider implements LlmProvider {
     let buffer = "";
     const maybeYield = createCooperativeYielder(64, request.signal);
 
+    let streamDoneNaturally = false;
     try {
     while (true) {
       const { done, value } = await readWithAbort(reader, request.signal);
-      if (done) break;
+      if (done) { streamDoneNaturally = !request.signal?.aborted; break; }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -187,7 +188,7 @@ export class GoogleProvider implements LlmProvider {
       }
     }
     } finally {
-      await reader.cancel().catch(() => {});
+      if (!streamDoneNaturally) await reader.cancel().catch(() => {});
     }
   }
 

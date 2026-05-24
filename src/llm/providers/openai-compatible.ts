@@ -119,6 +119,12 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
             prompt_tokens: data.usage.prompt_tokens,
             completion_tokens: data.usage.completion_tokens,
             total_tokens: data.usage.total_tokens,
+            // Preserve provider-side telemetry so consumers (e.g. NanoGPT
+            // cache hit summary in the prompt breakdown UI) can read fields
+            // beyond the canonical three — cache_read_input_tokens,
+            // cache_creation_input_tokens, prompt_tokens_details.cached_tokens,
+            // and any other passthrough metadata.
+            provider_raw: { ...data.usage },
           }
         : undefined,
     };
@@ -155,10 +161,11 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
     // Tool call accumulation — OpenAI streams tool_calls as delta chunks
     const toolCallBuffer: { id: string; name: string; argsJson: string }[] = [];
 
+    let streamDoneNaturally = false;
     try {
     while (true) {
       const { done, value } = await readWithAbort(reader, request.signal);
-      if (done) break;
+      if (done) { streamDoneNaturally = !request.signal?.aborted; break; }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -206,6 +213,7 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
                 prompt_tokens: parsed.usage.prompt_tokens || 0,
                 completion_tokens: parsed.usage.completion_tokens || 0,
                 total_tokens: parsed.usage.total_tokens || 0,
+                provider_raw: { ...parsed.usage },
               }
             : undefined;
 
@@ -236,7 +244,7 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
       }
     }
     } finally {
-      await reader.cancel().catch(() => {});
+      if (!streamDoneNaturally) await reader.cancel().catch(() => {});
     }
   }
 
