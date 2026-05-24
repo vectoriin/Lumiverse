@@ -11,7 +11,7 @@ import { expressionsApi } from '@/api/expressions'
 import { personasApi } from '@/api/personas'
 import { globalAddonsApi } from '@/api/global-addons'
 import { imagesApi } from '@/api/images'
-import { getPersonaAvatarThumbUrlById, getCharacterAvatarThumbUrlById } from '@/lib/avatarUrls'
+import { getPersonaAvatarThumbUrlById, getCharacterAvatarThumbUrl } from '@/lib/avatarUrls'
 import { uuidv7 } from '@/lib/uuid'
 import { toast } from '@/lib/toast'
 import { shouldForceLoomRuntimePreset } from '@/lib/loom/runtimeProfile'
@@ -208,7 +208,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
   const databankDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [atQuery, setAtQuery] = useState<string | null>(null)
   const [atStartIndex, setAtStartIndex] = useState(0)
-  const [atResults, setAtResults] = useState<Array<{ id: string; name: string; slug: string; muted: boolean; image_id: string | null }>>([])
+  const [atResults, setAtResults] = useState<Array<{ id: string; name: string; slug: string; muted: boolean; image_id: string | null; extensions?: Record<string, any> }>>([])
   const [atActiveIdx, setAtActiveIdx] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const pendingSelectionRef = useRef<{ start: number; end: number; direction?: 'forward' | 'backward' | 'none' } | null>(null)
@@ -855,9 +855,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
           slug: slugifyName(c.name),
           muted: mutedCharacterIds.includes(id),
           image_id: (c as any).image_id ?? null,
+          extensions: (c as any).extensions ?? undefined,
         }
       })
-      .filter(Boolean) as Array<{ id: string; name: string; slug: string; muted: boolean; image_id: string | null }>
+      .filter(Boolean) as Array<{ id: string; name: string; slug: string; muted: boolean; image_id: string | null; extensions?: Record<string, any> }>
     const ranked = members
       .map((m) => {
         const lname = m.name.toLowerCase()
@@ -2484,7 +2485,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
                             {char.avatar_path || char.image_id ? (
                               <img
                                 className={styles.personaAvatarImg}
-                                src={getCharacterAvatarThumbUrlById(char.id, char.image_id) || undefined}
+                                src={getCharacterAvatarThumbUrl(char) || undefined}
                                 alt={char.name}
                                 loading="lazy"
                               />
@@ -2730,7 +2731,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
               <div className={styles.quickSetName}>Mention member</div>
               {atResults.length === 0 && <div className={styles.popEmpty}>No matching members.</div>}
               {atResults.map((r, i) => {
-                const avatarUrl = getCharacterAvatarThumbUrlById(r.id, r.image_id)
+                const avatarUrl = getCharacterAvatarThumbUrl(r)
                 return (
                   <button
                     key={r.id}

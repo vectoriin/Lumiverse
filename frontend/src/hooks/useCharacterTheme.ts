@@ -12,7 +12,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useStore } from '@/store'
-import { getCharacterAvatarThumbUrlById } from '@/lib/avatarUrls'
+import { getCharacterAvatarThumbUrl, pickCharacterThumbImageId } from '@/lib/avatarUrls'
 import { imagesApi } from '@/api/images'
 import { extractPalette, type ImagePalette } from '@/lib/colorExtraction'
 import { deriveCharacterOverlay, deriveCharacterNameVars } from '@/lib/characterTheme'
@@ -41,10 +41,10 @@ export function useCharacterTheme() {
     : null
 
   // Prefer the chat's active avatar override, fall back to character's default
-  const effectiveImageId = activeChatAvatarId ?? activeCharacter?.image_id ?? null
+  const effectiveImageId = activeChatAvatarId ?? pickCharacterThumbImageId(activeCharacter) ?? null
   const avatarUrl = activeChatAvatarId
     ? imagesApi.smallUrl(activeChatAvatarId)
-    : getCharacterAvatarThumbUrlById(activeCharacterId, activeCharacter?.image_id ?? null)
+    : getCharacterAvatarThumbUrl(activeCharacter)
   const avatarCacheKey = activeCharacterId
     ? `${activeCharacterId}:${effectiveImageId ?? 'legacy'}`
     : null
