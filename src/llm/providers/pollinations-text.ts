@@ -143,7 +143,7 @@ export class PollinationsTextProvider extends OpenAICompatibleProvider {
         }
       }
     } finally {
-      reader.cancel().catch(() => {});
+      await reader.cancel().catch(() => {});
     }
   }
 }

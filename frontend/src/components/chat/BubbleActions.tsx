@@ -12,12 +12,31 @@ interface BubbleActionsProps {
   onPromptBreakdown?: () => void
   onPlay?: () => void
   isPlaying?: boolean
+  /** True while a save-first TTS regen is in flight — swaps the play
+   *  button to a cancel affordance. */
+  isGenerating?: boolean
+  /** True when this message already has a persisted audio attachment —
+   *  changes the play tooltip to "Regenerate". */
+  hasSavedAudio?: boolean
   isHidden: boolean
   content: string
   className?: string
 }
 
-export default function BubbleActions({ onEdit, onDelete, onToggleHidden, onFork, onPromptBreakdown, onPlay, isPlaying, isHidden, content, className }: BubbleActionsProps) {
+export default function BubbleActions({
+  onEdit,
+  onDelete,
+  onToggleHidden,
+  onFork,
+  onPromptBreakdown,
+  onPlay,
+  isPlaying,
+  isGenerating,
+  hasSavedAudio,
+  isHidden,
+  content,
+  className,
+}: BubbleActionsProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
@@ -25,6 +44,15 @@ export default function BubbleActions({ onEdit, onDelete, onToggleHidden, onFork
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }, [content])
+
+  const playLabel = isGenerating
+    ? 'Cancel TTS generation'
+    : isPlaying
+      ? 'Stop playback'
+      : hasSavedAudio
+        ? 'Regenerate TTS audio'
+        : 'Play with TTS'
+  const showStopIcon = !!(isGenerating || isPlaying)
 
   return (
     <div data-component="BubbleActions" className={className ? `${styles.pill} ${className}` : styles.pill}>
@@ -38,11 +66,11 @@ export default function BubbleActions({ onEdit, onDelete, onToggleHidden, onFork
         <button
           type="button"
           onClick={onPlay}
-          title={isPlaying ? 'Stop playback' : 'Play with TTS'}
-          aria-label={isPlaying ? 'Stop playback' : 'Play with TTS'}
+          title={playLabel}
+          aria-label={playLabel}
           aria-pressed={isPlaying}
         >
-          {isPlaying ? <Square size={13} /> : <Volume2 size={13} />}
+          {showStopIcon ? <Square size={13} /> : <Volume2 size={13} />}
         </button>
       )}
       <button

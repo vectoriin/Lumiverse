@@ -10,6 +10,7 @@ import type { BulkMessageInput } from "../types/migrate";
 import type { PaginationParams, PaginatedResult } from "../types/pagination";
 import { paginatedQuery } from "./pagination";
 import * as embeddingsSvc from "./embeddings.service";
+import * as audioSvc from "./audio.service";
 import * as memoryCortex from "./memory-cortex";
 import { removePoolEntriesForChat } from "./generation-pool.service";
 import { invalidateChatMemoryCache, scheduleChatMemoryRefresh } from "./chat-memory-cache.service";
@@ -846,8 +847,23 @@ export function convertSoloChatToGroup(userId: string, chatId: string): Chat | n
 }
 
 export function deleteChat(userId: string, id: string): boolean {
+  // Snapshot any audio attachments before the cascade DELETE wipes the
+  // messages rows — we lose access to extras the moment the rows are gone.
+  let audioAttachments: any[] = [];
+  try {
+    const messageRows = getDb()
+      .query("SELECT extra FROM messages WHERE chat_id = ?")
+      .all(id) as any[];
+    for (const row of messageRows) {
+      audioAttachments.push(...collectMessageAttachments(row));
+    }
+  } catch (err) {
+    console.warn(`[chats] Failed to scan messages for audio cleanup in chat ${id}:`, err);
+  }
+
   const result = getDb().query("DELETE FROM chats WHERE id = ? AND user_id = ?").run(id, userId);
   if (result.changes > 0) {
+    cleanupAudioAttachments(userId, audioAttachments);
     invalidateChatMemoryCache(id);
     removePoolEntriesForChat(userId, id);
 
@@ -1420,10 +1436,43 @@ export function appendMessageAttachment(
 }
 
 /**
+ * Best-effort cleanup of audio_files rows referenced by message attachments.
+ * Tolerates missing audio table (test schemas) and missing rows. Caller passes
+ * the attachment list to clean up (either being-removed entries or the full
+ * extras of a message about to be deleted).
+ */
+function cleanupAudioAttachments(userId: string, attachments: any[]): void {
+  for (const att of attachments) {
+    if (!att || typeof att !== "object") continue;
+    if (att.type !== "audio") continue;
+    const id = typeof att.image_id === "string" ? att.image_id : null;
+    if (!id) continue;
+    try {
+      audioSvc.deleteAudio(userId, id);
+    } catch (err) {
+      console.warn(`[chats] Failed to delete audio file ${id} on cleanup:`, err);
+    }
+  }
+}
+
+function collectMessageAttachments(messageRow: any): any[] {
+  if (!messageRow) return [];
+  let extra: any = messageRow.extra;
+  if (typeof extra === "string") {
+    try { extra = JSON.parse(extra); } catch { return []; }
+  }
+  if (!extra || typeof extra !== "object") return [];
+  return Array.isArray(extra.attachments) ? extra.attachments : [];
+}
+
+/**
  * Removes a single attachment (by image_id) from a message's extra.attachments
  * array. Returns the updated Message if the attachment was found and removed,
  * null if the message doesn't exist, or the unchanged Message if the
  * attachment wasn't present. Emits MESSAGE_EDITED so chat clients re-render.
+ * When the removed attachment is an audio file, the underlying audio_files
+ * row + on-disk blob are also deleted (audio is single-ref per message; no
+ * orphan-tracking needed like images have).
  */
 export function removeMessageAttachment(
   userId: string,
@@ -1437,6 +1486,7 @@ export function removeMessageAttachment(
     ? existing.extra as Record<string, any>
     : {};
   const existingAttachments = Array.isArray(existingExtra.attachments) ? existingExtra.attachments : [];
+  const removed = existingAttachments.filter((a: any) => a && typeof a === "object" && a.image_id === imageId);
   const nextAttachments = existingAttachments.filter(
     (a: any) => a && typeof a === "object" && a.image_id !== imageId,
   );
@@ -1451,6 +1501,12 @@ export function removeMessageAttachment(
   getDb()
     .query("UPDATE messages SET extra = ? WHERE id = ? AND chat_id = ?")
     .run(JSON.stringify(normalizedExtra), messageId, existing.chat_id);
+
+  // Free any audio_files blob backing a removed audio attachment so the
+  // on-disk file doesn't outlive the message reference. Safe to call after
+  // the UPDATE — if cleanup throws, the attachment is already gone from the
+  // message and the orphan can be GC'd manually.
+  cleanupAudioAttachments(userId, removed);
 
   const updated: Message = { ...existing, extra: normalizedExtra };
   eventBus.emit(EventType.MESSAGE_EDITED, { chatId: updated.chat_id, message: updated }, userId);
@@ -1677,17 +1733,19 @@ export function bulkDeleteMessages(userId: string, chatId: string, messageIds: s
   if (messageIds.length > 500) throw new Error("Maximum 500 messages per batch");
 
   const db = getDb();
-  const getStmt = db.query("SELECT id FROM messages WHERE id = ? AND chat_id = ?");
+  const getStmt = db.query("SELECT id, extra FROM messages WHERE id = ? AND chat_id = ?");
   const deleteStmt = db.query("DELETE FROM messages WHERE id = ? AND chat_id = ?");
 
   let deleted = 0;
   const deletedIds: string[] = [];
+  const attachmentsToCleanup: any[] = [];
 
   const transaction = db.transaction(() => {
     for (const msgId of messageIds) {
       const row = getStmt.get(msgId, chatId) as any;
       if (!row) continue;
 
+      attachmentsToCleanup.push(...collectMessageAttachments(row));
       deleteStmt.run(msgId, chatId);
       deleted++;
       deletedIds.push(msgId);
@@ -1695,6 +1753,8 @@ export function bulkDeleteMessages(userId: string, chatId: string, messageIds: s
   });
 
   transaction();
+
+  cleanupAudioAttachments(userId, attachmentsToCleanup);
 
   for (const msgId of deletedIds) {
     eventBus.emit(EventType.MESSAGE_DELETED, { chatId, messageId: msgId }, userId);
@@ -1719,8 +1779,10 @@ export function bulkDeleteMessages(userId: string, chatId: string, messageIds: s
 export function deleteMessage(userId: string, id: string): boolean {
   const msg = getMessage(userId, id);
   if (!msg) return false;
+  const attachmentsToCleanup = collectMessageAttachments(msg);
   const result = getDb().query("DELETE FROM messages WHERE id = ? AND chat_id = ?").run(id, msg.chat_id);
   if (result.changes > 0) {
+    cleanupAudioAttachments(userId, attachmentsToCleanup);
     eventBus.emit(EventType.MESSAGE_DELETED, { chatId: msg.chat_id, messageId: id }, userId);
     invalidateChatMemoryCache(msg.chat_id);
 

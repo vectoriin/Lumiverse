@@ -930,7 +930,9 @@ app.post("/import", async (c) => {
             const importedBookIds: string[] = [];
             for (const bookData of lumiverseModules.world_books) {
               try {
-                const result = wbSvc.importLumiverseWorldBook(userId, character.id, bookData);
+                const result = wbSvc.importLumiverseWorldBook(userId, character.id, bookData, {
+                  signal: c.req.raw.signal,
+                });
                 importedBookIds.push(result.worldBook.id);
               } catch { /* skip individual failures */ }
             }

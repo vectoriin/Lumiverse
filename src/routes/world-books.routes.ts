@@ -740,7 +740,7 @@ app.post("/import", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json();
   try {
-    const result = svc.importWorldBook(userId, body);
+    const result = svc.importWorldBook(userId, body, { signal: c.req.raw.signal });
     return c.json({ world_book: result.worldBook, entry_count: result.entryCount }, 201);
   } catch (err: any) {
     return c.json({ error: err.message || "Import failed" }, 400);
@@ -773,7 +773,7 @@ app.post("/import-url", async (c) => {
   }
 
   try {
-    const result = svc.importWorldBook(userId, payload);
+    const result = svc.importWorldBook(userId, payload, { signal: c.req.raw.signal });
     return c.json({ world_book: result.worldBook, entry_count: result.entryCount }, 201);
   } catch (err: any) {
     return c.json({ error: err.message || "Import failed" }, 400);
@@ -796,7 +796,9 @@ app.post("/import-character-book", async (c) => {
     return c.json({ error: "No embedded character book found" }, 400);
   }
 
-  const result = svc.importCharacterBook(userId, characterId, character.name, characterBook);
+  const result = svc.importCharacterBook(userId, characterId, character.name, characterBook, {
+    signal: c.req.raw.signal,
+  });
   const currentIds = getCharacterWorldBookIds(character.extensions);
   const nextExtensions = setCharacterWorldBookIds(
     { ...(character.extensions || {}) },

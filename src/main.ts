@@ -115,6 +115,9 @@ initDnsSettings();
 const { startVectorizationQueueMaintenance } = await import("./services/vectorization-queue.service");
 startVectorizationQueueMaintenance();
 
+const { startDiskMonitor } = await import("./services/disk-monitor.service");
+startDiskMonitor();
+
 // Pre-warm tokenizers for configured connection models (fire-and-forget)
 import("./services/tokenizer.service").then(({ prewarm }) => prewarm()).catch(() => {});
 
@@ -280,6 +283,8 @@ async function gracefulShutdown(signal: string) {
   // 7.5 Stop DB stats monitor
   stopDatabaseMonitor();
   stopAutomaticDatabaseMaintenance();
+  const { stopDiskMonitor } = await import("./services/disk-monitor.service");
+  stopDiskMonitor();
 
   // 8. Close database (triggers WAL checkpoint)
   const { closeDatabase } = await import("./db/connection");

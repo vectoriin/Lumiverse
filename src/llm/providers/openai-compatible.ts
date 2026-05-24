@@ -236,7 +236,7 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
       }
     }
     } finally {
-      reader.cancel().catch(() => {});
+      await reader.cancel().catch(() => {});
     }
   }
 

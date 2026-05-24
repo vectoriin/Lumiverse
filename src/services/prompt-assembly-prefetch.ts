@@ -172,10 +172,14 @@ export async function prefetchAssemblyData(ctx: AssemblyContext): Promise<Prefet
         .map((m) => m.content)
         .join(" ");
       if (databankQueryPreview.trim().length > 0) {
+        // Fire-and-forget cache warm-up: the result is consumed only via the
+        // shared cache, never awaited here. We deliberately do NOT pass the
+        // generation signal — if the user regenerates, aborting an in-flight
+        // embedding fetch mid-receive can trigger a Bun HTTPThread use-after-free
+        // (AsyncHTTP.onAsyncHTTPCallback). The embedding service's internal
+        // timeout still bounds the request.
         void embeddingsSvc
-          .cachedEmbedTexts(ctx.userId, [databankQueryPreview], {
-            signal: ctx.signal,
-          })
+          .cachedEmbedTexts(ctx.userId, [databankQueryPreview])
           .catch(() => {
             /* Surface errors at the consumer site, not the warm-up. */
           });

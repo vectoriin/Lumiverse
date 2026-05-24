@@ -146,6 +146,19 @@ export enum EventType {
   SUMMARIZATION_STARTED = 'SUMMARIZATION_STARTED',
   SUMMARIZATION_COMPLETED = 'SUMMARIZATION_COMPLETED',
   SUMMARIZATION_FAILED = 'SUMMARIZATION_FAILED',
+
+  // System health
+  SYSTEM_DISK_LOW = 'SYSTEM_DISK_LOW',
+}
+
+export interface SystemDiskLowPayload {
+  path: string
+  /** 0..1, e.g. 0.93 = 93% full */
+  usagePercent: number
+  freeBytes: number
+  totalBytes: number
+  /** 0..1, the threshold that was crossed */
+  thresholdPercent: number
 }
 
 export interface SummarizationStartedPayload {

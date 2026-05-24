@@ -13,12 +13,34 @@ interface MessageActionsProps {
   onPromptBreakdown?: () => void
   onPlay?: () => void
   isPlaying?: boolean
+  /**
+   * True while a save-first TTS regen is in flight. Swaps the play
+   * button to a stop affordance with a "Cancel TTS generation" label so
+   * the user can abort a long synth they no longer want.
+   */
+  isGenerating?: boolean
+  /** True when this message already has a persisted audio attachment —
+   *  changes the play tooltip from "Play with TTS" to "Regenerate". */
+  hasSavedAudio?: boolean
   isUser: boolean
   isHidden: boolean
   content: string
 }
 
-export default function MessageActions({ onEdit, onDelete, onToggleHidden, onFork, onPromptBreakdown, onPlay, isPlaying, isUser, isHidden, content }: MessageActionsProps) {
+export default function MessageActions({
+  onEdit,
+  onDelete,
+  onToggleHidden,
+  onFork,
+  onPromptBreakdown,
+  onPlay,
+  isPlaying,
+  isGenerating,
+  hasSavedAudio,
+  isUser,
+  isHidden,
+  content,
+}: MessageActionsProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
@@ -26,6 +48,15 @@ export default function MessageActions({ onEdit, onDelete, onToggleHidden, onFor
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }, [content])
+
+  const playLabel = isGenerating
+    ? 'Cancel TTS generation'
+    : isPlaying
+      ? 'Stop playback'
+      : hasSavedAudio
+        ? 'Regenerate TTS audio'
+        : 'Play with TTS'
+  const showStopIcon = !!(isGenerating || isPlaying)
 
   return (
     <div className={styles.actions}>
@@ -40,11 +71,11 @@ export default function MessageActions({ onEdit, onDelete, onToggleHidden, onFor
           size="icon-sm"
           variant="ghost"
           onClick={onPlay}
-          title={isPlaying ? 'Stop playback' : 'Play with TTS'}
-          aria-label={isPlaying ? 'Stop playback' : 'Play with TTS'}
+          title={playLabel}
+          aria-label={playLabel}
           aria-pressed={isPlaying}
         >
-          {isPlaying ? <Square size={13} /> : <Volume2 size={13} />}
+          {showStopIcon ? <Square size={13} /> : <Volume2 size={13} />}
         </Button>
       )}
       <Button

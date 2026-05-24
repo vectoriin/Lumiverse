@@ -21,6 +21,7 @@ import { getProvider } from "../llm/registry";
 import { getFirstUserId } from "../auth/seed";
 import { sanitizeForVectorization } from "../utils/content-sanitizer";
 import { describeProviderError } from "../utils/provider-errors";
+import { fetchWithPreflightAbort, readJsonWithAbort } from "../llm/stream-utils";
 import { resolveBrokenTermuxLanceDbMirrorPath, resolveLanceDbConnectUri } from "../utils/lancedb-path";
 import { chunkDocument } from "./databank/document-chunker.service";
 import { loadWorldBookVectorSettings, type WorldBookVectorSettings } from "./world-book-vector-settings.service";
@@ -2305,31 +2306,39 @@ async function requestVertexEmbeddings(
 
 async function postVertex<T>(url: string, accessToken: string, body: Record<string, any>, timeoutMs: number, externalSignal?: AbortSignal): Promise<T> {
   const { signal, cleanup } = linkTimeoutSignal(externalSignal, timeoutMs);
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (err: any) {
+  const mapAbortError = (err: any): Error => {
     if (err?.name === "AbortError") {
-      if (externalSignal?.aborted) throw err;
-      throw new Error(`Vertex embedding request timed out after ${timeoutMs / 1000}s`);
+      if (externalSignal?.aborted) return err;
+      return new Error(`Vertex embedding request timed out after ${timeoutMs / 1000}s`);
     }
-    throw err;
+    return err;
+  };
+  try {
+    let res: Response;
+    try {
+      res = await fetchWithPreflightAbort(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(body),
+      }, signal);
+    } catch (err: any) {
+      throw mapAbortError(err);
+    }
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "Vertex embedding request failed");
+      throw new Error(`Vertex embedding request failed (${res.status}): ${msg}`);
+    }
+    try {
+      return await readJsonWithAbort<T>(res, signal);
+    } catch (err: any) {
+      throw mapAbortError(err);
+    }
   } finally {
     cleanup();
   }
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "Vertex embedding request failed");
-    throw new Error(`Vertex embedding request failed (${res.status}): ${msg}`);
-  }
-  return (await res.json()) as T;
 }
 
 async function requestEmbeddings(
@@ -2384,36 +2393,44 @@ async function requestEmbeddings(
     ? cfg.request_timeout * 1000
     : DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS;
   const { signal, cleanup } = linkTimeoutSignal(options?.signal, timeoutMs);
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (err: any) {
+  const mapAbortError = (err: any): Error => {
     if (err?.name === "AbortError") {
       // Distinguish external cancel (caller-initiated) from our own timeout.
-      if (options?.signal?.aborted) throw err;
-      throw new Error(`Embedding request timed out after ${timeoutMs / 1000}s`);
+      if (options?.signal?.aborted) return err;
+      return new Error(`Embedding request timed out after ${timeoutMs / 1000}s`);
     }
-    throw err;
+    return err;
+  };
+  try {
+    let res: Response;
+    try {
+      res = await fetchWithPreflightAbort(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      }, signal);
+    } catch (err: any) {
+      throw mapAbortError(err);
+    }
+
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "Embedding request failed");
+      throw new Error(`Embedding request failed (${res.status}): ${msg}`);
+    }
+
+    let payload: any;
+    try {
+      payload = await readJsonWithAbort<any>(res, signal);
+    } catch (err: any) {
+      throw mapAbortError(err);
+    }
+    return parseEmbeddingResponse(payload, texts.length);
   } finally {
     cleanup();
   }
-
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "Embedding request failed");
-    throw new Error(`Embedding request failed (${res.status}): ${msg}`);
-  }
-
-  const payload = await res.json() as any;
-  const vectors = parseEmbeddingResponse(payload, texts.length);
-  return vectors;
 }
 
 export async function embedTexts(

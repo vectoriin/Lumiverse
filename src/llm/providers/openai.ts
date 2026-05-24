@@ -405,7 +405,7 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
       }
     }
     } finally {
-      reader.cancel().catch(() => {});
+      await reader.cancel().catch(() => {});
     }
   }
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Fuse from 'fuse.js'
 import { personasApi } from '@/api/personas'
 import { useStore } from '@/store'
+import { resolveAutoPersonaBinding } from '@/store/slices/personas'
 import { toast } from '@/lib/toast'
 import type { Persona, CreatePersonaInput, UpdatePersonaInput } from '@/types/api'
 
@@ -245,8 +246,30 @@ export function usePersonaBrowser() {
         }
       }
       updatePersonaInStore(id, updated)
+
+      // Promote the new default into the active slot when nothing else is
+      // claiming it: no active persona, or no character/tag binding is
+      // already overriding the current chat. If a binding exists, leave the
+      // bound persona in place so the user's contextual choice wins.
+      if (newDefault && activePersonaId !== id) {
+        const state = useStore.getState()
+        const character = state.activeCharacterId
+          ? state.characters.find((c) => c.id === state.activeCharacterId)
+          : null
+        const resolved = resolveAutoPersonaBinding({
+          characterId: state.activeCharacterId,
+          characterTags: character?.tags ?? [],
+          personas: state.personas,
+          characterPersonaBindings: state.characterPersonaBindings,
+          personaTagBindings: state.personaTagBindings,
+        })
+        if (!resolved.personaId) {
+          setActivePersona(id)
+          toast.info(`Switched to persona: ${updated.name}`)
+        }
+      }
     },
-    [personas, updatePersonaInStore]
+    [personas, updatePersonaInStore, activePersonaId, setActivePersona]
   )
 
   const setLorebook = useCallback(

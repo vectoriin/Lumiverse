@@ -5,6 +5,15 @@ export interface MessageAttachment {
   original_filename: string;
   width?: number;             // images only
   height?: number;            // images only
+  /**
+   * Audio-only: the message swipe this audio was generated for. Audio is
+   * a per-swipe artifact (regenerating a swipe should not invalidate the
+   * audio of another swipe). When set, the player is only visible when
+   * `message.swipe_id` matches. Undefined on legacy audio (saved before
+   * this field existed) and on images — interpreted as "applies to all
+   * swipes" so we don't strand any pre-existing recordings.
+   */
+  swipe_id?: number;
 }
 
 export interface Message {

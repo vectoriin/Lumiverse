@@ -54,6 +54,11 @@ function isLocalStreamPlaceholderId(id: string | null | undefined) {
 const MACRO_VARS_PREFIX = 'metadata.macro_variables.'
 const CHAT_VARS_PREFIX = 'metadata.chat_variables.'
 
+// Set on first SYSTEM_DISK_LOW receipt to silence the rebroadcasts the
+// backend fires every 5 min while the disk stays over threshold. Module
+// scope (not state) — survives WS reconnects, resets only on full page load.
+let diskWarningShown = false
+
 interface VarChangeSummary {
   bagWideVarChange: boolean
   changedVars: ReadonlySet<string>
@@ -1066,6 +1071,27 @@ export function useWebSocket() {
           ? `${payload.extensionName}: ${payload.title}`
           : payload.extensionName
         toastFn(payload.message, { title: attributedTitle, duration: payload.duration })
+      }),
+
+      wsClient.on(EventType.SYSTEM_DISK_LOW, (payload: { path: string; usagePercent: number; freeBytes: number; totalBytes: number; thresholdPercent: number }) => {
+        // Backend re-emits this on every 5-min interval while the disk is
+        // over threshold so late-connecting admins still get notified. Dedupe
+        // here so existing sessions only see one toast per page-load.
+        if (diskWarningShown) return
+        diskWarningShown = true
+        const formatBytes = (bytes: number): string => {
+          const GIB = 1024 * 1024 * 1024
+          const MIB = 1024 * 1024
+          if (bytes >= GIB) return `${(bytes / GIB).toFixed(1)} GiB`
+          if (bytes >= MIB) return `${(bytes / MIB).toFixed(0)} MiB`
+          return `${bytes} B`
+        }
+        const pct = (payload.usagePercent * 100).toFixed(0)
+        const free = formatBytes(payload.freeBytes)
+        toast.warning(
+          `The disk hosting Lumiverse is ${pct}% full (${free} free). Free up space to avoid crashes — writes to memory-mapped files may fault if the disk fills.`,
+          { title: 'Storage almost full', duration: 30_000 },
+        )
       }),
 
       wsClient.on(EventType.SPINDLE_THEME_OVERRIDES, (payload: { extensionId: string; extensionName: string; overrides: { paletteAccent?: { h: number; s: number; l: number }; variables?: Record<string, string>; variablesByMode?: { dark?: Record<string, string>; light?: Record<string, string> } } | null }) => {

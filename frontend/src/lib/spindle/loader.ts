@@ -603,6 +603,32 @@ async function doLoadFrontendExtension(
         removeWidget(messageId: string, widgetId: string) {
           removeMessageWidget(extensionId, messageId, widgetId)
         },
+        getLatestMessageId(): string | null {
+          // Source from the chat store, NOT the DOM. The chat list is
+          // virtualized, so the bubble for the latest message may not
+          // be mounted right now (user scrolled up). Extensions want a
+          // real id regardless of mount state — they can pair this with
+          // dom.findMessageElement / dom.inject and the injection
+          // registry handles auto-replay on remount.
+          const msgs = useStore.getState().messages
+          return msgs.length > 0 ? msgs[msgs.length - 1].id : null
+        },
+        getMessageIdAtIndex(index: number): string | null {
+          const msgs = useStore.getState().messages
+          if (msgs.length === 0) return null
+          // Python-style negative indexing: -1 → last, -2 → second-to-last,
+          // etc. Clamping out-of-range to null keeps the caller from
+          // accidentally walking off either end of the array.
+          const i = index < 0 ? msgs.length + index : index
+          if (i < 0 || i >= msgs.length) return null
+          return msgs[i].id
+        },
+        listMessageIds(): string[] {
+          // Chronological order matches the store's array order — the
+          // chat slice sorts by index_in_chat so callers can rely on
+          // oldest-first / newest-last without re-sorting.
+          return useStore.getState().messages.map((m) => m.id)
+        },
       },
       characters: {
         get(characterId: string) {

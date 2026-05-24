@@ -57,6 +57,38 @@ export async function readWithAbort<T>(
   });
 }
 
+// Read a non-streaming JSON response body via the same user-space abort path
+// the streaming providers use. The user signal is checked between reads instead
+// of being handed to Bun's fetch, and reader.cancel() is awaited so the
+// underlying HTTP connection is fully torn down before the response object
+// becomes eligible for GC — closing the window where Bun's HTTPThread can
+// dispatch a callback into freed memory.
+export async function readJsonWithAbort<T>(
+  res: Response,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!res.body) {
+    return (await res.json()) as T;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await readWithAbort(reader, signal);
+      if (signal?.aborted) {
+        throw signal.reason ?? new DOMException("Aborted", "AbortError");
+      }
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+    }
+    buffer += decoder.decode();
+    return JSON.parse(buffer) as T;
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+
 // Streaming providers can emit a large number of tiny reasoning/text deltas in a
 // tight loop. Periodically yielding a macrotask keeps Bun's HTTP/WS queue moving
 // so stop requests and health checks do not starve behind an active stream.

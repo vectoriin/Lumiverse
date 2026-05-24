@@ -371,7 +371,7 @@ export class AnthropicProvider implements LlmProvider {
         }
       }
     } finally {
-      reader.cancel().catch(() => {});
+      await reader.cancel().catch(() => {});
     }
   }
 

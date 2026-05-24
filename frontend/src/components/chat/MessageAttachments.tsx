@@ -102,10 +102,13 @@ export default function MessageAttachments({ attachments, isUser, chatId, messag
     },
   ], [removeAttachment])
 
+  // Audio attachments are rendered by the separate MessageAudioSlot
+  // component as a sibling of MessageAttachments — keeping it out of the
+  // flex-wrap row here means the slot can collapse to 0 height (without
+  // dragging this wrapper's padding along) when there's no audio.
   const images = attachments.filter((a) => a.type === 'image')
-  const audios = attachments.filter((a) => a.type === 'audio')
 
-  if (images.length === 0 && audios.length === 0) return null
+  if (images.length === 0) return null
 
   return (
     <>
@@ -157,14 +160,6 @@ export default function MessageAttachments({ attachments, isUser, chatId, messag
             </button>
           )
         )}
-        {audios.map((att) => (
-          <div key={att.image_id} className={styles.audioWrap}>
-            <audio controls preload="metadata" className={styles.audioPlayer}>
-              <source src={imagesApi.url(att.image_id)} type={att.mime_type} />
-            </audio>
-            <span className={styles.audioName}>{att.original_filename}</span>
-          </div>
-        ))}
       </div>
 
       <ImageLightbox src={lightboxSrc} onClose={closeLightbox} />
