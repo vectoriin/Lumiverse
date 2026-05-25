@@ -133,15 +133,33 @@ export function EntityEditorModal({
             <input
               className={styles.chipInput}
               value={aliasDraft}
-              onChange={(e) => setAliasDraft(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val.includes(",")) {
+                  const parts = val.split(",");
+                  for (const part of parts.slice(0, -1)) {
+                    const a = part.trim();
+                    if (a && !aliases.some((x) => x.toLowerCase() === a.toLowerCase())) {
+                      setAliases((prev) => [...prev, a]);
+                    }
+                  }
+                  setAliasDraft(parts[parts.length - 1]);
+                  return;
+                }
+                setAliasDraft(val);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addAlias(); }
                 if (e.key === "Backspace" && !aliasDraft && aliases.length > 0) {
                   setAliases(aliases.slice(0, -1));
                 }
               }}
+              onBlur={() => { if (aliasDraft.trim()) addAlias(); }}
               placeholder={aliases.length === 0 ? "Type and press Enter to add" : ""}
             />
+            <button className={styles.addBtn} onClick={addAlias} disabled={!aliasDraft.trim()} type="button" title="Add alias">
+              <Plus size={12} />
+            </button>
           </div>
         </div>
 

@@ -1229,6 +1229,17 @@ app.put("/chats/:chatId/entities/:entityId", async (c) => {
   // the chat-ownership gate above plus this filter prevents cross-chat writes.
   db.query(`UPDATE memory_entities SET ${updates.join(", ")} WHERE id = ? AND chat_id = ?`).run(...params);
 
+  if (body.aliases && Array.isArray(body.aliases)) {
+    for (const alias of body.aliases) {
+      if (typeof alias !== "string" || !alias.trim()) continue;
+      const mergeResult = memoryCortex.checkAndAutoMerge(chatId, entityId, alias.trim());
+      if (mergeResult && mergeResult !== entityId) {
+        const survivor = memoryCortex.getEntities(chatId).find((e) => e.id === mergeResult);
+        return c.json({ ...survivor, merged: true, mergedInto: mergeResult });
+      }
+    }
+  }
+
   const updated = memoryCortex.getEntities(chatId).find((e) => e.id === entityId);
   return c.json(updated);
 });
@@ -1268,54 +1279,10 @@ app.post("/chats/:chatId/entities/merge", async (c) => {
 
   if (!source || !target) return c.json({ error: "One or both entities not found" }, 404);
 
-  const { getDb } = require("../db/connection");
-  const db = getDb();
+  memoryCortex.mergeEntitiesInternal(sourceId, targetId);
+
   const now = Math.floor(Date.now() / 1000);
-
-  db.transaction(() => {
-    // Merge aliases (source name becomes an alias on target)
-    const targetAliases = [...target.aliases];
-    if (!targetAliases.includes(source.name)) targetAliases.push(source.name);
-    for (const alias of source.aliases) {
-      if (!targetAliases.includes(alias)) targetAliases.push(alias);
-    }
-
-    // Merge facts (deduplicated)
-    const targetFacts = [...target.facts];
-    const lowerFacts = new Set(targetFacts.map((f) => f.toLowerCase()));
-    for (const fact of source.facts) {
-      if (!lowerFacts.has(fact.toLowerCase())) {
-        targetFacts.push(fact);
-      }
-    }
-
-    // Update target entity
-    db.query(
-      `UPDATE memory_entities SET
-        aliases = ?, facts = ?,
-        mention_count = mention_count + ?,
-        salience_avg = MAX(salience_avg, ?),
-        updated_at = ?,
-        user_edited_at = ?
-       WHERE id = ?`,
-    ).run(
-      JSON.stringify(targetAliases), JSON.stringify(targetFacts.slice(-20)),
-      source.mentionCount, source.salienceAvg, now, now, targetId,
-    );
-
-    // Re-point all source mentions to target
-    db.query("UPDATE memory_mentions SET entity_id = ? WHERE entity_id = ?")
-      .run(targetId, sourceId);
-
-    // Re-point all source relations to target
-    db.query("UPDATE memory_relations SET source_entity_id = ? WHERE source_entity_id = ?")
-      .run(targetId, sourceId);
-    db.query("UPDATE memory_relations SET target_entity_id = ? WHERE target_entity_id = ?")
-      .run(targetId, sourceId);
-
-    // Delete source entity
-    db.query("DELETE FROM memory_entities WHERE id = ?").run(sourceId);
-  })();
+  getDb().query("UPDATE memory_entities SET user_edited_at = ? WHERE id = ?").run(now, targetId);
 
   const merged = memoryCortex.getEntities(chatId).find((e) => e.id === targetId);
   return c.json(merged);

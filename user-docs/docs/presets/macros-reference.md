@@ -162,9 +162,11 @@ Macros for character and user identity.
 | `{{notChar}}` | `{{not_char}}` | The non-character party (usually the user) |
 | `{{charGroupFocused}}` | `{{charFocused}}`, `{{char_group_focused}}` | The targeted character in a group chat |
 | `{{isGroupChat}}` | `{{is_group_chat}}` | `"yes"` or `"no"` — usable as a condition |
+| `{{isNarrator}}` | `{{is_narrator}}` | `"yes"` or `"no"` — whether the active persona is a narrator (not a self-insert) |
 | `{{groupOthers}}` | `{{group_others}}` | Group members excluding the focused character |
 | `{{groupMemberCount}}` | `{{group_member_count}}` | Number of characters in the group |
 | `{{groupLastSpeaker}}` | `{{group_last_speaker}}` | Last character who spoke |
+| `{{groupCardMode}}` | `{{group_card_mode}}` | Card composition mode: `"solo"`, `"swap"`, `"merge"`, or `"merge_ignore_muted"` |
 
 ---
 
@@ -410,6 +412,7 @@ Access individual messages, track state, and query character metadata.
 | `{{toggle::name}}` | — | Flipped boolean (`"true"` ↔ `"false"`) | Toggle name (stored as local variable) |
 | `{{charTags}}` | `{{char_tags}}`, `{{characterTags}}` | Comma-separated list of the character's tags | — |
 | `{{charTag::tag}}` | `{{char_tag}}`, `{{hasTag}}`, `{{has_tag}}` | `"true"` / `"false"` — whether character has this tag | Tag name (case-insensitive) |
+| `{{rcounter::name}}` | — | Render-scoped counter (resets each prompt build, never persisted) | Counter name; optional second arg `reset` to zero it |
 
 **Examples:**
 
@@ -776,6 +779,7 @@ These macros return `"yes"` / `"no"` or `"true"` / `"false"` and are designed fo
 | Macro | True When |
 |-------|-----------|
 | `{{isGroupChat}}` | Chat has multiple characters |
+| `{{isNarrator}}` | Active persona is marked as a narrator |
 | `{{lumiaCouncilModeActive}}` | Council mode is enabled |
 | `{{lumiaCouncilToolsActive}}` | Council tools ran this generation |
 | `{{loomSovHandActive}}` | Sovereign Hand mode is on |

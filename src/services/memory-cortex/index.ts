@@ -100,6 +100,8 @@ export {
   updateSalienceBreakdown,
   processProvisionalEntities,
   getAllRelationsUnfiltered,
+  mergeEntitiesInternal,
+  checkAndAutoMerge,
 } from "./entity-graph";
 export type { MigrationResult } from "./entity-graph";
 export {

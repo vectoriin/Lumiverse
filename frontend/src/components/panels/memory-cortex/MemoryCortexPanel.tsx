@@ -384,7 +384,7 @@ function EntityCard({
 
   // Salience breakdown for mini bar
   const bd = entity.salienceBreakdown;
-  const bdTotal = bd ? (bd.mentionComponent + bd.arcComponent + bd.graphComponent) || 1 : 0;
+  const bdTotal = bd ? (bd.mentionComponent + bd.arcComponent + bd.graphComponent + (bd.frequencyFloor ?? 0)) || 1 : 0;
 
   // Fact extraction status indicator
   const needsFacts = entity.factExtractionStatus !== "ok" && entity.salienceAvg > 0.45;
@@ -446,15 +446,25 @@ function EntityCard({
             {entity.salienceAvg > 0 && (
               <span className={styles.salienceBadge} style={{
                 opacity: 0.4 + entity.salienceAvg * 0.6,
-              }}>
+              }} title={[
+                `Salience: ${(entity.salienceAvg * 100).toFixed(0)}%`,
+                bd ? `Mention: ${(bd.mentionComponent * 100).toFixed(0)}%` : null,
+                bd ? `Arc: ${(bd.arcComponent * 100).toFixed(0)}%` : null,
+                bd ? `Graph: ${(bd.graphComponent * 100).toFixed(0)}%` : null,
+                bd?.frequencyFloor ? `Floor: ${(bd.frequencyFloor * 100).toFixed(0)}%` : null,
+                entity.saliencePeak > 0 ? `Peak: ${(entity.saliencePeak * 100).toFixed(0)}%` : null,
+              ].filter(Boolean).join("\n")}>
                 {(entity.salienceAvg * 100).toFixed(0)}%
               </span>
             )}
             {bd && bdTotal > 0 && (
-              <span className={styles.salienceBar} title={`Mention: ${(bd.mentionComponent * 100).toFixed(0)}% · Arc: ${(bd.arcComponent * 100).toFixed(0)}% · Graph: ${(bd.graphComponent * 100).toFixed(0)}%`}>
+              <span className={styles.salienceBar} title={`Mention: ${(bd.mentionComponent * 100).toFixed(0)}% · Arc: ${(bd.arcComponent * 100).toFixed(0)}% · Graph: ${(bd.graphComponent * 100).toFixed(0)}%${bd.frequencyFloor ? ` · Floor: ${(bd.frequencyFloor * 100).toFixed(0)}%` : ""}`}>
                 <span className={clsx(styles.salienceBarSegment, styles.salienceBarMention)} style={{ width: `${(bd.mentionComponent / bdTotal) * 100}%` }} />
                 <span className={clsx(styles.salienceBarSegment, styles.salienceBarArc)} style={{ width: `${(bd.arcComponent / bdTotal) * 100}%` }} />
                 <span className={clsx(styles.salienceBarSegment, styles.salienceBarGraph)} style={{ width: `${(bd.graphComponent / bdTotal) * 100}%` }} />
+                {(bd.frequencyFloor ?? 0) > 0 && (
+                  <span className={clsx(styles.salienceBarSegment, styles.salienceBarFloor)} style={{ width: `${((bd.frequencyFloor ?? 0) / bdTotal) * 100}%` }} />
+                )}
               </span>
             )}
           </div>
@@ -524,6 +534,16 @@ function EntityCard({
                 <span className={styles.miniTag} style={{ borderColor: "color-mix(in srgb, #06b6d4 30%, transparent)" }}>
                   Graph {(bd.graphComponent * 100).toFixed(0)}%
                 </span>
+                {(bd.frequencyFloor ?? 0) > 0 && (
+                  <span className={styles.miniTag} style={{ borderColor: "color-mix(in srgb, #f59e0b 30%, transparent)" }}>
+                    Floor {((bd.frequencyFloor ?? 0) * 100).toFixed(0)}%
+                  </span>
+                )}
+                {(entity.saliencePeak ?? 0) > 0 && (
+                  <span className={styles.miniTag} style={{ borderColor: "color-mix(in srgb, #ef4444 30%, transparent)" }}>
+                    Peak {((entity.saliencePeak ?? 0) * 100).toFixed(0)}%
+                  </span>
+                )}
               </div>
             </div>
           )}
