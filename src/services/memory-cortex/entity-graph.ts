@@ -58,6 +58,7 @@ function rowToEntity(row: MemoryEntityRow): MemoryEntity {
     recentMentionCount: row.recent_mention_count ?? 0,
     confidence: (row.confidence ?? "confirmed") as EntityConfidence,
     userEditedAt: row.user_edited_at ?? null,
+    saliencePeak: row.salience_peak ?? 0,
   };
 }
 
@@ -726,8 +727,8 @@ export function upsertEntity(
     `INSERT INTO memory_entities
       (id, chat_id, name, entity_type, aliases, first_seen_chunk_id, last_seen_chunk_id,
        first_seen_at, last_seen_at, mention_count, last_mention_timestamp, metadata,
-       confidence, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+       confidence, salience_peak, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 0.0, ?, ?)`,
   ).run(
     id, chatId, extracted.name, resolvedType,
     JSON.stringify(initialAliases),
@@ -755,7 +756,7 @@ export function upsertEntity(
  *
  * @returns true if a new alias was persisted, false otherwise.
  */
-export function persistLearnedAlias(entityId: string, alias: string): boolean {
+export function persistLearnedAlias(entityId: string, alias: string, chatId?: string): boolean {
   const cleaned = sanitizeAlias(alias);
   if (!cleaned) return false;
   const db = getDb();
@@ -776,7 +777,109 @@ export function persistLearnedAlias(entityId: string, alias: string): boolean {
   db.query(
     "UPDATE memory_entities SET aliases = ?, updated_at = ? WHERE id = ?",
   ).run(JSON.stringify(existing), now, entityId);
+
+  if (chatId) {
+    checkAndAutoMerge(chatId, entityId, cleaned);
+  }
+
   return true;
+}
+
+/**
+ * Merge source entity into target entity. Transfers aliases, facts,
+ * mentions, and relations. Deletes the source entity.
+ */
+export function mergeEntitiesInternal(
+  sourceId: string,
+  targetId: string,
+): void {
+  const db = getDb();
+  const source = getEntity(sourceId);
+  const target = getEntity(targetId);
+  if (!source || !target) return;
+
+  const now = Math.floor(Date.now() / 1000);
+
+  db.transaction(() => {
+    const targetAliases = [...target.aliases];
+    if (!targetAliases.some((a) => a.toLowerCase() === source.name.toLowerCase())) {
+      targetAliases.push(source.name);
+    }
+    for (const alias of source.aliases) {
+      if (!targetAliases.some((a) => a.toLowerCase() === alias.toLowerCase())) {
+        targetAliases.push(alias);
+      }
+    }
+
+    const targetFacts = [...target.facts];
+    const lowerFacts = new Set(targetFacts.map((f) => f.toLowerCase()));
+    for (const fact of source.facts) {
+      if (!lowerFacts.has(fact.toLowerCase())) {
+        targetFacts.push(fact);
+      }
+    }
+
+    db.query(
+      `UPDATE memory_entities SET
+        aliases = ?, facts = ?,
+        mention_count = mention_count + ?,
+        salience_avg = MAX(salience_avg, ?),
+        salience_peak = MAX(COALESCE(salience_peak, 0), ?),
+        updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      JSON.stringify(targetAliases), JSON.stringify(targetFacts.slice(-20)),
+      source.mentionCount, source.salienceAvg, source.saliencePeak,
+      now, targetId,
+    );
+
+    db.query("UPDATE memory_mentions SET entity_id = ? WHERE entity_id = ?")
+      .run(targetId, sourceId);
+    db.query("UPDATE memory_relations SET source_entity_id = ? WHERE source_entity_id = ?")
+      .run(targetId, sourceId);
+    db.query("UPDATE memory_relations SET target_entity_id = ? WHERE target_entity_id = ?")
+      .run(targetId, sourceId);
+
+    db.query("DELETE FROM memory_entities WHERE id = ?").run(sourceId);
+  })();
+}
+
+/**
+ * After an alias is added, check if it matches another entity's name.
+ * If found, auto-merge the smaller entity (by mention count) into the larger.
+ * @returns Surviving entity ID if a merge occurred, null otherwise.
+ */
+export function checkAndAutoMerge(
+  chatId: string,
+  entityId: string,
+  newAlias: string,
+): string | null {
+  const db = getDb();
+
+  const match = db
+    .query(
+      `SELECT id, mention_count FROM memory_entities
+       WHERE chat_id = ? AND name = ? COLLATE NOCASE AND id != ?`,
+    )
+    .get(chatId, newAlias, entityId) as { id: string; mention_count: number } | null;
+
+  if (!match) return null;
+
+  const current = db
+    .query("SELECT mention_count FROM memory_entities WHERE id = ?")
+    .get(entityId) as { mention_count: number } | null;
+  if (!current) return null;
+
+  const keepId = current.mention_count >= match.mention_count ? entityId : match.id;
+  const absorbId = keepId === entityId ? match.id : entityId;
+
+  mergeEntitiesInternal(absorbId, keepId);
+
+  console.info(
+    `[memory-cortex] Auto-merged entity "${absorbId}" into "${keepId}" via alias "${newAlias}" in chat ${chatId}`,
+  );
+
+  return keepId;
 }
 
 /** Flip user_edited_at on an entity so rebuilds preserve its curated fields. */
@@ -910,18 +1013,22 @@ export function updateEntityEmotionalValence(
     .run(JSON.stringify(existing), now, entityId);
 }
 
-/** Update salience average for an entity */
+/** Update salience average (EMA) and peak for an entity */
 export function updateEntitySalience(entityId: string, chunkSalience: number): void {
   const db = getDb();
-  const row = db.query("SELECT salience_avg, mention_count FROM memory_entities WHERE id = ?").get(entityId) as any;
+  const row = db.query(
+    "SELECT salience_avg, salience_peak FROM memory_entities WHERE id = ?",
+  ).get(entityId) as { salience_avg: number; salience_peak: number } | null;
   if (!row) return;
 
-  const count = row.mention_count || 1;
-  const newAvg = row.salience_avg + (chunkSalience - row.salience_avg) / count;
+  const EMA_ALPHA = 0.15;
+  const newAvg = row.salience_avg * (1 - EMA_ALPHA) + chunkSalience * EMA_ALPHA;
+  const newPeak = Math.max(row.salience_peak ?? 0, chunkSalience);
 
   const now = Math.floor(Date.now() / 1000);
-  db.query("UPDATE memory_entities SET salience_avg = ?, updated_at = ? WHERE id = ?")
-    .run(newAvg, now, entityId);
+  db.query(
+    "UPDATE memory_entities SET salience_avg = ?, salience_peak = ?, updated_at = ? WHERE id = ?",
+  ).run(newAvg, newPeak, now, entityId);
 }
 
 /** Update last_mention_timestamp and recent_mention_count for an entity (IMP 2) */
@@ -987,7 +1094,7 @@ export function getEntitiesNeedingFactExtraction(
 
 /**
  * Update salience breakdown for an entity (IMP 2).
- * Decomposes salience into mention, arc, and graph components.
+ * Decomposes salience into mention, arc, graph, and frequency-floor components.
  */
 export function updateSalienceBreakdown(
   entityId: string,
@@ -999,29 +1106,32 @@ export function updateSalienceBreakdown(
 
   const now = Math.floor(Date.now() / 1000);
 
-  // Mention component: recency-weighted mention frequency
-  const mentionAge = entity.lastMentionTimestamp
-    ? Math.max(0, now - entity.lastMentionTimestamp)
-    : now;
-  const mentionDecay = Math.exp(-0.01 * (mentionAge / 60));
+  // Mention component: log-scaled frequency (reaches ~1.0 at 127 mentions)
   const mentionComponent = Math.min(1.0,
-    (Math.log2(1 + entity.mentionCount) / 10) * mentionDecay,
+    Math.log2(1 + entity.mentionCount) / 7,
   );
 
-  // Arc component: from existing salience (approximation until arcs are fully tracked)
-  // This will be the portion of salience not explained by mentions or graph
-  const arcComponent = Math.max(0, entity.salienceAvg - mentionComponent * 0.5);
+  // Arc component: anchored to peak salience so dramatic introductions persist
+  const arcComponent = Math.max(entity.saliencePeak * 0.8, entity.salienceAvg);
 
   // Graph component: single-hop weighted centrality
   const graphComponent = computeGraphCentrality(entityId, chatId);
 
-  // Total: weighted sum
-  const total = mentionComponent * 0.4 + arcComponent * 0.4 + graphComponent * 0.2;
+  // Frequency floor: entities with >10 mentions get a guaranteed minimum
+  const frequencyFloor = entity.mentionCount > 10 ? 0.15 : 0;
+
+  const total = Math.min(1.0,
+    mentionComponent * 0.35 +
+    arcComponent * 0.35 +
+    graphComponent * 0.15 +
+    frequencyFloor,
+  );
 
   const breakdown: SalienceBreakdown = {
     mentionComponent,
     arcComponent,
     graphComponent,
+    frequencyFloor,
     total,
   };
 
@@ -1198,6 +1308,7 @@ export function deleteEntitiesForChat(
       `UPDATE memory_entities SET
         mention_count = 0,
         salience_avg = 0,
+        salience_peak = 0,
         last_seen_chunk_id = NULL,
         last_seen_at = NULL,
         first_seen_chunk_id = NULL,
@@ -1636,8 +1747,9 @@ export function ingestChunkEntities(
         0, // Sentiment from mentions will be refined later
       );
 
-      // Update entity salience (with breakdown)
+      // Update entity salience (EMA + peak) then recompute breakdown
       updateEntitySalience(entityId, chunkSalience);
+      updateSalienceBreakdown(entityId, chatId);
 
       // Update last_mention_timestamp and recent_mention_count
       updateEntityMentionTimestamp(entityId, chunkTimestamp);
@@ -1664,7 +1776,7 @@ export function ingestChunkEntities(
           entityIdMap.set(da.alias.toLowerCase(), canonicalId);
         }
         if (canonicalId) {
-          persistLearnedAlias(canonicalId, da.alias);
+          persistLearnedAlias(canonicalId, da.alias, chatId);
         }
       }
     }
