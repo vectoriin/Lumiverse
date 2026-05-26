@@ -86,7 +86,7 @@ export default function WorldBookEditorModal() {
   // Load books
   const loadBooks = useCallback(async () => {
     try {
-      const res = await worldBooksApi.list({ limit: 200 })
+      const res = await worldBooksApi.list({ limit: 1000 })
       setBooks(res.data)
     } catch {}
   }, [])

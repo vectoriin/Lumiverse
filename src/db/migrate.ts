@@ -147,13 +147,22 @@ function repairDreamWeaverBaselineDrift(db: Database): void {
 }
 
 // The shipped baseline.sql was regenerated from a DB that already had
-// migration 072 applied, so world_books.folder is present after baseline
-// bootstrap. Returns true when the migration's effect is already in place
-// and the runner should record it as applied without re-running.
+// migrations 072, 075, and 076 applied, so their schema changes are
+// present after baseline bootstrap. Returns true when the migration's
+// effect is already in place and the runner should record it as applied
+// without re-running.
 function isBaselineDriftAlreadyApplied(db: Database, file: string): boolean {
   if (file === "072_world_books_folder.sql") {
     const columns = db.query("PRAGMA table_info('world_books')").all() as Array<{ name: string }>;
     return columns.some((column) => column.name === "folder");
+  }
+  if (file === "075_persona_is_narrator.sql") {
+    const columns = db.query("PRAGMA table_info('personas')").all() as Array<{ name: string }>;
+    return columns.some((column) => column.name === "is_narrator");
+  }
+  if (file === "076_cortex_salience_peak.sql") {
+    const columns = db.query("PRAGMA table_info('memory_entities')").all() as Array<{ name: string }>;
+    return columns.some((column) => column.name === "salience_peak");
   }
   return false;
 }

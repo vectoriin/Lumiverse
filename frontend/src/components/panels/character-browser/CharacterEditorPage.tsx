@@ -241,7 +241,7 @@ export default function CharacterEditorPage() {
     const loadWorldBooks = async () => {
       if (!editingCharacterId) return
       try {
-        const res = await worldBooksApi.list({ limit: 200 })
+        const res = await worldBooksApi.list({ limit: 1000 })
         if (!cancelled) setWorldBooks(res.data.map((b) => ({ id: b.id, name: b.name, folder: b.folder || '' })))
       } catch {
         // no-op
