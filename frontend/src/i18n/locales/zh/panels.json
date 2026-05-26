@@ -566,7 +566,16 @@
     "restoreServerDefault": "恢复服务器默认",
     "reset": "重置",
     "summarizationSystemPrompt": "摘要系统提示词",
-    "summarizationUserPrompt": "摘要用户提示词"
+    "summarizationUserPrompt": "摘要用户提示词",
+    "rebuildFromScratch": "从头重建",
+    "rebuilding": "重建中...",
+    "rebuildInProgress": "正在重建",
+    "rebuildBatchProgress": "正在处理第 {{current}}/{{total}} 批…",
+    "clearModalTitle": "清空摘要",
+    "rebuildModalTitle": "重建摘要",
+    "rebuildModalMessage": "这将分 <strong>{{batchCount}}</strong> 个批次处理全部 <strong>{{totalMessages}}</strong> 条消息。如果重建中途失败，现有摘要将被保留。",
+    "rebuildModalLoading": "正在从头重建摘要…",
+    "rebuildConfirm": "重建"
   },
   "regexPanel": {
     "title": "正则脚本",

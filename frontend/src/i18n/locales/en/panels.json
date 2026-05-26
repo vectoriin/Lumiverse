@@ -566,7 +566,16 @@
     "restoreServerDefault": "Restore server default",
     "reset": "Reset",
     "summarizationSystemPrompt": "Summarization System Prompt",
-    "summarizationUserPrompt": "Summarization User Prompt"
+    "summarizationUserPrompt": "Summarization User Prompt",
+    "rebuildFromScratch": "Rebuild from scratch",
+    "rebuilding": "Rebuilding...",
+    "rebuildInProgress": "Rebuilding in progress",
+    "rebuildBatchProgress": "Processing batch {{current}}/{{total}}…",
+    "clearModalTitle": "Clear Summary",
+    "rebuildModalTitle": "Rebuild Summary",
+    "rebuildModalMessage": "This will process all <strong>{{totalMessages}}</strong> messages in <strong>{{batchCount}}</strong> batch(es). The existing summary will be preserved if the rebuild fails midway.",
+    "rebuildModalLoading": "Rebuilding summary from scratch…",
+    "rebuildConfirm": "Rebuild"
   },
   "regexPanel": {
     "title": "Regex Scripts",

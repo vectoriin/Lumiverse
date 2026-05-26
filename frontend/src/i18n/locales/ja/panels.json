@@ -566,7 +566,16 @@
     "restoreServerDefault": "サーバーのデフォルトを復元",
     "reset": "リセット",
     "summarizationSystemPrompt": "要約システム プロンプト",
-    "summarizationUserPrompt": "要約ユーザー プロンプト"
+    "summarizationUserPrompt": "要約ユーザー プロンプト",
+    "rebuildFromScratch": "最初から再構築",
+    "rebuilding": "再構築中...",
+    "rebuildInProgress": "再構築を実行中",
+    "rebuildBatchProgress": "バッチ {{current}}/{{total}} を処理中…",
+    "clearModalTitle": "概要をクリア",
+    "rebuildModalTitle": "概要を再構築",
+    "rebuildModalMessage": "<strong>{{totalMessages}}</strong> 件すべてのメッセージを <strong>{{batchCount}}</strong> 個のバッチで処理します。再構築が途中で失敗した場合、既存の概要は保持されます。",
+    "rebuildModalLoading": "概要を最初から再構築しています…",
+    "rebuildConfirm": "再構築"
   },
   "regexPanel": {
     "title": "正規表現スクリプト",

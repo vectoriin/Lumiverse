@@ -566,7 +566,16 @@
     "restoreServerDefault": "Restaurer les paramètres par défaut du serveur",
     "reset": "Réinitialiser",
     "summarizationSystemPrompt": "Invite système de récapitulation",
-    "summarizationUserPrompt": "Invite utilisateur de récapitulation"
+    "summarizationUserPrompt": "Invite utilisateur de récapitulation",
+    "rebuildFromScratch": "Reconstruire de zéro",
+    "rebuilding": "Reconstruction...",
+    "rebuildInProgress": "Reconstruction en cours",
+    "rebuildBatchProgress": "Traitement du lot {{current}}/{{total}}…",
+    "clearModalTitle": "Effacer le résumé",
+    "rebuildModalTitle": "Reconstruire le résumé",
+    "rebuildModalMessage": "Cela traitera l'ensemble des <strong>{{totalMessages}}</strong> messages en <strong>{{batchCount}}</strong> lot(s). Le résumé existant sera conservé si la reconstruction échoue en cours de route.",
+    "rebuildModalLoading": "Reconstruction du résumé de zéro…",
+    "rebuildConfirm": "Reconstruire"
   },
   "regexPanel": {
     "title": "Scripts Regex",
