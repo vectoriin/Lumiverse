@@ -1398,7 +1398,7 @@ export async function processChunk(
           const subjectEntity = sidecarEntities.find((e) => e.role === "subject") ?? sidecarEntities[0];
           const entity = entityGraph.findEntityByName(data.chatId, subjectEntity.name);
           if (entity) {
-            if (config.factManagement.autopilot && sidecarActive && generateRawFn && sidecarConnectionId) {
+            if (config.factManagement.autopilot && sidecarActive) {
               // Defer LLM call to after the transaction completes
               deferredAutopilotEntityId = entity.id;
               entityGraph.addEntityFacts(entity.id, sidecarFacts, null, chunkImportance, maxFacts);
