@@ -390,6 +390,16 @@
   }
 }
 
+/* Touch devices with inflated viewports (e.g. browser zoom < 100%)
+   skip the max-width breakpoint above — catch them by input type. */
+@media (pointer: coarse) {
+  .content {
+    justify-content: flex-start;
+    padding-top: max(24px, calc(18dvh / var(--lumiverse-ui-scale, 1)));
+    padding-bottom: calc(32px + var(--app-keyboard-inset-bottom, 0px));
+  }
+}
+
 /* When virtual keyboard is visible, the viewport shrinks.
    Ensure the page scrolls instead of clipping. */
 @media (max-height: 500px) {
