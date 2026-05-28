@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useTranslation } from 'react-i18next'
 import { ArrowUpRight, Globe, Send, Sparkles, Wrench } from "lucide-react";
 import { parseSlash } from "../../lib/slash-parser";
 import type { ToolCatalogEntry } from "@/api/dream-weaver-tooling";
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function Composer({ catalog, hasSource, workspaceKind, onSubmit }: Props) {
+  const { t } = useTranslation('dreamWeaver')
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
@@ -90,7 +92,7 @@ export function Composer({ catalog, hasSource, workspaceKind, onSubmit }: Props)
       return;
     }
     if (!hasSource && requiresSource(result.tool)) {
-      setError("Add source material with /dream before running generation tools.");
+      setError(t('chat.composer.needsSource'));
       return;
     }
     setError(null);
@@ -141,8 +143,8 @@ export function Composer({ catalog, hasSource, workspaceKind, onSubmit }: Props)
       {showSuggestions && (
         <div className={styles.suggestions} id={suggestionsId} role="listbox">
           <div className={styles.suggestionHeader}>
-            <span>Tools</span>
-            <span>Tab completes a typed command</span>
+            <span>{t('chat.composer.toolsHeader')}</span>
+            <span>{t('chat.composer.tabHint')}</span>
           </div>
           {suggestions.map((tool, index) => {
             const command = tool.slashCommand ?? `/${tool.name}`;
@@ -211,8 +213,8 @@ export function Composer({ catalog, hasSource, workspaceKind, onSubmit }: Props)
           className={styles.send}
           onMouseDown={(event) => event.preventDefault()}
           onClick={submit}
-          title="Run command"
-          aria-label="Run Dream Weaver command"
+          title={t('chat.composer.runCommand')}
+          aria-label={t('chat.composer.runCommandAria')}
         >
           <Send size={14} />
         </button>

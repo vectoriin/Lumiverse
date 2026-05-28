@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import { Copy, Check, Pencil, Trash2, EyeOff, Eye, BarChart3, Volume2, Square } from 'lucide-react'
 import { IconGitFork } from '@tabler/icons-react'
 import { copyTextToClipboard } from '@/lib/clipboard'
@@ -37,6 +39,8 @@ export default function BubbleActions({
   content,
   className,
 }: BubbleActionsProps) {
+  const { t } = useTranslation('chat')
+  const { t: tc } = useTranslation('common')
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
@@ -46,20 +50,20 @@ export default function BubbleActions({
   }, [content])
 
   const playLabel = isGenerating
-    ? 'Cancel TTS generation'
+    ? t('messageActions.cancelTtsGeneration')
     : isPlaying
-      ? 'Stop playback'
+      ? t('messageActions.stopPlayback')
       : hasSavedAudio
-        ? 'Regenerate TTS audio'
-        : 'Play with TTS'
+        ? t('messageActions.regenerateTtsAudio')
+        : t('messageActions.playTts')
   const showStopIcon = !!(isGenerating || isPlaying)
 
   return (
     <div data-component="BubbleActions" className={className ? `${styles.pill} ${className}` : styles.pill}>
-      <button type="button" onClick={handleCopy} title="Copy" aria-label="Copy">
+      <button type="button" onClick={handleCopy} title={tc('actions.copy')} aria-label={tc('actions.copy')}>
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </button>
-      <button type="button" onClick={onEdit} title="Edit" aria-label="Edit">
+      <button type="button" onClick={onEdit} title={tc('actions.edit')} aria-label={tc('actions.edit')}>
         <Pencil size={13} />
       </button>
       {onPlay && (
@@ -76,20 +80,20 @@ export default function BubbleActions({
       <button
         type="button"
         onClick={onToggleHidden}
-        title={isHidden ? 'Unhide from AI context' : 'Hide from AI context'}
-        aria-label={isHidden ? 'Unhide' : 'Hide'}
+        title={isHidden ? t('messageActions.unhideFromAi') : t('messageActions.hideFromAi')}
+        aria-label={isHidden ? t('messageActions.unhide') : t('messageActions.hide')}
       >
         {isHidden ? <Eye size={13} /> : <EyeOff size={13} />}
       </button>
-      <button type="button" onClick={onFork} title="Fork chat here" aria-label="Fork chat">
+      <button type="button" onClick={onFork} title={t('messageActions.fork')} aria-label={t('messageActions.forkAria')}>
         <IconGitFork size={13} />
       </button>
       {onPromptBreakdown && (
-        <button type="button" onClick={onPromptBreakdown} title="Prompt breakdown" aria-label="Prompt breakdown">
+        <button type="button" onClick={onPromptBreakdown} title={t('messageActions.promptBreakdown')} aria-label={t('messageActions.promptBreakdown')}>
           <BarChart3 size={13} />
         </button>
       )}
-      <button type="button" onClick={onDelete} title="Delete" aria-label="Delete">
+      <button type="button" onClick={onDelete} title={tc('actions.delete')} aria-label={tc('actions.delete')}>
         <Trash2 size={13} />
       </button>
     </div>

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   RefreshCw,
   Download,
@@ -68,23 +69,20 @@ function normalizeOperatorOperation(operation: string | null | undefined): strin
   return OPERATOR_OPERATION_LABELS[operation] ?? operation
 }
 
-const TRUSTED_HOST_SOURCE_LABELS: Record<TrustedHostEntry['source'], string> = {
-  hostname: 'hostname',
-  mdns: 'mDNS',
-  'reverse-dns': 'reverse DNS',
-  tailscale: 'Tailscale',
-  'lan-ip': 'LAN IP',
-  env: 'env',
-  configured: 'configured',
-}
-
-const IPC_REASON_COPY: Record<OperatorStatus['ipcReason'], string> = {
-  connected: 'Runner IPC connected.',
-  not_started_with_runner: 'Runner IPC not available. This server was started without the runner. Start Lumiverse with ./start.sh in an interactive terminal, or use bun run runner.',
-  runner_env_without_process_send: 'Runner IPC was requested, but Bun did not expose process.send in this server process. This usually means the server was relaunched outside the runner IPC channel.',
-}
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+function hostSourceKey(source: TrustedHostEntry['source']): string {
+  const keys: Record<TrustedHostEntry['source'], string> = {
+    hostname: 'operator.hostSourceHostname',
+    mdns: 'operator.hostSourceMdns',
+    'reverse-dns': 'operator.hostSourceReverseDns',
+    tailscale: 'operator.hostSourceTailscale',
+    'lan-ip': 'operator.hostSourceLanIp',
+    env: 'operator.hostSourceEnv',
+    configured: 'operator.hostSourceConfigured',
+  }
+  return keys[source] ?? source
+}
 
 function formatUptime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
@@ -185,6 +183,7 @@ interface ConfirmState {
 // ─── Log Viewer ─────────────────────────────────────────────────────────────
 
 function LogViewer() {
+  const { t } = useTranslation('settings')
   const logs = useStore((s) => s.operatorLogs)
   const clearLogs = useStore((s) => s.clearOperatorLogs)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -233,7 +232,7 @@ function LogViewer() {
       <div className={styles.logContainer}>
         <div ref={scrollRef} className={styles.logScroll} onScroll={handleScroll}>
           {logs.length === 0 ? (
-            <div className={styles.logEmpty}>No log entries yet. Server output will appear here.</div>
+            <div className={styles.logEmpty}>{t('operator.logsEmpty')}</div>
           ) : (
             logs.map((entry, i) => (
               <div key={i} className={styles.logEntry}>
@@ -248,7 +247,7 @@ function LogViewer() {
       </div>
       <div className={styles.logControls}>
         <div className={styles.logBufferControl}>
-          <span>Buffer:</span>
+          <span>{t('operator.logsBuffer')}</span>
           <input
             type="number"
             className={styles.logBufferInput}
@@ -258,11 +257,11 @@ function LogViewer() {
             step={50}
             onChange={(e) => handleBufferChange(e.target.value)}
           />
-          <span>lines</span>
+          <span>{t('operator.logsLines')}</span>
         </div>
         <button className={styles.logClearBtn} onClick={clearLogs}>
           <Trash2 size={12} />
-          Clear
+          {t('operator.logsClear')}
         </button>
       </div>
     </>
@@ -271,7 +270,10 @@ function LogViewer() {
 
 // ─── Main Panel ─────────────────────────────────────────────────────────────
 
+type VectorBusyOp = 'compacting' | 'resetting'
+
 export default function OperatorPanel() {
+  const { t } = useTranslation('settings')
   const [status, setStatus] = useState<OperatorStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
   const [dbStatus, setDbStatus] = useState<OperatorDatabaseStatus | null>(null)
@@ -288,7 +290,7 @@ export default function OperatorPanel() {
   const [reconnecting, setReconnecting] = useState(false)
   const [isShutdown, setIsShutdown] = useState(false)
   const [vectorHealth, setVectorHealth] = useState<VectorStoreHealth | null>(null)
-  const [vectorBusy, setVectorBusy] = useState<string | null>(null)
+  const [vectorBusy, setVectorBusy] = useState<VectorBusyOp | null>(null)
   const [trustedHosts, setTrustedHosts] = useState<TrustedHostsResponse | null>(null)
   const [trustedHostsLoading, setTrustedHostsLoading] = useState(true)
   const [trustedHostsError, setTrustedHostsError] = useState<string | null>(null)
@@ -308,7 +310,40 @@ export default function OperatorPanel() {
     ? storeProgressMessage
     : null
   const ipcAvailable = status?.ipcAvailable ?? false
-  const ipcHint = status ? IPC_REASON_COPY[status.ipcReason] : null
+  const ipcHint = useMemo(() => {
+    if (!status) return null
+    switch (status.ipcReason) {
+      case 'connected':
+        return t('operator.ipcConnected')
+      case 'not_started_with_runner':
+        return t('operator.ipcNotStarted')
+      case 'runner_env_without_process_send':
+        return t('operator.ipcNoProcessSend')
+      default:
+        return null
+    }
+  }, [status, t])
+
+  const busyMessage = useCallback((op: string) => {
+    const labels: Record<string, string> = {
+      checking: t('operator.busyChecking'),
+      updating: t('operator.busyUpdating'),
+      'switching branch': t('operator.busySwitchingBranch'),
+      restarting: t('operator.busyRestarting'),
+      'shutting down': t('operator.busyShuttingDown'),
+      'toggling remote': t('operator.busyTogglingRemote'),
+      'clearing cache': t('operator.busyClearingCache'),
+      'installing dependencies': t('operator.busyInstallingDeps'),
+      'saving database tuning': t('operator.busySavingDbTuning'),
+      'saving sharp settings': t('operator.busySavingSharp'),
+      'saving database maintenance': t('operator.busySavingDbMaintenance'),
+      'refreshing database stats': t('operator.busyRefreshingDbStats'),
+      'database maintenance': t('operator.busyDbMaintenance'),
+      'database vacuum': t('operator.busyDbVacuum'),
+      'rebuilding frontend': t('operator.busyRebuildingFrontend'),
+    }
+    return labels[op] ?? `${op}...`
+  }, [t])
 
   // ── Fetch status helper ─────────────────────────────────────────────────
 
@@ -320,10 +355,10 @@ export default function OperatorPanel() {
       setUptime(s.uptime)
       return s
     } catch (err) {
-      setStatusError(err instanceof Error ? err.message : 'Failed to load operator status.')
+      setStatusError(err instanceof Error ? err.message : t('operator.loadStatusFailed'))
       return null
     }
-  }, [])
+  }, [t])
 
   const refreshDatabase = useCallback(async () => {
     try {
@@ -350,13 +385,13 @@ export default function OperatorPanel() {
       setTrustedHostsError(null)
     } catch (err) {
       if (requestId !== trustedHostsRequestId.current) return
-      setTrustedHostsError(err instanceof Error ? err.message : 'Failed to load trusted hostnames.')
+      setTrustedHostsError(err instanceof Error ? err.message : t('operator.loadHostsFailed'))
     } finally {
       if (requestId === trustedHostsRequestId.current) {
         setTrustedHostsLoading(false)
       }
     }
-  }, [])
+  }, [t])
 
   const refreshSharpSettings = useCallback(async () => {
     try {
@@ -395,13 +430,13 @@ export default function OperatorPanel() {
       trustedHostsRequestId.current += 1
       setTrustedHosts((prev) => prev ? { ...prev, configured: res.configured, baseline: res.baseline } : prev)
       setTrustedHostsError(null)
-      addToast({ type: 'success', message: 'Trusted hosts updated.' })
+      addToast({ type: 'success', message: t('operator.hostsUpdated') })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update trusted hosts.'
+      const message = err instanceof Error ? err.message : t('operator.updateHostsFailed')
       addToast({ type: 'error', message })
       await refreshTrustedHosts()
     }
-  }, [addToast, refreshTrustedHosts])
+  }, [addToast, refreshTrustedHosts, t])
 
   const handleAddHost = useCallback((value: string) => {
     const trimmed = value.trim()
@@ -430,30 +465,30 @@ export default function OperatorPanel() {
   }, [])
 
   const handleVectorOptimize = useCallback(async () => {
-    setVectorBusy('Compacting & rebuilding...')
+    setVectorBusy('compacting')
     try {
       await embeddingsApi.optimize()
       await refreshVectorHealth()
-      addToast({ type: 'success', message: 'Vector store optimized.' })
+      addToast({ type: 'success', message: t('operator.vectorOptimizeSuccess') })
     } catch {
-      addToast({ type: 'error', message: 'Vector store optimization failed.' })
+      addToast({ type: 'error', message: t('operator.vectorOptimizeFailed') })
     } finally {
       setVectorBusy(null)
     }
-  }, [addToast, refreshVectorHealth])
+  }, [addToast, refreshVectorHealth, t])
 
   const handleVectorReset = useCallback(async () => {
-    setVectorBusy('Resetting...')
+    setVectorBusy('resetting')
     try {
       await embeddingsApi.forceReset()
       await refreshVectorHealth()
-      addToast({ type: 'success', message: 'Vector store reset. It will reinitialize on next use.' })
+      addToast({ type: 'success', message: t('operator.vectorResetSuccess') })
     } catch {
-      addToast({ type: 'error', message: 'Vector store reset failed.' })
+      addToast({ type: 'error', message: t('operator.vectorResetFailed') })
     } finally {
       setVectorBusy(null)
     }
-  }, [addToast, refreshVectorHealth])
+  }, [addToast, refreshVectorHealth, t])
 
   // Fetch status on mount and every 30s
   useEffect(() => {
@@ -554,10 +589,10 @@ export default function OperatorPanel() {
 
   const handleApplyUpdate = useCallback(() => {
     setConfirm({
-      title: 'Apply Update',
-      message: `This will pull the latest changes (${status?.commitsBehind ?? 0} commits), reinstall dependencies, rebuild the frontend, and restart the server. Your browser will temporarily disconnect.`,
+      title: t('operator.confirmUpdateTitle'),
+      message: t('operator.confirmUpdateMessage', { count: status?.commitsBehind ?? 0 }),
       variant: 'warning',
-      confirmText: 'Update & Restart',
+      confirmText: t('operator.confirmUpdateRestart'),
       onConfirm: async () => {
         setConfirm(null)
         startRestartOperation('updating')
@@ -566,14 +601,14 @@ export default function OperatorPanel() {
         } catch { /* server will restart */ }
       },
     })
-  }, [status?.commitsBehind, startRestartOperation])
+  }, [status?.commitsBehind, startRestartOperation, t])
 
   const handleSwitchBranch = useCallback((target: string) => {
     setConfirm({
-      title: 'Switch Branch',
-      message: `Switch to the "${target}" branch? This will checkout, pull, reinstall, rebuild, and restart the server.`,
+      title: t('operator.confirmSwitchBranch'),
+      message: t('operator.confirmSwitchBranchMessage', { branch: target }),
       variant: 'warning',
-      confirmText: `Switch to ${target}`,
+      confirmText: t('operator.confirmSwitchToBranch', { branch: target }),
       onConfirm: async () => {
         setConfirm(null)
         startRestartOperation('switching branch')
@@ -582,14 +617,14 @@ export default function OperatorPanel() {
         } catch { /* server will restart */ }
       },
     })
-  }, [startRestartOperation])
+  }, [startRestartOperation, t])
 
   const handleRestart = useCallback(() => {
     setConfirm({
-      title: 'Restart Server',
-      message: 'Restart the Lumiverse server? Your browser will temporarily disconnect and reconnect automatically.',
+      title: t('operator.confirmRestartTitle'),
+      message: t('operator.confirmRestartMessage'),
       variant: 'warning',
-      confirmText: 'Restart',
+      confirmText: t('operator.confirmRestart'),
       onConfirm: async () => {
         setConfirm(null)
         startRestartOperation('restarting')
@@ -598,19 +633,19 @@ export default function OperatorPanel() {
         } catch { /* server will restart */ }
       },
     })
-  }, [startRestartOperation])
+  }, [startRestartOperation, t])
 
   const handleShutdown = useCallback(() => {
     setConfirm({
-      title: 'Shut Down Server',
+      title: t('operator.confirmShutdownTitle'),
       message: (
         <>
-          <p>This will completely stop the Lumiverse server and runner. You will need to restart manually from the terminal.</p>
-          <p style={{ marginTop: 8, fontWeight: 500 }}>This action cannot be undone from the web interface.</p>
+          <p>{t('operator.confirmShutdownP1')}</p>
+          <p style={{ marginTop: 8, fontWeight: 500 }}>{t('operator.confirmShutdownP2')}</p>
         </>
       ),
       variant: 'danger',
-      confirmText: 'Shut Down',
+      confirmText: t('operator.confirmShutdown'),
       onConfirm: async () => {
         setConfirm(null)
         setIsShutdown(true)
@@ -620,21 +655,21 @@ export default function OperatorPanel() {
         } catch { /* expected — server is going down */ }
       },
     })
-  }, [])
+  }, [t])
 
   const handleToggleRemote = useCallback((enable: boolean) => {
     if (enable) {
       setConfirm({
-        title: 'Enable Remote Mode',
+        title: t('operator.confirmRemoteTitle'),
         message: (
           <>
-            <p>Remote mode allows connections from any origin. This is intended for accessing Lumiverse from other devices on your network or remotely.</p>
-            <p style={{ marginTop: 8 }}>Enabling remote mode exposes your Lumiverse instance to any device that can reach this server. Only enable this if you understand the security implications and trust your network.</p>
-            <p style={{ marginTop: 8 }}>The server will restart to apply this change.</p>
+            <p>{t('operator.confirmRemoteP1')}</p>
+            <p style={{ marginTop: 8 }}>{t('operator.confirmRemoteP2')}</p>
+            <p style={{ marginTop: 8 }}>{t('operator.confirmRemoteP3')}</p>
           </>
         ),
         variant: 'danger',
-        confirmText: 'Enable Remote Mode',
+        confirmText: t('operator.confirmRemote'),
         onConfirm: async () => {
           setConfirm(null)
           startRestartOperation('toggling remote')
@@ -647,7 +682,7 @@ export default function OperatorPanel() {
       startRestartOperation('toggling remote')
       operatorApi.toggleRemote(false).catch(() => {})
     }
-  }, [startRestartOperation])
+  }, [startRestartOperation, t])
 
   const handleClearCache = useCallback(async () => {
     setBusy('clearing cache')
@@ -667,10 +702,10 @@ export default function OperatorPanel() {
 
   const handleRebuildFrontend = useCallback(() => {
     setConfirm({
-      title: 'Rebuild Frontend',
-      message: 'This will delete the frontend build, rebuild it from source, and restart the server. Your browser will temporarily disconnect.',
+      title: t('operator.confirmRebuildFrontend'),
+      message: t('operator.confirmRebuildMessage'),
       variant: 'warning',
-      confirmText: 'Rebuild & Restart',
+      confirmText: t('operator.confirmRebuild'),
       onConfirm: async () => {
         setConfirm(null)
         startRestartOperation('rebuilding frontend')
@@ -679,7 +714,7 @@ export default function OperatorPanel() {
         } catch { /* server will restart */ }
       },
     })
-  }, [startRestartOperation])
+  }, [startRestartOperation, t])
 
   const handleSaveDatabaseTuning = useCallback(async () => {
     setBusy('saving database tuning')
@@ -715,12 +750,12 @@ export default function OperatorPanel() {
         stats: result.statsAfter,
       } : prev)
       await refreshDatabase()
-      addToast({ type: 'success', message: 'Database tuning refreshed and optimize completed.' })
+      addToast({ type: 'success', message: t('operator.dbMaintenanceSuccess') })
     } catch {
-      addToast({ type: 'error', message: 'Database maintenance failed.' })
+      addToast({ type: 'error', message: t('operator.dbMaintenanceFailed') })
     }
     setBusy(null)
-  }, [addToast, dbTuning, refreshDatabase])
+  }, [addToast, dbTuning, refreshDatabase, t])
 
   const handleSaveDatabaseMaintenance = useCallback(async () => {
     setBusy('saving database maintenance')
@@ -746,12 +781,12 @@ export default function OperatorPanel() {
         cacheFiles: next.configuredSettings.cacheFiles ?? null,
         cacheItems: next.configuredSettings.cacheItems ?? null,
       })
-      addToast({ type: 'success', message: 'Sharp runtime settings applied.' })
+      addToast({ type: 'success', message: t('operator.sharpApplySuccess') })
     } catch (err) {
-      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Failed to apply Sharp settings.' })
+      addToast({ type: 'error', message: err instanceof Error ? err.message : t('operator.sharpApplyFailed') })
     }
     setBusy(null)
-  }, [addToast, sharpSettings])
+  }, [addToast, sharpSettings, t])
 
   const handleResetSharpSettings = useCallback(async () => {
     setBusy('saving sharp settings')
@@ -764,12 +799,12 @@ export default function OperatorPanel() {
         cacheFiles: null,
         cacheItems: null,
       })
-      addToast({ type: 'success', message: 'Sharp runtime settings reset to defaults.' })
+      addToast({ type: 'success', message: t('operator.sharpResetSuccess') })
     } catch (err) {
-      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Failed to reset Sharp settings.' })
+      addToast({ type: 'error', message: err instanceof Error ? err.message : t('operator.sharpResetFailed') })
     }
     setBusy(null)
-  }, [addToast])
+  }, [addToast, t])
 
   const handleSaveDnsSettings = useCallback(async (override?: DnsSettings) => {
     setBusy('saving dns settings')
@@ -795,27 +830,27 @@ export default function OperatorPanel() {
     const normalizedTuning = normalizeDatabaseTuning(dbTuning)
     const normalizedMaintenance = normalizeDatabaseMaintenance(dbMaintenanceSettings)
     setConfirm({
-      title: 'Run Vacuum Now',
+      title: t('operator.confirmVacuumTitle'),
       message: (
         <>
-          <p>This will checkpoint the WAL, rewrite the SQLite database, reclaim free pages, run ANALYZE, and finish with PRAGMA optimize.</p>
+          <p>{t('operator.confirmVacuumP1')}</p>
           <p style={{ marginTop: 8 }}>
-            Estimated scratch space needed: <strong>{formatBytes(dbStatus?.stats?.vacuumEstimatedRequiredBytes ?? 0)}</strong>
-            {' · '}
-            currently free: <strong>{formatBytes(dbStatus?.stats?.filesystemFreeBytes ?? 0)}</strong>
+            {t('operator.confirmVacuumScratch', {
+              needed: formatBytes(dbStatus?.stats?.vacuumEstimatedRequiredBytes ?? 0),
+              free: formatBytes(dbStatus?.stats?.filesystemFreeBytes ?? 0),
+            })}
           </p>
           <p style={{ marginTop: 8 }}>
-            Reclaimable space right now: <strong>{formatBytes(dbStatus?.stats?.freeBytes ?? 0)}</strong>
-            {' · '}
-            active generations: <strong>{dbStatus?.automaticMaintenance?.activeGenerationCount ?? 0}</strong>
+            {t('operator.confirmVacuumReclaim', {
+              reclaimable: formatBytes(dbStatus?.stats?.freeBytes ?? 0),
+              generations: dbStatus?.automaticMaintenance?.activeGenerationCount ?? 0,
+            })}
           </p>
-          <p style={{ marginTop: 8, opacity: 0.85 }}>
-            This can block writes while the file is rebuilt. Run it when the server is otherwise quiet.
-          </p>
+          <p style={{ marginTop: 8, opacity: 0.85 }}>{t('operator.confirmVacuumP2')}</p>
         </>
       ),
       variant: 'warning',
-      confirmText: 'Vacuum Database',
+      confirmText: t('operator.confirmVacuum'),
       onConfirm: async () => {
         setConfirm(null)
         setBusy('database vacuum')
@@ -841,14 +876,14 @@ export default function OperatorPanel() {
             maintenanceState: result.state ?? prev.maintenanceState,
           } : prev)
           await refreshDatabase()
-          addToast({ type: 'success', message: 'SQLite VACUUM completed successfully.' })
+          addToast({ type: 'success', message: t('operator.vacuumSuccess') })
         } catch (err) {
-          addToast({ type: 'error', message: err instanceof Error ? err.message : 'VACUUM failed.' })
+          addToast({ type: 'error', message: err instanceof Error ? err.message : t('operator.vacuumFailed') })
         }
         setBusy(null)
       },
     })
-  }, [addToast, dbMaintenanceSettings, dbStatus, dbTuning, refreshDatabase])
+  }, [addToast, dbMaintenanceSettings, dbStatus, dbTuning, refreshDatabase, t])
 
   const handleRefreshDatabase = useCallback(async () => {
     setBusy('refreshing database stats')
@@ -859,13 +894,18 @@ export default function OperatorPanel() {
     }
   }, [refreshDatabase])
 
+  const hostSourceLabel = useCallback(
+    (source: TrustedHostEntry['source']) => t(hostSourceKey(source)),
+    [t],
+  )
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
       <div className={styles.container}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lumiverse-text-dim)', fontSize: 13 }}>
-          <Loader2 size={16} className={spinClass} /> Loading operator status...
+          <Loader2 size={16} className={spinClass} /> {t('operator.loadingStatus')}
         </div>
       </div>
     )
@@ -878,8 +918,8 @@ export default function OperatorPanel() {
         <div className={styles.shutdownBanner}>
           <PowerOff size={18} />
           <div>
-            <div style={{ fontWeight: 600, marginBottom: 2 }}>Server shut down</div>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Lumiverse has been stopped. Restart it from the terminal to continue.</div>
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>{t('operator.serverShutdown')}</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{t('operator.shutdownHint')}</div>
           </div>
         </div>
       </div>
@@ -901,32 +941,32 @@ export default function OperatorPanel() {
       {/* Status Grid */}
       <div className={styles.statusGrid}>
         <div className={styles.statusCard}>
-          <span className={styles.statusLabel}>Port</span>
+          <span className={styles.statusLabel}>{t('operator.port')}</span>
           <span className={styles.statusValue}>{status?.port ?? '—'}</span>
         </div>
         <div className={styles.statusCard}>
-          <span className={styles.statusLabel}>PID</span>
+          <span className={styles.statusLabel}>{t('operator.pid')}</span>
           <span className={styles.statusValue}>{status?.pid ?? '—'}</span>
         </div>
         <div className={styles.statusCard}>
-          <span className={styles.statusLabel}>Uptime</span>
+          <span className={styles.statusLabel}>{t('operator.uptime')}</span>
           <span className={styles.statusValue}>{formatUptime(uptime)}</span>
         </div>
         <div className={styles.statusCard}>
-          <span className={styles.statusLabel}>Branch</span>
+          <span className={styles.statusLabel}>{t('operator.branch')}</span>
           <span className={styles.statusValue}>{currentBranch}</span>
         </div>
         <div className={styles.statusCard}>
-          <span className={styles.statusLabel}>Version</span>
+          <span className={styles.statusLabel}>{t('operator.version')}</span>
           <span className={styles.statusValue}>
             {status?.version ?? '—'}
             {status?.commit ? <span style={{ fontSize: 11, opacity: 0.5, marginLeft: 4 }}>({status.commit})</span> : null}
           </span>
         </div>
         <div className={styles.statusCard}>
-          <span className={styles.statusLabel}>Runner IPC</span>
+          <span className={styles.statusLabel}>{t('operator.runnerIpc')}</span>
           <span className={clsx(styles.ipcBadge, ipcAvailable ? styles.ipcAvailable : styles.ipcUnavailable)}>
-            {ipcAvailable ? 'Connected' : 'Unavailable'}
+            {ipcAvailable ? t('operator.connected') : t('operator.unavailable')}
           </span>
         </div>
       </div>
@@ -935,7 +975,7 @@ export default function OperatorPanel() {
       {status?.updateAvailable && (
         <div className={styles.updateBadge}>
           <Download size={12} />
-          {status.commitsBehind} update{status.commitsBehind > 1 ? 's' : ''} available
+          {t('operator.updatesAvailable', { count: status.commitsBehind ?? 0 })}
           {status.latestUpdateMessage ? ` — ${status.latestUpdateMessage}` : ''}
         </div>
       )}
@@ -945,8 +985,8 @@ export default function OperatorPanel() {
         <div className={styles.reconnectBanner}>
           <Loader2 size={16} className={spinClass} />
           <div>
-            <div style={{ fontWeight: 600, marginBottom: 2 }}>Reconnecting to server...</div>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>The server is restarting. This page will refresh automatically once it's back.</div>
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>{t('operator.reconnectingTitle')}</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>{t('operator.reconnectingHint')}</div>
           </div>
         </div>
       )}
@@ -955,34 +995,19 @@ export default function OperatorPanel() {
       {effectiveBusy && effectiveBusy !== 'reconnecting' && (
         <div className={styles.busyOverlay}>
           <Loader2 size={16} className={spinClass} />
-          {effectiveBusyMessage ?? (effectiveBusy === 'checking' ? 'Checking for updates...' :
-           effectiveBusy === 'updating' ? 'Applying update... Server will restart.' :
-           effectiveBusy === 'switching branch' ? 'Switching branch... Server will restart.' :
-           effectiveBusy === 'restarting' ? 'Restarting server...' :
-           effectiveBusy === 'shutting down' ? 'Shutting down...' :
-           effectiveBusy === 'toggling remote' ? 'Toggling remote mode... Server will restart.' :
-           effectiveBusy === 'clearing cache' ? 'Clearing package cache...' :
-           effectiveBusy === 'installing dependencies' ? 'Installing dependencies...' :
-           effectiveBusy === 'saving database tuning' ? 'Saving database tuning...' :
-            effectiveBusy === 'saving sharp settings' ? 'Applying Sharp runtime settings...' :
-            effectiveBusy === 'saving database maintenance' ? 'Saving database maintenance...' :
-           effectiveBusy === 'refreshing database stats' ? 'Refreshing database stats...' :
-            effectiveBusy === 'database maintenance' ? 'Running database maintenance...' :
-           effectiveBusy === 'database vacuum' ? 'Running SQLite VACUUM...' :
-             effectiveBusy === 'rebuilding frontend' ? 'Rebuilding frontend... Server will restart.' :
-             `${effectiveBusy}...`)}
+          {effectiveBusyMessage ?? busyMessage(effectiveBusy)}
         </div>
       )}
 
       {/* Controls */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Server Controls</span>
+          <span className={styles.sectionTitle}>{t('operator.serverControls')}</span>
         </div>
         <div className={styles.sectionBody}>
           {statusError && (
             <div className={styles.disabledHint}>
-              Operator status unavailable: {statusError}
+              {t('operator.statusUnavailable', { error: statusError })}
             </div>
           )}
           {!statusError && !ipcAvailable && ipcHint && (
@@ -997,7 +1022,7 @@ export default function OperatorPanel() {
               onClick={handleCheckUpdate}
             >
               <RefreshCw size={14} />
-              Check for Updates
+              {t('operator.checkUpdates')}
             </button>
             {status?.updateAvailable && (
               <button
@@ -1006,7 +1031,7 @@ export default function OperatorPanel() {
                 onClick={handleApplyUpdate}
               >
                 <Download size={14} />
-                Apply Update
+                {t('operator.applyUpdate')}
               </button>
             )}
             <button
@@ -1015,7 +1040,7 @@ export default function OperatorPanel() {
               onClick={() => handleSwitchBranch(otherBranch)}
             >
               <GitBranch size={14} />
-              Switch to {otherBranch}
+              {t('operator.switchBranch', { branch: otherBranch })}
             </button>
             <button
               className={styles.controlBtn}
@@ -1023,7 +1048,7 @@ export default function OperatorPanel() {
               onClick={handleRestart}
             >
               <Power size={14} />
-              Restart Server
+              {t('operator.restartServer')}
             </button>
             <button
               className={styles.controlBtnDanger}
@@ -1031,7 +1056,7 @@ export default function OperatorPanel() {
               onClick={handleShutdown}
             >
               <PowerOff size={14} />
-              Shut Down
+              {t('operator.shutDown')}
             </button>
           </div>
         </div>
@@ -1040,12 +1065,12 @@ export default function OperatorPanel() {
       {/* Maintenance */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Maintenance</span>
+          <span className={styles.sectionTitle}>{t('operator.maintenance')}</span>
         </div>
         <div className={styles.sectionBody}>
           {statusError && (
             <div className={styles.disabledHint}>
-              Operator status unavailable: {statusError}
+              {t('operator.statusUnavailable', { error: statusError })}
             </div>
           )}
           {!statusError && !ipcAvailable && ipcHint && (
@@ -1060,7 +1085,7 @@ export default function OperatorPanel() {
               onClick={handleClearCache}
             >
               <HardDrive size={14} />
-              Clear Package Cache
+              {t('operator.clearPackageCache')}
             </button>
             <button
               className={styles.controlBtn}
@@ -1068,7 +1093,7 @@ export default function OperatorPanel() {
               onClick={handleEnsureDeps}
             >
               <PackageCheck size={14} />
-              Ensure Dependencies
+              {t('operator.ensureDependencies')}
             </button>
             <button
               className={styles.controlBtn}
@@ -1076,7 +1101,7 @@ export default function OperatorPanel() {
               onClick={handleRebuildFrontend}
             >
               <Hammer size={14} />
-              Rebuild Frontend
+              {t('operator.rebuildFrontendBtn')}
             </button>
           </div>
         </div>
@@ -1085,19 +1110,19 @@ export default function OperatorPanel() {
       {/* Remote Mode */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Remote Access</span>
+          <span className={styles.sectionTitle}>{t('operator.remoteAccess')}</span>
         </div>
         <div className={styles.sectionBody}>
           <div className={styles.remoteRow}>
             <div className={styles.remoteInfo}>
               <span className={styles.remoteLabel}>
                 {status?.remoteMode ? <Wifi size={14} style={{ marginRight: 6 }} /> : <WifiOff size={14} style={{ marginRight: 6, opacity: 0.5 }} />}
-                Remote Mode
+                {t('operator.remoteMode')}
               </span>
               <span className={styles.remoteHint}>
                 {status?.remoteMode
-                  ? 'Connections accepted from any origin. Disable when not needed.'
-                  : 'Only local and LAN connections are accepted.'}
+                  ? t('operator.remoteAcceptAny')
+                  : t('operator.remoteLocalOnly')}
               </span>
             </div>
             <Toggle.Switch
@@ -1112,44 +1137,41 @@ export default function OperatorPanel() {
       {/* Trusted Hostnames */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Trusted Hostnames</span>
+          <span className={styles.sectionTitle}>{t('operator.trustedHostnames')}</span>
         </div>
         <div className={styles.sectionBody}>
-          <span className={styles.remoteHint}>
-            Hostnames accepted in the HTTP <code>Host</code> header. Add the DNS or Tailscale name you use
-            to reach this device. Wildcards are not allowed — this guards against DNS-rebinding attacks.
-          </span>
+          <span className={styles.remoteHint}>{t('operator.hostsHint')}</span>
 
           {trustedHostsLoading && !trustedHosts && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lumiverse-text-dim)', fontSize: 12 }}>
-              <Loader2 size={14} className={spinClass} /> Detecting trusted hostnames...
+              <Loader2 size={14} className={spinClass} /> {t('operator.hostsDetecting')}
             </div>
           )}
 
           {trustedHostsError && (
             <div className={styles.disabledHint}>
               {trustedHosts
-                ? `Trusted hostname refresh failed: ${trustedHostsError}. Showing the last successful snapshot.`
-                : `Trusted hostname detection is still unavailable: ${trustedHostsError}`}
+                ? t('operator.hostsRefreshFailed', { error: trustedHostsError })
+                : t('operator.hostsDetectFailed', { error: trustedHostsError })}
             </div>
           )}
 
           {trustedHosts && (
             <>
               <div className={styles.dbInfoBlock}>
-                <span className={styles.fieldLabel}>Always trusted</span>
+                <span className={styles.fieldLabel}>{t('operator.hostsAlwaysTrusted')}</span>
                 <div className={styles.hostChipGroup}>
                   {trustedHosts.baseline.map((entry) => (
-                    <span key={entry.host} className={styles.hostChipBaseline} title={`source: ${TRUSTED_HOST_SOURCE_LABELS[entry.source] ?? entry.source}`}>
+                    <span key={entry.host} className={styles.hostChipBaseline} title={t('operator.hostsSource', { source: hostSourceLabel(entry.source) })}>
                       {entry.host}
-                      <span className={styles.hostChipSource}>{TRUSTED_HOST_SOURCE_LABELS[entry.source] ?? entry.source}</span>
+                      <span className={styles.hostChipSource}>{hostSourceLabel(entry.source)}</span>
                     </span>
                   ))}
                 </div>
               </div>
 
               <div className={styles.dbInfoBlock}>
-                <span className={styles.fieldLabel}>Configured</span>
+                <span className={styles.fieldLabel}>{t('operator.hostsConfigured')}</span>
                 {trustedHosts.configured.length > 0 ? (
                   <div className={styles.hostChipGroup}>
                     {trustedHosts.configured.map((host) => (
@@ -1159,7 +1181,7 @@ export default function OperatorPanel() {
                           type="button"
                           className={styles.hostChipRemove}
                           onClick={() => handleRemoveHost(host)}
-                          aria-label={`Remove ${host}`}
+                          aria-label={t('operator.hostsRemove', { host })}
                           disabled={!trustedHostsReady}
                         >
                           <X size={12} />
@@ -1168,13 +1190,13 @@ export default function OperatorPanel() {
                     ))}
                   </div>
                 ) : (
-                  <span className={styles.hostEmpty}>No custom hostnames added yet.</span>
+                  <span className={styles.hostEmpty}>{t('operator.hostsNoCustom')}</span>
                 )}
               </div>
 
               {trustedHosts.suggestions.length > 0 && (
                 <div className={styles.dbInfoBlock}>
-                  <span className={styles.fieldLabel}>Detected on this device</span>
+                  <span className={styles.fieldLabel}>{t('operator.hostsDetected')}</span>
                   <div className={styles.hostChipGroup}>
                     {trustedHosts.suggestions.map((entry) => {
                       const alreadyConfigured = trustedHosts.configured.includes(entry.host)
@@ -1185,11 +1207,11 @@ export default function OperatorPanel() {
                           className={styles.hostChipSuggested}
                           disabled={!trustedHostsReady || alreadyConfigured}
                           onClick={() => handleAddHost(entry.host)}
-                          title={`source: ${TRUSTED_HOST_SOURCE_LABELS[entry.source] ?? entry.source}`}
+                          title={t('operator.hostsSource', { source: hostSourceLabel(entry.source) })}
                         >
                           <Plus size={11} />
                           {entry.host}
-                          <span className={styles.hostChipSource}>{TRUSTED_HOST_SOURCE_LABELS[entry.source] ?? entry.source}</span>
+                          <span className={styles.hostChipSource}>{hostSourceLabel(entry.source)}</span>
                         </button>
                       )
                     })}
@@ -1201,12 +1223,12 @@ export default function OperatorPanel() {
 
           {!trustedHosts && !trustedHostsLoading && !trustedHostsError && (
             <div className={styles.dbInfoBlock}>
-              <span className={styles.hostEmpty}>Trusted hostname data has not loaded yet.</span>
+              <span className={styles.hostEmpty}>{t('operator.hostsNotLoaded')}</span>
             </div>
           )}
 
           <div className={styles.dbInfoBlock}>
-            <span className={styles.fieldLabel}>Add manually</span>
+            <span className={styles.fieldLabel}>{t('operator.hostsAddManually')}</span>
             <form
               className={styles.hostInputRow}
               onSubmit={(e) => {
@@ -1217,7 +1239,7 @@ export default function OperatorPanel() {
               <input
                 type="text"
                 className={styles.hostInput}
-                placeholder="e.g. machine.tailnet-abcd.ts.net"
+                placeholder={t('operator.hostsPlaceholder')}
                 value={hostDraft}
                 onChange={(e) => setHostDraft(e.target.value)}
                 autoComplete="off"
@@ -1230,7 +1252,7 @@ export default function OperatorPanel() {
                 disabled={!trustedHostsReady || !hostDraft.trim()}
               >
                 <Globe size={14} />
-                Add
+                {t('operator.hostsAdd')}
               </button>
               <button
                 type="button"
@@ -1239,12 +1261,12 @@ export default function OperatorPanel() {
                 disabled={trustedHostsLoading}
               >
                 <RefreshCw size={14} className={trustedHostsLoading ? spinClass : undefined} />
-                Rescan
+                {t('operator.hostsRescan')}
               </button>
             </form>
             <span className={styles.fieldHint}>
-              Port defaults to {status?.port ?? '7860'} when omitted. Full <code>https://*.ts.net</code> origins are preserved for Tailscale Serve.
-              {!trustedHostsReady ? ' Load the current snapshot before editing so existing trusted hosts are preserved.' : ''}
+              {t('operator.hostsPortHint', { port: status?.port ?? '7860' })}
+              {!trustedHostsReady ? t('operator.hostsLoadSnapshotHint') : ''}
             </span>
           </div>
         </div>
@@ -1253,33 +1275,33 @@ export default function OperatorPanel() {
       {/* Database */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Database</span>
+          <span className={styles.sectionTitle}>{t('operator.database')}</span>
         </div>
         <div className={styles.sectionBody}>
           {dbStats && (
             <div className={styles.statusGrid}>
               <div className={styles.statusCard}>
-                <span className={styles.statusLabel}>DB File</span>
+                <span className={styles.statusLabel}>{t('operator.dbFile')}</span>
                 <span className={styles.statusValue}>{formatBytes(dbStats.fileBytes)}</span>
               </div>
               <div className={styles.statusCard}>
-                <span className={styles.statusLabel}>WAL</span>
+                <span className={styles.statusLabel}>{t('operator.dbWal')}</span>
                 <span className={styles.statusValue}>{formatBytes(dbStats.walBytes)}</span>
               </div>
               <div className={styles.statusCard}>
-                <span className={styles.statusLabel}>Live Pages</span>
+                <span className={styles.statusLabel}>{t('operator.dbLivePages')}</span>
                 <span className={styles.statusValue}>{dbStats.pageCount.toLocaleString()}</span>
               </div>
               <div className={styles.statusCard}>
-                <span className={styles.statusLabel}>Freelist</span>
+                <span className={styles.statusLabel}>{t('operator.dbFreelist')}</span>
                 <span className={styles.statusValue}>{formatBytes(dbStats.freeBytes)}</span>
               </div>
               <div className={styles.statusCard}>
-                <span className={styles.statusLabel}>Cache</span>
+                <span className={styles.statusLabel}>{t('operator.dbCache')}</span>
                 <span className={styles.statusValue}>{formatBytes(dbStats.cacheBytesApprox)}</span>
               </div>
               <div className={styles.statusCard}>
-                <span className={styles.statusLabel}>mmap</span>
+                <span className={styles.statusLabel}>{t('operator.dbMmap')}</span>
                 <span className={styles.statusValue}>{formatBytes(dbStats.mmapSize)}</span>
               </div>
             </div>
@@ -1287,56 +1309,68 @@ export default function OperatorPanel() {
 
           <div className={styles.dbInfoGrid}>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.statusLabel}>Path</span>
+              <span className={styles.statusLabel}>{t('operator.dbPath')}</span>
               <span className={styles.dbMono}>{dbStats?.path ?? '—'}</span>
             </div>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.statusLabel}>Pragmas</span>
+              <span className={styles.statusLabel}>{t('operator.dbPragmas')}</span>
               <span className={styles.dbInlineText}>
-                journal={dbStats?.journalMode ?? '—'} · sync={dbStats?.synchronous ?? '—'} · temp={dbStats?.tempStore ?? '—'} · checkpoint={dbStats?.walAutocheckpoint ?? '—'}
+                {t('operator.dbPragmasValue', {
+                  journal: dbStats?.journalMode ?? '—',
+                  sync: dbStats?.synchronous ?? '—',
+                  temp: dbStats?.tempStore ?? '—',
+                  checkpoint: dbStats?.walAutocheckpoint ?? '—',
+                })}
               </span>
             </div>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.statusLabel}>Resolved Tuning</span>
+              <span className={styles.statusLabel}>{t('operator.dbResolvedTuning')}</span>
               <span className={styles.dbInlineText}>
-                cache {effectiveTuning ? `${formatBytes(effectiveTuning.cacheBytes)} (${effectiveTuning.cacheSource})` : '—'}
-                {' · '}
-                mmap {effectiveTuning ? `${formatBytes(effectiveTuning.mmapSizeBytes)} (${effectiveTuning.mmapSource})` : '—'}
-                {' · '}
-                journal cap {effectiveTuning ? formatBytes(effectiveTuning.journalSizeLimitBytes) : '—'}
+                {effectiveTuning
+                  ? t('operator.dbResolvedTuningValue', {
+                    cache: formatBytes(effectiveTuning.cacheBytes),
+                    cacheSource: effectiveTuning.cacheSource,
+                    mmap: formatBytes(effectiveTuning.mmapSizeBytes),
+                    mmapSource: effectiveTuning.mmapSource,
+                    journalCap: formatBytes(effectiveTuning.journalSizeLimitBytes),
+                  })
+                  : '—'}
               </span>
             </div>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.statusLabel}>Disk Headroom</span>
+              <span className={styles.statusLabel}>{t('operator.dbDiskHeadroom')}</span>
               <span className={styles.dbInlineText}>
-                free {formatBytes(dbStats?.filesystemFreeBytes ?? 0)}
-                {' · '}
-                vacuum needs about {formatBytes(dbStats?.vacuumEstimatedRequiredBytes ?? 0)}
-                {' · '}
-                {dbStats?.vacuumHasEnoughFreeBytes === null
-                  ? 'filesystem free space unknown'
-                  : dbStats?.vacuumHasEnoughFreeBytes
-                    ? 'enough free space detected'
-                    : 'not enough free space for a safe vacuum'}
+                {t('operator.dbDiskHeadroomValue', {
+                  free: formatBytes(dbStats?.filesystemFreeBytes ?? 0),
+                  needed: formatBytes(dbStats?.vacuumEstimatedRequiredBytes ?? 0),
+                  status: dbStats?.vacuumHasEnoughFreeBytes === null
+                    ? t('operator.dbDiskUnknown')
+                    : dbStats?.vacuumHasEnoughFreeBytes
+                      ? t('operator.dbDiskEnough')
+                      : t('operator.dbDiskNotEnough'),
+                })}
               </span>
             </div>
           </div>
 
           {vacuumDiskWarning && (
             <div className={styles.warningBanner}>
-              SQLite VACUUM is currently unsafe: estimated rewrite headroom is {formatBytes(dbStats?.vacuumEstimatedRequiredBytes ?? 0)}, but only {formatBytes(dbStats?.filesystemFreeBytes ?? 0)} appears free on this volume.
+              {t('operator.dbVacuumUnsafe', {
+                needed: formatBytes(dbStats?.vacuumEstimatedRequiredBytes ?? 0),
+                free: formatBytes(dbStats?.filesystemFreeBytes ?? 0),
+              })}
             </div>
           )}
 
           <div className={styles.tuningGrid}>
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Cache % of host RAM</span>
+              <span className={styles.fieldLabel}>{t('operator.dbCachePercent')}</span>
               <NumericInput
                 min={0.1}
                 max={50}
                 step={0.1}
                 className={styles.fieldInput}
-                placeholder="Auto"
+                placeholder={t('operator.mmapAuto')}
                 value={dbTuning.cacheMemoryPercent ?? null}
                 allowEmpty
                 onChange={(value) => setDbTuning((prev) => ({
@@ -1345,17 +1379,19 @@ export default function OperatorPanel() {
                 }))}
               />
               <span className={styles.fieldHint}>
-                Blank uses the automatic cache target. Current recommendation: {effectiveTuning ? formatBytes(effectiveTuning.cacheBytes) : '—'}.
+                {t('operator.dbCachePercentHint', {
+                  size: effectiveTuning ? formatBytes(effectiveTuning.cacheBytes) : '—',
+                })}
               </span>
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>mmap size (MiB)</span>
+              <span className={styles.fieldLabel}>{t('operator.dbMmapSize')}</span>
               <NumericInput
                 min={0}
                 step={16}
                 className={styles.fieldInput}
-                placeholder={mmapSupported ? 'Auto' : 'Disabled on Windows'}
+                placeholder={mmapSupported ? t('operator.mmapAuto') : t('operator.mmapDisabledWindows')}
                 disabled={!mmapSupported}
                 value={dbTuning.mmapSizeBytes == null ? null : Math.round(dbTuning.mmapSizeBytes / (1024 * 1024))}
                 integer
@@ -1365,51 +1401,55 @@ export default function OperatorPanel() {
                   mmapSizeBytes: value == null ? null : value * 1024 * 1024,
                 }))}
               />
-              <span className={styles.fieldHint}>
-                Linux/macOS only. Blank uses the automatic mmap target. Set `0` to disable mmap explicitly.
-              </span>
+              <span className={styles.fieldHint}>{t('operator.dbMmapHint')}</span>
             </label>
           </div>
 
           <div className={styles.dbInfoGrid}>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.fieldLabel}>Automatic Maintenance</span>
+              <span className={styles.fieldLabel}>{t('operator.dbAutoMaintenance')}</span>
               <span className={styles.dbInlineText}>
-                optimize {formatTimestamp(maintenanceState?.lastOptimizeAt)} · analyze {formatTimestamp(maintenanceState?.lastAnalyzeAt)} · vacuum {formatTimestamp(maintenanceState?.lastVacuumAt)}
+                {t('operator.dbAutoMaintenanceValue', {
+                  optimize: formatTimestamp(maintenanceState?.lastOptimizeAt),
+                  analyze: formatTimestamp(maintenanceState?.lastAnalyzeAt),
+                  vacuum: formatTimestamp(maintenanceState?.lastVacuumAt),
+                })}
               </span>
             </div>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.fieldLabel}>Auto Vacuum Status</span>
+              <span className={styles.fieldLabel}>{t('operator.dbAutoVacuumStatus')}</span>
               <span className={styles.dbInlineText}>
                 {autoMaintenance?.vacuum.eligible
-                  ? 'Eligible to run on the next scheduler pass.'
+                  ? t('operator.vacuumEligible')
                   : autoMaintenance?.vacuum.blockedReasons.length
                     ? autoMaintenance.vacuum.blockedReasons.join(' · ')
-                    : 'Automatic vacuum is idle.'}
+                    : t('operator.vacuumIdle')}
               </span>
             </div>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.fieldLabel}>Idle Signals</span>
+              <span className={styles.fieldLabel}>{t('operator.dbIdleSignals')}</span>
               <span className={styles.dbInlineText}>
-                visible sessions {autoMaintenance?.visibility.visibleSessions ?? 0}/{autoMaintenance?.visibility.totalSessions ?? 0}
-                {' · '}
-                hidden for {autoMaintenance?.visibility.hiddenIdleMinutes ?? 0} min
-                {' · '}
-                last write {autoMaintenance?.lastWriteIdleMinutes == null ? '—' : `${autoMaintenance.lastWriteIdleMinutes} min ago`}
-                {' · '}
-                active generations {autoMaintenance?.activeGenerationCount ?? 0}
+                {t('operator.dbIdleSignalsValue', {
+                  visible: autoMaintenance?.visibility.visibleSessions ?? 0,
+                  total: autoMaintenance?.visibility.totalSessions ?? 0,
+                  hidden: autoMaintenance?.visibility.hiddenIdleMinutes ?? 0,
+                  lastWrite: autoMaintenance?.lastWriteIdleMinutes == null
+                    ? '—'
+                    : t('operator.dbLastWriteAgo', { minutes: autoMaintenance.lastWriteIdleMinutes }),
+                  generations: autoMaintenance?.activeGenerationCount ?? 0,
+                })}
               </span>
             </div>
           </div>
 
           <div className={styles.tuningGrid}>
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Optimize interval (hours)</span>
+              <span className={styles.fieldLabel}>{t('operator.dbOptimizeInterval')}</span>
               <NumericInput
                 min={1}
                 step={1}
                 className={styles.fieldInput}
-                placeholder="Disabled"
+                placeholder={t('operator.placeholderDisabled')}
                 value={dbMaintenanceSettings.optimizeIntervalHours ?? null}
                 integer
                 allowEmpty
@@ -1421,12 +1461,12 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Analyze interval (hours)</span>
+              <span className={styles.fieldLabel}>{t('operator.dbAnalyzeInterval')}</span>
               <NumericInput
                 min={1}
                 step={1}
                 className={styles.fieldInput}
-                placeholder="Disabled"
+                placeholder={t('operator.placeholderDisabled')}
                 value={dbMaintenanceSettings.analyzeIntervalHours ?? null}
                 integer
                 allowEmpty
@@ -1438,12 +1478,12 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Auto vacuum interval (hours)</span>
+              <span className={styles.fieldLabel}>{t('operator.dbVacuumInterval')}</span>
               <NumericInput
                 min={1}
                 step={1}
                 className={styles.fieldInput}
-                placeholder="Disabled"
+                placeholder={t('operator.placeholderDisabled')}
                 value={dbMaintenanceSettings.vacuumIntervalHours ?? null}
                 integer
                 allowEmpty
@@ -1455,7 +1495,7 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Vacuum idle time (minutes)</span>
+              <span className={styles.fieldLabel}>{t('operator.dbVacuumIdle')}</span>
               <NumericInput
                 min={1}
                 step={1}
@@ -1470,7 +1510,7 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Min reclaimable space (MiB)</span>
+              <span className={styles.fieldLabel}>{t('operator.dbMinReclaim')}</span>
               <NumericInput
                 min={0}
                 step={64}
@@ -1485,7 +1525,7 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Min reclaim percent</span>
+              <span className={styles.fieldLabel}>{t('operator.dbMinReclaimPercent')}</span>
               <NumericInput
                 min={0}
                 max={100}
@@ -1501,7 +1541,7 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Min DB size (MiB)</span>
+              <span className={styles.fieldLabel}>{t('operator.dbMinSize')}</span>
               <NumericInput
                 min={0}
                 step={256}
@@ -1518,8 +1558,8 @@ export default function OperatorPanel() {
 
           <div className={styles.toggleRow}>
             <div className={styles.remoteInfo}>
-              <span className={styles.remoteLabel}>Enable automatic vacuum</span>
-              <span className={styles.remoteHint}>Runs only when the interval, idle, and reclaim thresholds are all satisfied.</span>
+              <span className={styles.remoteLabel}>{t('operator.dbEnableAutoVacuum')}</span>
+              <span className={styles.remoteHint}>{t('operator.dbEnableAutoVacuumHint')}</span>
             </div>
             <Toggle.Switch
               checked={dbMaintenanceSettings.autoVacuumEnabled ?? false}
@@ -1530,7 +1570,7 @@ export default function OperatorPanel() {
 
           <div className={styles.toggleGrid}>
             <div className={styles.toggleRowCompact}>
-              <span className={styles.remoteHint}>Require no visible clients</span>
+              <span className={styles.remoteHint}>{t('operator.dbRequireNoClients')}</span>
               <Toggle.Switch
                 checked={dbMaintenanceSettings.vacuumRequireNoVisibleClients !== false}
                 onChange={(checked) => setDbMaintenanceSettings((prev) => ({ ...prev, vacuumRequireNoVisibleClients: checked }))}
@@ -1538,7 +1578,7 @@ export default function OperatorPanel() {
               />
             </div>
             <div className={styles.toggleRowCompact}>
-              <span className={styles.remoteHint}>Require no active generations</span>
+              <span className={styles.remoteHint}>{t('operator.dbRequireNoGenerations')}</span>
               <Toggle.Switch
                 checked={dbMaintenanceSettings.vacuumRequireNoActiveGenerations !== false}
                 onChange={(checked) => setDbMaintenanceSettings((prev) => ({ ...prev, vacuumRequireNoActiveGenerations: checked }))}
@@ -1550,23 +1590,23 @@ export default function OperatorPanel() {
           <div className={styles.controls}>
             <button className={styles.controlBtn} disabled={!!effectiveBusy} onClick={handleRefreshDatabase}>
               <RefreshCw size={14} />
-              Refresh DB Stats
+              {t('operator.dbRefreshStats')}
             </button>
             <button className={styles.controlBtn} disabled={!!effectiveBusy} onClick={handleSaveDatabaseTuning}>
               <HardDrive size={14} />
-              Save Tuning
+              {t('operator.dbSaveTuning')}
             </button>
             <button className={styles.controlBtn} disabled={!!effectiveBusy} onClick={handleSaveDatabaseMaintenance}>
               <HardDrive size={14} />
-              Save Auto Maintenance
+              {t('operator.dbSaveMaintenance')}
             </button>
             <button className={styles.controlBtnPrimary} disabled={!!effectiveBusy} onClick={handleRunDatabaseMaintenance}>
               <Hammer size={14} />
-              Apply Tuning + Optimize
+              {t('operator.dbApplyOptimize')}
             </button>
             <button className={styles.controlBtnDanger} disabled={!!effectiveBusy || vacuumDiskWarning} onClick={handleRunVacuumNow}>
               <Hammer size={14} />
-              Run Vacuum Now
+              {t('operator.dbRunVacuum')}
             </button>
           </div>
         </div>
@@ -1575,53 +1615,63 @@ export default function OperatorPanel() {
       {/* Image Processing */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Image Processing</span>
+          <span className={styles.sectionTitle}>{t('operator.imageProcessing')}</span>
         </div>
         <div className={styles.sectionBody}>
           <div className={styles.dbInfoGrid}>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.statusLabel}>Effective Runtime</span>
+              <span className={styles.statusLabel}>{t('operator.sharpEffective')}</span>
               <span className={styles.dbInlineText}>
-                concurrency {sharpStatus?.effectiveSettings.concurrency ?? '—'}
-                {' · '}
-                cache {sharpStatus ? `${sharpStatus.effectiveSettings.cacheMemoryMb} MiB / ${sharpStatus.effectiveSettings.cacheFiles} files / ${sharpStatus.effectiveSettings.cacheItems} items` : '—'}
+                {sharpStatus
+                  ? t('operator.sharpEffectiveValue', {
+                    concurrency: sharpStatus.effectiveSettings.concurrency,
+                    cacheMb: sharpStatus.effectiveSettings.cacheMemoryMb,
+                    cacheFiles: sharpStatus.effectiveSettings.cacheFiles,
+                    cacheItems: sharpStatus.effectiveSettings.cacheItems,
+                  })
+                  : '—'}
               </span>
             </div>
             <div className={styles.dbInfoBlock}>
-              <span className={styles.statusLabel}>Defaults</span>
+              <span className={styles.statusLabel}>{t('operator.sharpDefaults')}</span>
               <span className={styles.dbInlineText}>
-                concurrency {sharpStatus?.defaults.concurrency ?? '—'}
-                {' · '}
-                cache {sharpStatus ? `${sharpStatus.defaults.cacheMemoryMb} MiB / ${sharpStatus.defaults.cacheFiles} files / ${sharpStatus.defaults.cacheItems} items` : '—'}
+                {sharpStatus
+                  ? t('operator.sharpEffectiveValue', {
+                    concurrency: sharpStatus.defaults.concurrency,
+                    cacheMb: sharpStatus.defaults.cacheMemoryMb,
+                    cacheFiles: sharpStatus.defaults.cacheFiles,
+                    cacheItems: sharpStatus.defaults.cacheItems,
+                  })
+                  : '—'}
               </span>
             </div>
           </div>
 
           <div className={styles.tuningGrid}>
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Concurrency</span>
+              <span className={styles.fieldLabel}>{t('operator.sharpConcurrency')}</span>
               <NumericInput
                 min={1}
                 max={16}
                 step={1}
                 className={styles.fieldInput}
-                placeholder={`Default (${sharpStatus?.defaults.concurrency ?? 4})`}
+                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.concurrency ?? 4 })}
                 value={sharpSettings.concurrency ?? null}
                 integer
                 allowEmpty
                 onChange={(value) => setSharpSettings((prev) => ({ ...prev, concurrency: value }))}
               />
-              <span className={styles.fieldHint}>Blank uses the backend default. New image work picks up changes immediately.</span>
+              <span className={styles.fieldHint}>{t('operator.sharpConcurrencyHint')}</span>
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Cache memory (MiB)</span>
+              <span className={styles.fieldLabel}>{t('operator.sharpCacheMemory')}</span>
               <NumericInput
                 min={8}
                 max={512}
                 step={8}
                 className={styles.fieldInput}
-                placeholder={`Default (${sharpStatus?.defaults.cacheMemoryMb ?? 64})`}
+                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.cacheMemoryMb ?? 64 })}
                 value={sharpSettings.cacheMemoryMb ?? null}
                 integer
                 allowEmpty
@@ -1630,13 +1680,13 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Cache files</span>
+              <span className={styles.fieldLabel}>{t('operator.sharpCacheFiles')}</span>
               <NumericInput
                 min={0}
                 max={2048}
                 step={16}
                 className={styles.fieldInput}
-                placeholder={`Default (${sharpStatus?.defaults.cacheFiles ?? 128})`}
+                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.cacheFiles ?? 128 })}
                 value={sharpSettings.cacheFiles ?? null}
                 integer
                 allowEmpty
@@ -1645,13 +1695,13 @@ export default function OperatorPanel() {
             </label>
 
             <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>Cache items</span>
+              <span className={styles.fieldLabel}>{t('operator.sharpCacheItems')}</span>
               <NumericInput
                 min={1}
                 max={4096}
                 step={16}
                 className={styles.fieldInput}
-                placeholder={`Default (${sharpStatus?.defaults.cacheItems ?? 256})`}
+                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.cacheItems ?? 256 })}
                 value={sharpSettings.cacheItems ?? null}
                 integer
                 allowEmpty
@@ -1667,7 +1717,7 @@ export default function OperatorPanel() {
               onClick={handleSaveSharpSettings}
             >
               <HardDrive size={14} />
-              Apply Sharp Settings
+              {t('operator.sharpApply')}
             </button>
             <button
               className={styles.controlBtn}
@@ -1675,7 +1725,7 @@ export default function OperatorPanel() {
               onClick={handleResetSharpSettings}
             >
               <RefreshCw size={14} />
-              Reset to Defaults
+              {t('operator.sharpResetDefaults')}
             </button>
             <button
               className={styles.controlBtn}
@@ -1683,7 +1733,7 @@ export default function OperatorPanel() {
               onClick={refreshSharpSettings}
             >
               <RefreshCw size={14} />
-              Refresh
+              {t('operator.refresh')}
             </button>
           </div>
         </div>
@@ -1759,7 +1809,7 @@ export default function OperatorPanel() {
       {/* LanceDB Vector Store */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Vector Store (LanceDB)</span>
+          <span className={styles.sectionTitle}>{t('operator.vectorStore')}</span>
         </div>
         <div className={styles.sectionBody}>
           {vectorHealth ? (
@@ -1769,7 +1819,7 @@ export default function OperatorPanel() {
                   <div key={tableName} style={{ marginBottom: 16 }}>
                     <div className={styles.dbInfoGrid} style={{ marginBottom: 10 }}>
                       <div className={styles.dbInfoBlock}>
-                        <span className={styles.statusLabel}>Table</span>
+                        <span className={styles.statusLabel}>{t('operator.vectorTable')}</span>
                         <span className={styles.dbInlineText}>{tableName}</span>
                       </div>
                     </div>
@@ -1778,27 +1828,27 @@ export default function OperatorPanel() {
                       <>
                         <div className={styles.statusGrid}>
                           <div className={styles.statusCard}>
-                            <span className={styles.statusLabel}>Rows</span>
+                            <span className={styles.statusLabel}>{t('operator.vectorRows')}</span>
                             <span className={styles.statusValue}>{tableHealth.rowCount.toLocaleString()}</span>
                           </div>
                           <div className={styles.statusCard}>
-                            <span className={styles.statusLabel}>Vector Index</span>
-                            <span className={styles.statusValue}>{tableHealth.vectorIndexReady ? 'Active' : 'Pending'}</span>
+                            <span className={styles.statusLabel}>{t('operator.vectorIndex')}</span>
+                            <span className={styles.statusValue}>{tableHealth.vectorIndexReady ? t('operator.indexActive') : t('operator.indexPending')}</span>
                           </div>
                           <div className={styles.statusCard}>
-                            <span className={styles.statusLabel}>Scalar Indexes</span>
-                            <span className={styles.statusValue}>{tableHealth.scalarIndexReady ? 'Active' : 'Pending'}</span>
+                            <span className={styles.statusLabel}>{t('operator.vectorScalarIndexes')}</span>
+                            <span className={styles.statusValue}>{tableHealth.scalarIndexReady ? t('operator.indexActive') : t('operator.indexPending')}</span>
                           </div>
                           <div className={styles.statusCard}>
-                            <span className={styles.statusLabel}>FTS Index</span>
-                            <span className={styles.statusValue}>{tableHealth.ftsIndexReady ? 'Active' : 'Pending'}</span>
+                            <span className={styles.statusLabel}>{t('operator.vectorFtsIndex')}</span>
+                            <span className={styles.statusValue}>{tableHealth.ftsIndexReady ? t('operator.indexActive') : t('operator.indexPending')}</span>
                           </div>
                           <div className={styles.statusCard}>
-                            <span className={styles.statusLabel}>Unindexed Rows</span>
+                            <span className={styles.statusLabel}>{t('operator.vectorUnindexedRows')}</span>
                             <span className={styles.statusValue}>{tableHealth.unindexedRowEstimate.toLocaleString()}</span>
                           </div>
                           <div className={styles.statusCard}>
-                            <span className={styles.statusLabel}>Indexes</span>
+                            <span className={styles.statusLabel}>{t('operator.vectorIndexes')}</span>
                             <span className={styles.statusValue}>{tableHealth.indexes.length}</span>
                           </div>
                         </div>
@@ -1806,7 +1856,7 @@ export default function OperatorPanel() {
                         {tableHealth.indexes.length > 0 && (
                           <div className={styles.dbInfoGrid}>
                             <div className={styles.dbInfoBlock}>
-                              <span className={styles.statusLabel}>Index Details</span>
+                              <span className={styles.statusLabel}>{t('operator.vectorIndexDetails')}</span>
                               <span className={styles.dbInlineText}>
                                 {tableHealth.indexes.map((idx) =>
                                   idx.type ? `${idx.name} (${idx.type})` : idx.name
@@ -1815,7 +1865,7 @@ export default function OperatorPanel() {
                             </div>
                             {tableHealth.lastIndexRebuildAt > 0 && (
                               <div className={styles.dbInfoBlock}>
-                                <span className={styles.statusLabel}>Last Index Rebuild</span>
+                                <span className={styles.statusLabel}>{t('operator.vectorLastRebuild')}</span>
                                 <span className={styles.dbInlineText}>
                                   {new Date(tableHealth.lastIndexRebuildAt).toLocaleString()}
                                 </span>
@@ -1826,7 +1876,7 @@ export default function OperatorPanel() {
                       </>
                     ) : (
                       <div className={styles.disabledHint}>
-                        Table not initialized yet.
+                        {t('operator.vectorTableNotInit')}
                       </div>
                     )}
                   </div>
@@ -1834,46 +1884,46 @@ export default function OperatorPanel() {
               </>
             ) : (
               <div className={styles.disabledHint}>
-                No vector store initialized. It will be created automatically when embeddings are first used.
+                {t('operator.vectorNotInit')}
               </div>
             )
           ) : (
-            <div className={styles.disabledHint}>Loading vector store status...</div>
+            <div className={styles.disabledHint}>{t('operator.vectorLoading')}</div>
           )}
 
           <div className={styles.controls}>
             <button className={styles.controlBtn} disabled={!!vectorBusy} onClick={refreshVectorHealth}>
               <RefreshCw size={14} />
-              Refresh
+              {t('operator.refresh')}
             </button>
             <button
               className={styles.controlBtnPrimary}
               disabled={!!vectorBusy || !vectorHealth?.exists}
               onClick={handleVectorOptimize}
             >
-              {vectorBusy === 'Compacting & rebuilding...'
+              {vectorBusy === 'compacting'
                 ? <Loader2 size={14} className={spinClass} />
                 : <Hammer size={14} />}
-              Compact + Rebuild Index
+              {t('operator.compactRebuildIndex')}
             </button>
             <button
               className={styles.controlBtnDanger}
               disabled={!!vectorBusy || !vectorHealth?.exists}
               onClick={() => setConfirm({
-                title: 'Reset Vector Store',
-                message: 'This will delete the entire LanceDB directory, clear all cached embeddings, and reset vectorization flags. The vector store will reinitialize automatically on next use.',
+                title: t('operator.confirmVectorResetTitle'),
+                message: t('operator.confirmVectorResetMessage'),
                 variant: 'danger',
-                confirmText: 'Reset Vector Store',
+                confirmText: t('operator.confirmVectorReset'),
                 onConfirm: async () => {
                   setConfirm(null)
                   await handleVectorReset()
                 },
               })}
             >
-              {vectorBusy === 'Resetting...'
+              {vectorBusy === 'resetting'
                 ? <Loader2 size={14} className={spinClass} />
                 : <Trash2 size={14} />}
-              Force Reset
+              {t('operator.forceReset')}
             </button>
           </div>
         </div>
@@ -1882,7 +1932,7 @@ export default function OperatorPanel() {
       {/* Log Viewer */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Server Logs</span>
+          <span className={styles.sectionTitle}>{t('operator.serverLogs')}</span>
         </div>
         <div className={styles.sectionBody}>
           <LogViewer />

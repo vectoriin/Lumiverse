@@ -11,6 +11,7 @@ import { generateApi } from '@/api/generate'
 import { operatorApi } from '@/api/operator'
 import { presetsApi } from '@/api/presets'
 import { toast } from '@/lib/toast'
+import i18n from '@/i18n'
 import {
   invalidateDisplayRegexCache,
   invalidateDisplayRegexCacheForMessage,
@@ -199,8 +200,11 @@ export function useWebSocket() {
 
         lastOperatorUpdateToastKeyRef.current = toastKey
         toast.info(
-          `${status.commitsBehind} update${status.commitsBehind === 1 ? '' : 's'} available${status.latestUpdateMessage ? ` - ${status.latestUpdateMessage}` : ''}`,
-          { title: 'Update Available', duration: 7000 },
+          i18n.t('common.toast.operatorUpdatesAvailable', {
+            count: status.commitsBehind,
+            suffix: status.latestUpdateMessage ? ` - ${status.latestUpdateMessage}` : '',
+          }),
+          { title: i18n.t('common.toast.operatorUpdateTitle'), duration: 7000 },
         )
       } catch {
         // Ignore transient operator status errors outside the Operator panel.
@@ -406,19 +410,24 @@ export function useWebSocket() {
           const clip = payload.contextClipStats
           if (clip?.enabled && clip.budgetInvalid) {
             toast.error(
-              `Context size (${clip.maxContext.toLocaleString()}) is smaller than reserved response tokens — no history can fit. Raise Context Size or lower Max Tokens.`,
+              i18n.t('common.toast.contextBudgetInvalid', { max: clip.maxContext.toLocaleString() }),
             )
           } else if (clip?.enabled && clip.fixedOverBudget) {
             toast.error(
-              `Fixed prompt overhead (${clip.fixedTokens.toLocaleString()} tokens) already exceeds the input budget by ${Math.abs(clip.remainingHistoryBudget).toLocaleString()} tokens. Chat history is the only clip-eligible section, so reduce system/WI/preset content, raise Context Size, or lower Max Tokens.`,
+              i18n.t('common.toast.contextFixedOverBudget', {
+                fixed: clip.fixedTokens.toLocaleString(),
+                over: Math.abs(clip.remainingHistoryBudget).toLocaleString(),
+              }),
             )
           } else if (clip?.enabled && clip.remainingHistoryBudget <= 0 && clip.messagesDropped > 0) {
-            toast.warning(
-              `Fixed prompt overhead leaves no room for chat history. System prompt and other fixed blocks are not clipped; raise Context Size, lower Max Tokens, or shorten fixed prompt content.`,
-            )
+            toast.warning(i18n.t('common.toast.contextNoHistoryRoom'))
           } else if (clip?.enabled && clip.messagesDropped > 0) {
             toast.warning(
-              `Clipped ${clip.messagesDropped} chat history message${clip.messagesDropped === 1 ? '' : 's'} to fit the remaining history budget (${clip.tokensDropped.toLocaleString()} tokens dropped).`,
+              i18n.t('common.toast.contextClipped', {
+                count: clip.messagesDropped,
+                messages: clip.messagesDropped,
+                tokens: clip.tokensDropped.toLocaleString(),
+              }),
             )
           }
         }
@@ -491,8 +500,10 @@ export function useWebSocket() {
             // even if it slips past the backend sanitizer.
             const safeError = sanitizeToastMessage(payload.error)
             toast.error(
-              partialSaved ? `${safeError} — partial response saved.` : safeError,
-              { title: 'Generation Failed' },
+              partialSaved
+                ? i18n.t('common.toast.partialResponseSaved', { error: safeError })
+                : safeError,
+              { title: i18n.t('common.toast.generationFailedTitle') },
             )
             // Reconcile message list on error so any backend-staged empty messages
             // are reflected (or removed if the backend cleaned them up).
@@ -633,7 +644,9 @@ export function useWebSocket() {
                   }).catch((err) => {
                     console.error('[MentionQueue] Failed to start next generation:', err)
                     const s = store.getState()
-                    s.setStreamingError(err?.body?.error || err?.message || 'Failed to continue @mention chain')
+                    s.setStreamingError(
+                      err?.body?.error || err?.message || i18n.t('errors.failedMentionChain'),
+                    )
                     s.setMentionQueue(null)
                     s.stopStreaming()
                   })
@@ -956,7 +969,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.SPINDLE_EXTENSION_ERROR, (payload: { extensionId: string; error: string }) => {
         console.error(`[Spindle] Extension error (${payload.extensionId}):`, payload.error)
-        toast.error(payload.error, { title: 'Extension Error' })
+        toast.error(payload.error, { title: i18n.t('common.toast.extensionErrorTitle') })
         syncExtensions()
       }),
 
@@ -1012,14 +1025,14 @@ export function useWebSocket() {
           errors,
         })
         if (total === 0) {
-          toast.info('No extensions to update')
+          toast.info(i18n.t('common.toast.extensionsNoneToUpdate'))
         } else if (failed === 0) {
-          toast.success(`Updated ${updated} extension${updated === 1 ? '' : 's'}`)
+          toast.success(i18n.t('common.toast.extensionsUpdated', { count: updated }))
         } else if (updated === 0) {
-          toast.error(`All ${failed} extension update${failed === 1 ? '' : 's'} failed. Check the console for details.`)
+          toast.error(i18n.t('common.toast.extensionsAllFailed', { count: failed }))
           console.error('[Spindle] Bulk update errors:', errors)
         } else {
-          toast.warning(`${updated} updated, ${failed} failed. Check the console for details.`)
+          toast.warning(i18n.t('common.toast.extensionsPartial', { updated, failed }))
           console.error('[Spindle] Bulk update errors:', errors)
         }
         // Pick up new version metadata in the list
@@ -1221,10 +1234,10 @@ export function useWebSocket() {
       }),
       // LumiHub remote install notifications
       wsClient.on(EventType.LUMIHUB_INSTALL_STARTED, (payload: { characterName: string; source: string }) => {
-        toast.info(`Installing "${payload.characterName}" from LumiHub...`, { title: 'LumiHub' })
+        toast.info(i18n.t('common.toast.lumiHubInstalling', { name: payload.characterName }), { title: i18n.t('common.toast.lumiHubTitle') })
       }),
       wsClient.on(EventType.LUMIHUB_INSTALL_COMPLETED, (payload: { characterId: string; characterName: string; type?: string }) => {
-        toast.success(`"${payload.characterName}" installed successfully`, { title: 'LumiHub' })
+        toast.success(i18n.t('common.toast.lumiHubInstalled', { name: payload.characterName }), { title: i18n.t('common.toast.lumiHubTitle') })
         if (payload.type === 'preset') {
           const state = store.getState()
           state.setLoomRegistry({
@@ -1248,7 +1261,7 @@ export function useWebSocket() {
         }
       }),
       wsClient.on(EventType.LUMIHUB_INSTALL_FAILED, (payload: { characterName: string; error: string }) => {
-        toast.error(`Failed to install "${payload.characterName}": ${payload.error}`, { title: 'LumiHub' })
+        toast.error(i18n.t('common.toast.lumiHubInstallFailed', { name: payload.characterName, error: payload.error }), { title: i18n.t('common.toast.lumiHubTitle') })
       }),
       // SillyTavern Migration
       wsClient.on(EventType.MIGRATION_PROGRESS, (payload: any) => {
@@ -1291,7 +1304,7 @@ export function useWebSocket() {
           tool_count: payload.toolCount,
           tools: payload.tools,
         })
-        toast.success(`Connected — ${payload.toolCount} tool(s) discovered`, { title: `MCP: ${payload.name}` })
+        toast.success(i18n.t('common.toast.mcpConnected', { count: payload.toolCount }), { title: i18n.t('common.toast.mcpServerTitle', { name: payload.name }) })
       }),
       wsClient.on(EventType.MCP_SERVER_DISCONNECTED, (payload: { id: string; name: string }) => {
         store.getState().setMcpServerStatus(payload.id, {
@@ -1309,7 +1322,7 @@ export function useWebSocket() {
           tools: [],
           error: payload.error,
         })
-        toast.error(payload.error, { title: `MCP: ${payload.name}` })
+        toast.error(payload.error, { title: i18n.t('common.toast.mcpServerTitle', { name: payload.name }) })
       }),
       wsClient.on(EventType.MCP_SERVER_CHANGED, (payload: { id: string; profile?: any; deleted?: boolean }) => {
         if (payload.deleted) {

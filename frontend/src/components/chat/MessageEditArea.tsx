@@ -1,5 +1,6 @@
 import { Brain } from 'lucide-react'
 import { useCallback, useLayoutEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import styles from './MessageEditArea.module.css'
 
 interface MessageEditAreaProps {
@@ -11,7 +12,6 @@ interface MessageEditAreaProps {
   onChangeReasoning?: (value: string) => void
 }
 
-// Auto-grow a textarea to fit its content, bounded by its CSS min/max-height.
 function autoResize(el: HTMLTextAreaElement | null) {
   if (!el) return
   el.style.height = 'auto'
@@ -22,6 +22,8 @@ export default function MessageEditArea({
   editContent, onChangeContent, onSave, onCancel,
   editReasoning, onChangeReasoning,
 }: MessageEditAreaProps) {
+  const { t } = useTranslation('chat')
+  const { t: tc } = useTranslation('common')
   const hasReasoning = editReasoning != null && onChangeReasoning != null
   const contentRef = useRef<HTMLTextAreaElement>(null)
   const reasoningRef = useRef<HTMLTextAreaElement>(null)
@@ -47,29 +49,29 @@ export default function MessageEditArea({
         <div className={styles.reasoningSection}>
           <div className={styles.sectionLabel}>
             <Brain size={13} />
-            <span>Reasoning</span>
+            <span>{t('messageEdit.reasoning')}</span>
           </div>
           <textarea
             ref={reasoningRef}
             name="message-edit-reasoning"
-            aria-label="Reasoning"
+            aria-label={t('messageEdit.reasoningAria')}
             className={`${styles.editTextarea} ${styles.reasoningTextarea}`}
             value={editReasoning}
             onChange={handleReasoningChange}
-            placeholder="Reasoning content (optional)"
+            placeholder={t('messageEdit.reasoningPlaceholder')}
           />
         </div>
       )}
       <div className={hasReasoning ? styles.contentSection : undefined}>
         {hasReasoning && (
           <div className={styles.sectionLabel}>
-            <span>Response</span>
+            <span>{t('messageEdit.response')}</span>
           </div>
         )}
         <textarea
           ref={contentRef}
           name="message-edit-content"
-          aria-label="Message content"
+          aria-label={t('messageEdit.contentAria')}
           className={styles.editTextarea}
           value={editContent}
           onChange={handleContentChange}
@@ -78,10 +80,10 @@ export default function MessageEditArea({
       </div>
       <div className={styles.editActions}>
         <button type="button" onClick={onCancel} className={styles.editCancelBtn}>
-          Cancel
+          {tc('actions.cancel')}
         </button>
         <button type="button" onClick={onSave} className={styles.editSaveBtn}>
-          Save
+          {tc('actions.save')}
         </button>
       </div>
     </div>

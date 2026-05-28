@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
   ChevronDown,
@@ -26,16 +27,6 @@ export interface VariablesEditorProps {
   variables: PromptVariableDef[]
   onChange: (vars: PromptVariableDef[]) => void
 }
-
-const VARIABLE_TYPE_OPTIONS: { value: PromptVariableType; label: string }[] = [
-  { value: 'text', label: 'Text' },
-  { value: 'textarea', label: 'Text Area' },
-  { value: 'number', label: 'Number' },
-  { value: 'slider', label: 'Slider' },
-  { value: 'select', label: 'Dropdown' },
-  { value: 'switch', label: 'On / Off' },
-  { value: 'multiselect', label: 'Multi-select' },
-]
 
 const TYPE_ACCENT_CLASS: Record<PromptVariableType, string> = {
   text: css.typeText,
@@ -184,6 +175,7 @@ function coerceVariableType(
 // ============================================================================
 
 export function VariablesEditor({ variables, onChange }: VariablesEditorProps) {
+  const { t } = useTranslation('panels')
   const [expanded, setExpanded] = useState(variables.length > 0)
 
   const duplicateNames = useMemo(() => {
@@ -229,29 +221,23 @@ export function VariablesEditor({ variables, onChange }: VariablesEditorProps) {
           aria-expanded={expanded}
         >
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          Prompt Variables
+          {t('promptVariablesEditor.title')}
           {variables.length > 0 && (
             <span className={css.headerCount}>({variables.length})</span>
           )}
         </button>
         <button type="button" className={css.addBtn} onClick={addVar}>
-          <Plus size={12} /> Add Variable
+          <Plus size={12} /> {t('promptVariablesEditor.addVariable')}
         </button>
       </div>
 
       <p className={css.hint}>
-        Declare typed inputs that end users can configure via the &ldquo;Configure Prompt
-        Variables&rdquo; modal. Reference them inside this block&apos;s content with{' '}
-        <code>{'{{var::name}}'}</code>. Multi-select also exposes{' '}
-        <code>{'{{var::name::ison::keyA,keyB}}'}</code>.
+        {t('promptVariablesEditor.hint', { varName: '{{var::name}}', multiselectName: '{{var::name::ison::keyA,keyB}}' })}
       </p>
 
       {expanded && (
         variables.length === 0 ? (
-          <div className={css.empty}>
-            No variables declared yet. Add one to expose a user-configurable input on this
-            block.
-          </div>
+          <div className={css.empty}>{t('promptVariablesEditor.empty')}</div>
         ) : (
           <div className={css.list}>
             {variables.map((v) => (
@@ -290,6 +276,15 @@ function VariableRow({
   onChangeType,
   onRemove,
 }: VariableRowProps) {
+  const { t } = useTranslation('panels')
+  const typeOptions = useMemo(
+    () =>
+      (['text', 'textarea', 'number', 'slider', 'select', 'switch', 'multiselect'] as const).map((value) => ({
+        value,
+        label: t(`promptVariablesEditor.types.${value}`),
+      })),
+    [t],
+  )
   const isNumeric = variable.type === 'number' || variable.type === 'slider'
   const isSlider = variable.type === 'slider'
   const isSelect = variable.type === 'select'
@@ -304,18 +299,18 @@ function VariableRow({
     <div className={clsx(css.card, TYPE_ACCENT_CLASS[variable.type])}>
       {/* Row 1: handle · type · name · delete */}
       <div className={css.headerRow}>
-        <span className={css.handle} aria-hidden="true" title="Drag (coming soon)">
+        <span className={css.handle} aria-hidden="true" title={t('promptVariablesEditor.dragComingSoon')}>
           <GripVertical size={14} />
         </span>
 
         <div className={clsx(css.field, css.typeField)}>
-          <label className={css.fieldLabel}>Type</label>
+          <label className={css.fieldLabel}>{t('promptVariablesEditor.type')}</label>
           <select
             className={css.select}
             value={variable.type}
             onChange={(e) => onChangeType(e.target.value as PromptVariableType)}
           >
-            {VARIABLE_TYPE_OPTIONS.map((opt) => (
+            {typeOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -324,22 +319,22 @@ function VariableRow({
         </div>
 
         <div className={css.nameField}>
-          <label className={css.fieldLabel}>Name</label>
+          <label className={css.fieldLabel}>{t('promptVariablesEditor.name')}</label>
           <div className={css.nameRow}>
             <input
               className={clsx(css.input, css.inputMono)}
               value={variable.name}
-              placeholder="tone"
+              placeholder={t('promptVariablesEditor.namePlaceholder')}
               spellCheck={false}
               onChange={(e) => onUpdate({ name: e.target.value })}
             />
             {isDuplicate && (
               <span
                 className={css.dupChip}
-                title="This name is used by more than one variable — the last enabled block wins at assembly time."
+                title={t('promptVariablesEditor.duplicateTitle')}
               >
                 <AlertTriangle size={10} />
-                shadowed
+                {t('promptVariablesEditor.shadowed')}
               </span>
             )}
           </div>
@@ -349,8 +344,8 @@ function VariableRow({
           type="button"
           className={css.deleteBtn}
           onClick={onRemove}
-          aria-label="Remove variable"
-          title="Remove variable"
+          aria-label={t('promptVariablesEditor.removeVariable')}
+          title={t('promptVariablesEditor.removeVariable')}
         >
           <Trash2 size={13} />
         </button>
@@ -358,11 +353,11 @@ function VariableRow({
 
       {/* Row 2: label */}
       <div className={clsx(css.field, css.colFull)}>
-        <label className={css.fieldLabel}>Label</label>
+        <label className={css.fieldLabel}>{t('promptVariablesEditor.label')}</label>
         <input
           className={css.input}
           value={variable.label}
-          placeholder="Response tone"
+          placeholder={t('promptVariablesEditor.labelPlaceholder')}
           onChange={(e) => onUpdate({ label: e.target.value })}
         />
       </div>
@@ -371,13 +366,13 @@ function VariableRow({
           For select/multiselect the default is set via the options list below. */}
       {!isSelect && !isMultiselect && (
         <div className={clsx(css.field, isSlider ? css.colHalf : css.colFull)}>
-          <label className={css.fieldLabel}>Default</label>
+          <label className={css.fieldLabel}>{t('promptVariablesEditor.default')}</label>
           {variable.type === 'textarea' ? (
             <textarea
               className={css.textarea}
               value={String(variable.defaultValue ?? '')}
               rows={3}
-              placeholder="Default body text…"
+              placeholder={t('promptVariablesEditor.defaultTextareaPlaceholder')}
               onChange={(e) =>
                 onUpdate({ defaultValue: e.target.value } as Partial<PromptVariableDef>)
               }
@@ -386,7 +381,7 @@ function VariableRow({
             <input
               className={css.input}
               value={String(variable.defaultValue ?? '')}
-              placeholder="Neutral, warm, clinical…"
+              placeholder={t('promptVariablesEditor.defaultTextPlaceholder')}
               onChange={(e) =>
                 onUpdate({ defaultValue: e.target.value } as Partial<PromptVariableDef>)
               }
@@ -400,10 +395,10 @@ function VariableRow({
                 }
               />
               <span className={css.switchToggleLabel}>
-                {(variable as { defaultValue: 0 | 1 }).defaultValue === 1 ? 'On' : 'Off'}
+                {(variable as { defaultValue: 0 | 1 }).defaultValue === 1 ? t('promptVariablesEditor.switchOn') : t('promptVariablesEditor.switchOff')}
               </span>
               <span className={css.switchToggleHint}>
-                Resolves to <code>1</code> when on, <code>0</code> when off.
+                {t('promptVariablesEditor.switchHint')}
               </span>
             </div>
           ) : (
@@ -440,7 +435,7 @@ function VariableRow({
             onChange={(e) =>
               onUpdate({ defaultValue: Number(e.target.value) } as Partial<PromptVariableDef>)
             }
-            aria-label="Default value preview"
+            aria-label={t('promptVariablesEditor.defaultPreviewAria')}
           />
           <div className={css.sliderPreviewScale}>
             <span>{sliderMin}</span>
@@ -478,7 +473,7 @@ function VariableRow({
       {isNumeric && (
         <>
           <div className={clsx(css.field, css.colThird)}>
-            <label className={css.fieldLabel}>Min</label>
+            <label className={css.fieldLabel}>{t('promptVariablesEditor.min')}</label>
             <NumberStepper
               value={
                 typeof (variable as { min?: number }).min === 'number'
@@ -492,7 +487,7 @@ function VariableRow({
             />
           </div>
           <div className={clsx(css.field, css.colThird)}>
-            <label className={css.fieldLabel}>Max</label>
+            <label className={css.fieldLabel}>{t('promptVariablesEditor.max')}</label>
             <NumberStepper
               value={
                 typeof (variable as { max?: number }).max === 'number'
@@ -506,7 +501,7 @@ function VariableRow({
             />
           </div>
           <div className={clsx(css.field, css.colThird)}>
-            <label className={css.fieldLabel}>Step</label>
+            <label className={css.fieldLabel}>{t('promptVariablesEditor.step')}</label>
             <NumberStepper
               value={
                 typeof (variable as { step?: number }).step === 'number'
@@ -524,11 +519,11 @@ function VariableRow({
 
       {/* Row 5: description — always last, soft hint copy */}
       <div className={clsx(css.field, css.colFull)}>
-        <label className={css.fieldLabel}>Description (optional)</label>
+        <label className={css.fieldLabel}>{t('promptVariablesEditor.descriptionOptional')}</label>
         <input
           className={css.input}
           value={variable.description ?? ''}
-          placeholder="Hint shown to end users configuring this variable"
+          placeholder={t('promptVariablesEditor.descriptionPlaceholder')}
           onChange={(e) => onUpdate({ description: e.target.value || undefined })}
         />
       </div>

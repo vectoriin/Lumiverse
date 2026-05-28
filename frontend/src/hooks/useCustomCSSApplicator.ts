@@ -3,6 +3,7 @@ import { useStore } from '@/store'
 import { validateCSS, sanitizeCSS } from '@/lib/cssValidator'
 import { rewriteThemeAssetUrls } from '@/lib/themeAssetCss'
 import { toast } from '@/lib/toast'
+import i18n from '@/i18n'
 
 const STYLE_ID = 'lumiverse-user-css'
 
@@ -62,7 +63,7 @@ export function useCustomCSSApplicator() {
       el.textContent = combined
       lastHashRef.current = combined
     } else {
-      toast.error(`Custom CSS error: ${result.error}`)
+      toast.error(i18n.t('common.toast.customCssError', { error: result.error }))
     }
   }, [customCSS.bundleId, customCSS.css, customCSS.enabled, customCSS.revision, componentOverrides])
 
@@ -82,7 +83,7 @@ export function useCustomCSSApplicator() {
       for (const name of Object.keys(componentOverrides)) {
         toggleComponentOverride(name, false)
       }
-      toast.info('All custom CSS disabled')
+      toast.info(i18n.t('common.toast.customCssDisabled'))
     }
   }, [toggleCustomCSS, toggleComponentOverride, componentOverrides])
 

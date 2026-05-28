@@ -3,6 +3,7 @@
  * so it can be used as a fallback when a user override crashes or is disabled.
  */
 import { useRef, useCallback, useState, useMemo, useLayoutEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { Copy, Pencil, Trash2, EyeOff, Eye, BarChart3, Volume2, Square } from 'lucide-react'
 import { IconGitFork } from '@tabler/icons-react'
@@ -89,6 +90,7 @@ function MetaPill({ index, timestamp, tokenCount, isHidden, isUser, generationMe
   generationMetrics: GenerationMetrics | undefined
   showTokenCount: boolean
 }) {
+  const { t } = useTranslation('chat')
   const pillRef = useRef<HTMLSpanElement>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null)
   const hasGenerationDetails = !isUser && !!generationMetrics && (
@@ -129,7 +131,7 @@ function MetaPill({ index, timestamp, tokenCount, isHidden, isUser, generationMe
       {isHidden && (
         <span className={styles.metaSegment}>
           <span className={styles.metaDot}>&middot;</span>
-          <span className={styles.hiddenBadge}>Hidden</span>
+          <span className={styles.hiddenBadge}>{t('messageMeta.hidden')}</span>
         </span>
       )}
       {tooltipPos && hasGenerationDetails && createPortal(
@@ -139,26 +141,26 @@ function MetaPill({ index, timestamp, tokenCount, isHidden, isUser, generationMe
         >
           {generationMetrics!.model && (
             <span className={styles.tooltipRow}>
-              <span className={styles.tooltipLabel}>Model</span>
+              <span className={styles.tooltipLabel}>{t('messageMeta.model')}</span>
               <span className={styles.tooltipValue}>{generationMetrics!.model}</span>
             </span>
           )}
           {generationMetrics!.provider && (
             <span className={styles.tooltipRow}>
-              <span className={styles.tooltipLabel}>Provider</span>
+              <span className={styles.tooltipLabel}>{t('messageMeta.provider')}</span>
               <span className={styles.tooltipValue}>{generationMetrics!.provider}</span>
             </span>
           )}
           {generationMetrics!.ttft != null && (
             <span className={styles.tooltipRow}>
-              <span className={styles.tooltipLabel}>First token</span>
+              <span className={styles.tooltipLabel}>{t('messageMeta.firstToken')}</span>
               <span className={styles.tooltipValue}>{formatMs(generationMetrics!.ttft)}</span>
             </span>
           )}
           {generationMetrics!.tps != null && (
             <span className={styles.tooltipRow}>
-              <span className={styles.tooltipLabel}>Speed</span>
-              <span className={styles.tooltipValue}>{generationMetrics!.tps} tok/s</span>
+              <span className={styles.tooltipLabel}>{t('messageMeta.speed')}</span>
+              <span className={styles.tooltipValue}>{t('messageMeta.tokPerSec', { count: generationMetrics!.tps })}</span>
             </span>
           )}
         </span>,
@@ -176,6 +178,8 @@ export default function BubbleMessageDefault({
   handleEdit, handleSaveEdit, handleCancelEdit, handleDelete, handleToggleHidden,
   handleFork, handlePromptBreakdown,
 }: BubbleMessageDefaultProps) {
+  const { t } = useTranslation('chat')
+  const { t: tc } = useTranslation('common')
   const openFloatingAvatar = useStore((s) => s.openFloatingAvatar)
   const swipeGesturesEnabled = useStore((s) => s.swipeGesturesEnabled)
   const showMessageTokenCount = useStore((s) => s.showMessageTokenCount ?? true)
@@ -263,51 +267,51 @@ export default function BubbleMessageDefault({
   const contextMenuItems: ContextMenuEntry[] = useMemo(() => [
     {
       key: 'copy',
-      label: 'Copy',
+      label: tc('actions.copy'),
       icon: <Copy size={14} />,
       onClick: () => contextAction(handleCopy),
     },
     {
       key: 'edit',
-      label: 'Edit',
+      label: tc('actions.edit'),
       icon: <Pencil size={14} />,
       onClick: () => contextAction(handleEdit),
     },
     ...(canPlay ? [{
       key: 'play',
       label: isGenerating
-        ? 'Cancel TTS generation'
+        ? t('messageActions.cancelTtsGeneration')
         : isPlaying
-          ? 'Stop playback'
+          ? t('messageActions.stopPlayback')
           : hasSavedAudio
-            ? 'Regenerate TTS audio'
-            : 'Play with TTS',
+            ? t('messageActions.regenerateTtsAudio')
+            : t('messageActions.playTts'),
       icon: (isGenerating || isPlaying) ? <Square size={14} /> : <Volume2 size={14} />,
       onClick: () => contextAction(togglePlayback),
     }] satisfies ContextMenuEntry[] : []),
     {
       key: 'toggle-hidden',
-      label: isHidden ? 'Unhide from AI context' : 'Hide from AI context',
+      label: isHidden ? t('messageActions.unhideFromAi') : t('messageActions.hideFromAi'),
       icon: isHidden ? <Eye size={14} /> : <EyeOff size={14} />,
       active: isHidden,
       onClick: () => contextAction(handleToggleHidden),
     },
     {
       key: 'fork',
-      label: 'Fork chat here',
+      label: t('messageActions.fork'),
       icon: <IconGitFork size={14} />,
       onClick: () => contextAction(handleFork),
     },
     ...(!isUser ? [{
       key: 'prompt-breakdown',
-      label: 'Prompt breakdown',
+      label: t('messageActions.promptBreakdown'),
       icon: <BarChart3 size={14} />,
       onClick: () => contextAction(handlePromptBreakdown),
     }] satisfies ContextMenuEntry[] : []),
     { key: 'delete-divider', type: 'divider' },
     {
       key: 'delete',
-      label: 'Delete',
+      label: tc('actions.delete'),
       icon: <Trash2 size={14} />,
       danger: true,
       onClick: () => contextAction(handleDelete),
@@ -315,7 +319,7 @@ export default function BubbleMessageDefault({
   ], [
     canPlay, contextAction, handleCopy, handleDelete, handleEdit, handleFork,
     handlePromptBreakdown, handleToggleHidden, hasSavedAudio, isGenerating, isHidden, isPlaying, isUser,
-    togglePlayback,
+    togglePlayback, t, tc,
   ])
 
   useSwipeGesture(cardRef, {

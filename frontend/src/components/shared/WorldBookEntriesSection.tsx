@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useWorldBookEntryLabels } from '@/lib/i18n/worldBookEntryLabels'
 import {
   ArrowDown,
   ArrowUp,
@@ -63,40 +65,6 @@ import type {
 } from '@/types/store'
 import styles from './WorldBookEntriesSection.module.css'
 
-const POSITION_SHORT: Record<number, string> = {
-  0: 'Before Main',
-  1: 'After Main',
-  2: 'Before AN',
-  3: 'After AN',
-  4: '@ Depth',
-  7: '@ Marker',
-}
-const POSITION_OPTIONS = [
-  { value: 0, label: 'Before Main' },
-  { value: 1, label: 'After Main' },
-  { value: 2, label: 'Before AN' },
-  { value: 3, label: 'After AN' },
-  { value: 4, label: 'At Depth' },
-  { value: 7, label: 'At Marker' },
-] as const
-const TYPE_OPTIONS = [
-  { value: 'trigger', label: 'Trigger' },
-  { value: 'constant', label: 'Constant' },
-  { value: 'vector', label: 'Vector' },
-] as const
-const SORT_OPTIONS: { value: WorldBookEntrySortBy; label: string }[] = [
-  { value: 'custom', label: 'Custom' },
-  { value: 'priority', label: 'Priority' },
-  { value: 'name', label: 'Name' },
-  { value: 'created', label: 'Date Created' },
-  { value: 'updated', label: 'Last Updated' },
-]
-const PAGE_SIZE_OPTIONS: Array<{ value: WorldBookEntryPageSize; label: string }> = [
-  { value: 50, label: '50 / page' },
-  { value: 100, label: '100 / page' },
-  { value: 200, label: '200 / page' },
-  { value: 'all', label: 'All entries' },
-]
 const DEFAULT_PAGE_SIZE = 50 as const
 const CUSTOM_PAGE_SIZE = 200 as const
 
@@ -110,8 +78,9 @@ function getEntryType(entry: WorldBookEntry): 'trigger' | 'constant' | 'vector' 
   return 'trigger'
 }
 
-function formatEntryCount(count: number): string {
-  return `${count} entr${count === 1 ? 'y' : 'ies'}`
+function useFormatEntryCount() {
+  const { t } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entries' })
+  return useCallback((count: number) => t('entryCount', { count }), [t])
 }
 
 interface EntryRowProps {
@@ -143,6 +112,8 @@ function SortableEntryRow({
   onOpenTypeMenu,
   onOpenPositionMenu,
 }: EntryRowProps) {
+  const { t } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entries' })
+  const labels = useWorldBookEntryLabels()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: entry.id,
     disabled: !dragEnabled,
@@ -176,23 +147,23 @@ function SortableEntryRow({
                 className={styles.selectionToggle}
                 checked={selected}
                 onChange={onToggleSelect}
-                aria-label={selected ? 'Deselect entry' : 'Select entry'}
+                aria-label={selected ? t('deselect') : t('selectEntry')}
               />
             ) : (
               <input
                 type="checkbox"
                 className={styles.enableToggle}
                 checked={!entry.disabled}
-                title={entry.disabled ? 'Disabled' : 'Enabled'}
+                title={entry.disabled ? t('disabled') : t('enabled')}
                 onChange={() => onUpdate(entry.id, { disabled: !entry.disabled })}
-                aria-label={entry.disabled ? 'Enable entry' : 'Disable entry'}
+                aria-label={entry.disabled ? t('enableEntry') : t('disableEntry')}
               />
             )}
             <button
               type="button"
               className={clsx(styles.dragHandle, !dragEnabled && styles.dragHandleDisabled)}
-              title={dragEnabled ? 'Drag to reorder' : 'Custom drag reorder unavailable'}
-              aria-label="Drag handle"
+              title={dragEnabled ? t('dragReorder') : t('dragUnavailable')}
+              aria-label={t('dragHandle')}
               tabIndex={-1}
               {...attributes}
               {...listeners}
@@ -217,10 +188,10 @@ function SortableEntryRow({
                     onOpenTypeMenu(entry.id, { x: rect.right, y: rect.bottom + 4 })
                   }}
                   onPointerDown={(e) => e.stopPropagation()}
-                  title="Change entry type"
-                  aria-label={`Change entry type from ${getEntryType(entry)}`}
+                  title={t('changeEntryType')}
+                  aria-label={t('changeEntryTypeFrom', { type: getEntryType(entry) })}
                 >
-                  <span>{entry.constant ? 'Constant' : entry.vectorized ? 'Vector' : 'Trigger'}</span>
+                  <span>{labels.entryTypeLabel(entry)}</span>
                   <ChevronDown size={11} />
                 </button>
                 <button
@@ -232,10 +203,10 @@ function SortableEntryRow({
                     onOpenPositionMenu(entry.id, { x: rect.right, y: rect.bottom + 4 })
                   }}
                   onPointerDown={(e) => e.stopPropagation()}
-                  title="Change entry position"
-                  aria-label={`Change entry position from ${POSITION_SHORT[entry.position] ?? `Pos ${entry.position}`}`}
+                  title={t('changeEntryPosition')}
+                  aria-label={t('changeEntryPositionFrom', { position: labels.positionLabel(entry.position) })}
                 >
-                  <span>{POSITION_SHORT[entry.position] ?? `Pos ${entry.position}`}</span>
+                  <span>{labels.positionLabel(entry.position)}</span>
                   <ChevronDown size={11} />
                 </button>
               </div>
@@ -246,11 +217,11 @@ function SortableEntryRow({
               type="button"
               className={styles.expandBtn}
               onClick={onToggleExpand}
-              title={expanded ? 'Collapse entry editor' : 'Expand entry editor'}
-              aria-label={expanded ? 'Collapse entry editor' : 'Expand entry editor'}
+              title={expanded ? t('collapseEditor') : t('expandEditor')}
+              aria-label={expanded ? t('collapseEditor') : t('expandEditor')}
             >
               {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              <span>{expanded ? 'Collapse' : 'Expand'}</span>
+              <span>{expanded ? t('collapse') : t('expand')}</span>
             </button>
             <button
               type="button"
@@ -259,7 +230,7 @@ function SortableEntryRow({
                 const rect = e.currentTarget.getBoundingClientRect()
                 onOpenMenu(entry.id, { x: rect.right, y: rect.bottom + 4 })
               }}
-              title="More actions"
+              title={t('moreActions')}
             >
               <MoreVertical size={13} />
             </button>
@@ -311,6 +282,11 @@ export default function WorldBookEntriesSection({
   selectedBookId,
   onRefreshVectorSummary,
 }: WorldBookEntriesSectionProps) {
+  const { t } = useTranslation('panels', { keyPrefix: 'worldBookPanel' })
+  const { t: te } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entries' })
+  const { t: tc } = useTranslation('common')
+  const labels = useWorldBookEntryLabels()
+  const formatEntryCount = useFormatEntryCount()
   const worldBookEntryViewPrefs = useStore((s) => s.worldBookEntryViewPrefs)
   const setSetting = useStore((s) => s.setSetting)
 
@@ -362,10 +338,10 @@ export default function WorldBookEntriesSection({
   const selectedCount = selectedIds.length
   const dragUnavailableReason = useMemo(() => {
     if (entrySortBy !== 'custom') return null
-    if (entrySearchFilter.trim()) return 'Clear search to drag-reorder entries.'
-    if (entryPageSize !== 'all') return 'Switch page size to All entries to drag-reorder without pagination.'
+    if (entrySearchFilter.trim()) return te('clearSearchDrag')
+    if (entryPageSize !== 'all') return te('switchAllDrag')
     return null
-  }, [entrySortBy, entrySearchFilter, entryPageSize])
+  }, [entrySortBy, entrySearchFilter, entryPageSize, te])
   const dragEnabled = entrySortBy === 'custom' && !dragUnavailableReason
 
   const sensors = useSensors(
@@ -511,7 +487,7 @@ export default function WorldBookEntriesSection({
 
   const handleCreateEntry = useCallback(async () => {
     const entry = await worldBooksApi.createEntry(selectedBookId, {
-      comment: 'New Entry',
+      comment: t('defaultEntryComment'),
       key: [],
       content: '',
     })
@@ -519,7 +495,7 @@ export default function WorldBookEntriesSection({
     setEntryPage(1)
     await loadEntries(selectedBookId, 1, entrySortBy, entrySortDir, entrySearchFilter.trim(), entryPageSize)
     await refreshVectorSummary()
-  }, [selectedBookId, entrySortBy, entrySortDir, entrySearchFilter, entryPageSize, loadEntries, refreshVectorSummary])
+  }, [selectedBookId, entrySortBy, entrySortDir, entrySearchFilter, entryPageSize, loadEntries, refreshVectorSummary, t])
 
   const handleDeleteEntries = useCallback(async (entryIds: string[]) => {
     if (entryIds.length === 1) {
@@ -697,7 +673,7 @@ export default function WorldBookEntriesSection({
     ? [
         {
           key: 'expand',
-          label: selectedEntryId === selectedEntry.id ? 'Collapse editor' : 'Expand editor',
+          label: selectedEntryId === selectedEntry.id ? te('contextCollapseEditor') : te('contextExpandEditor'),
           onClick: () => {
             setSelectedEntryId((current) => (current === selectedEntry.id ? null : selectedEntry.id))
             setContextMenu(null)
@@ -705,7 +681,7 @@ export default function WorldBookEntriesSection({
         },
         {
           key: 'duplicate',
-          label: 'Duplicate here',
+          label: te('duplicateHere'),
           icon: <Copy size={14} />,
           onClick: () => {
             setContextMenu(null)
@@ -714,7 +690,7 @@ export default function WorldBookEntriesSection({
         },
         {
           key: 'copy',
-          label: 'Copy to book…',
+          label: te('copyToBook'),
           icon: <Copy size={14} />,
           onClick: () => {
             setContextMenu(null)
@@ -722,15 +698,15 @@ export default function WorldBookEntriesSection({
             setMoveCopyState({
               mode: 'copy',
               entryIds: [selectedEntry.id],
-              title: 'Copy Entry',
-              confirmText: 'Copy',
+              title: te('copyEntryTitle'),
+              confirmText: tc('actions.copy'),
             })
           },
           disabled: availableTargetBooks.length === 0,
         },
         {
           key: 'move',
-          label: 'Move to book…',
+          label: te('moveToBook'),
           icon: <MoveRight size={14} />,
           onClick: () => {
             setContextMenu(null)
@@ -738,8 +714,8 @@ export default function WorldBookEntriesSection({
             setMoveCopyState({
               mode: 'move',
               entryIds: [selectedEntry.id],
-              title: 'Move Entry',
-              confirmText: 'Move',
+              title: te('moveEntryTitle'),
+              confirmText: te('move'),
             })
           },
           disabled: availableTargetBooks.length === 0,
@@ -747,22 +723,22 @@ export default function WorldBookEntriesSection({
         { key: 'divider', type: 'divider' },
         {
           key: 'delete',
-          label: 'Delete',
+          label: tc('actions.delete'),
           icon: <Trash2 size={14} />,
           danger: true,
           onClick: () => {
             setContextMenu(null)
             setDeleteState({
               entryIds: [selectedEntry.id],
-              title: 'Delete Entry',
-              message: 'Delete this entry? This cannot be undone.',
+              title: t('deleteEntryTitle'),
+              message: t('deleteEntryMessage'),
             })
           },
         },
       ]
     : []
   const typeMenuItems: ContextMenuEntry[] = selectedTypeEntry
-    ? TYPE_OPTIONS.map((option) => ({
+    ? labels.typeOptions.map((option) => ({
         key: option.value,
         label: option.label,
         icon: option.value === 'trigger'
@@ -781,7 +757,7 @@ export default function WorldBookEntriesSection({
       }))
     : []
   const positionMenuItems: ContextMenuEntry[] = selectedPositionEntry
-    ? POSITION_OPTIONS.map((option) => ({
+    ? labels.positionOptions.map((option) => ({
         key: String(option.value),
         label: option.label,
         icon: option.value === 0
@@ -806,7 +782,7 @@ export default function WorldBookEntriesSection({
   return (
     <>
       <div className={styles.entryListHeader}>
-        <span className={styles.entryListTitle}>Entries ({entryTotal})</span>
+        <span className={styles.entryListTitle}>{te('entriesTitle', { count: entryTotal })}</span>
         <div className={styles.toolbarActions}>
           <button
             type="button"
@@ -817,14 +793,14 @@ export default function WorldBookEntriesSection({
                 return !current
               })
             }}
-            title={selectMode ? 'Exit bulk select' : 'Bulk select'}
+            title={selectMode ? te('exitBulkSelect') : te('bulkSelect')}
           >
             {selectMode ? <CheckSquare size={13} /> : <Square size={13} />}
-            <span>Select</span>
+            <span>{te('select')}</span>
           </button>
           <button type="button" className={styles.newEntryBtn} onClick={() => void handleCreateEntry()}>
             <Plus size={12} />
-            <span>New Entry</span>
+            <span>{te('newEntry')}</span>
           </button>
         </div>
       </div>
@@ -834,19 +810,19 @@ export default function WorldBookEntriesSection({
           className={styles.entrySortSelect}
           value={entrySortBy}
           onChange={(e) => handleSortByChange(e.target.value as WorldBookEntrySortBy)}
-          title="Sort entries by"
+          title={te('sortBy')}
         >
-          {SORT_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>Sort: {option.label}</option>
+          {labels.sortOptions.map((option) => (
+            <option key={option.value} value={option.value}>{te('sortPrefix', { label: option.label })}</option>
           ))}
         </select>
         <select
           className={styles.entryPageSizeSelect}
           value={String(entryPageSize)}
           onChange={(e) => handlePageSizeChange(e.target.value)}
-          title="Entries per page"
+          title={te('perPage')}
         >
-          {PAGE_SIZE_OPTIONS.map((option) => (
+          {labels.pageSizeOptions.map((option) => (
             <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
           ))}
         </select>
@@ -855,7 +831,7 @@ export default function WorldBookEntriesSection({
             type="button"
             className={styles.entrySortDirBtn}
             onClick={handleToggleSortDir}
-            title={entrySortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
+            title={entrySortDir === 'asc' ? te('sortAsc') : te('sortDesc')}
           >
             {entrySortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
             <ArrowUpDown size={10} />
@@ -868,7 +844,7 @@ export default function WorldBookEntriesSection({
         <input
           type="text"
           className={styles.entrySearchInput}
-          placeholder="Search all entries..."
+          placeholder={te('searchAll')}
           value={entrySearchFilter}
           onChange={(e) => {
             setEntrySearchFilter(e.target.value)
@@ -891,7 +867,7 @@ export default function WorldBookEntriesSection({
             <button type="button" className={styles.bulkToggle} onClick={handleSelectAllVisible}>
               {allSelected ? <CheckSquare size={14} /> : <Square size={14} />}
             </button>
-            <span className={styles.bulkCount}>{selectedCount} of {entries.length} selected</span>
+            <span className={styles.bulkCount}>{te('bulkSelected', { selected: selectedCount, total: entries.length })}</span>
           </div>
           <div className={styles.bulkActions}>
             <button
@@ -903,13 +879,13 @@ export default function WorldBookEntriesSection({
                 setMoveCopyState({
                   mode: 'move',
                   entryIds: selectedIds,
-                  title: `Move ${formatEntryCount(selectedCount)}`,
-                  confirmText: 'Move',
+                  title: te('moveCount', { count: selectedCount }),
+                  confirmText: te('move'),
                 })
               }}
             >
               <MoveRight size={13} />
-              <span>Move</span>
+              <span>{te('move')}</span>
             </button>
             <button
               type="button"
@@ -923,7 +899,7 @@ export default function WorldBookEntriesSection({
               }}
             >
               <Hash size={13} />
-              <span>Renumber</span>
+              <span>{te('renumber')}</span>
             </button>
             <button
               type="button"
@@ -936,7 +912,7 @@ export default function WorldBookEntriesSection({
               }}
             >
               <Tag size={13} />
-              <span>Add Keyword</span>
+              <span>{te('addKeyword')}</span>
             </button>
             <button
               type="button"
@@ -958,13 +934,13 @@ export default function WorldBookEntriesSection({
               onClick={() => {
                 setDeleteState({
                   entryIds: selectedIds,
-                  title: 'Delete Entries',
-                  message: `Delete ${formatEntryCount(selectedCount)}? This cannot be undone.`,
+                  title: te('deleteEntriesTitle'),
+                  message: te('deleteCountMessage', { count: selectedCount }),
                 })
               }}
             >
               <Trash2 size={13} />
-              <span>Delete</span>
+              <span>{tc('actions.delete')}</span>
             </button>
             <button
               type="button"
@@ -975,14 +951,14 @@ export default function WorldBookEntriesSection({
               }}
             >
               <X size={13} />
-              <span>Cancel</span>
+              <span>{tc('actions.cancel')}</span>
             </button>
           </div>
         </div>
       )}
 
       {loadingEntries ? (
-        <div className={styles.emptyState}>Loading entries...</div>
+        <div className={styles.emptyState}>{te('loading')}</div>
       ) : (
         <>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -1007,7 +983,7 @@ export default function WorldBookEntriesSection({
                 ))}
                 {entries.length === 0 && (
                   <div className={styles.emptyState}>
-                    {entrySearchFilter.trim() ? 'No entries match your search' : 'No entries yet'}
+                    {entrySearchFilter.trim() ? te('noMatch') : te('empty')}
                   </div>
                 )}
               </div>
@@ -1053,7 +1029,7 @@ export default function WorldBookEntriesSection({
           title={deleteState.title}
           message={deleteState.message}
           variant="danger"
-          confirmText="Delete"
+          confirmText={tc('actions.delete')}
           onConfirm={async () => {
             setPendingAction(true)
             try {
@@ -1072,22 +1048,22 @@ export default function WorldBookEntriesSection({
           <div className={styles.dialogBody}>
             <h3 className={styles.dialogTitle}>{moveCopyState.title}</h3>
             <p className={styles.dialogText}>
-              {selectedBook ? `From ${selectedBook.name}.` : null}
+              {selectedBook ? te('moveCopyFrom', { name: selectedBook.name }) : null}
             </p>
             <div className={styles.dialogField}>
-              <span className={styles.dialogLabel}>Target World Book</span>
+              <span className={styles.dialogLabel}>{te('targetWorldBook')}</span>
               <SearchableSelect
                 value={moveTargetBookId}
                 onChange={(value) => setMoveTargetBookId(value || '')}
                 options={availableTargetBooks}
-                placeholder="Choose a world book…"
-                searchPlaceholder="Search world books…"
-                emptyMessage="No other world books available"
+                placeholder={te('chooseWorldBook')}
+                searchPlaceholder={t('searchWorldBooks')}
+                emptyMessage={te('noOtherBooks')}
                 portal
               />
             </div>
             <div className={styles.dialogActions}>
-              <button type="button" className={styles.dialogBtn} onClick={() => setMoveCopyState(null)} disabled={pendingAction}>Cancel</button>
+              <button type="button" className={styles.dialogBtn} onClick={() => setMoveCopyState(null)} disabled={pendingAction}>{tc('actions.cancel')}</button>
               <button type="button" className={styles.dialogPrimaryBtn} onClick={() => void handleMoveOrCopy()} disabled={pendingAction || !moveTargetBookId}>
                 {moveCopyState.confirmText}
               </button>
@@ -1099,21 +1075,21 @@ export default function WorldBookEntriesSection({
       {renumberState && (
         <ModalShell isOpen={true} onClose={() => !pendingAction && setRenumberState(null)} maxWidth="520px">
           <div className={styles.dialogBody}>
-            <h3 className={styles.dialogTitle}>Renumber Entries</h3>
-            <p className={styles.dialogText}>Applies numbering in the current list order.</p>
+            <h3 className={styles.dialogTitle}>{te('renumberTitle')}</h3>
+            <p className={styles.dialogText}>{te('renumberHint')}</p>
             <div className={styles.dialogGrid}>
               <label className={styles.dialogField}>
-                <span className={styles.dialogLabel}>Start Number</span>
+                <span className={styles.dialogLabel}>{te('startNumber')}</span>
                 <input
                   type="number"
                   className={styles.dialogInput}
                   value={renumberStart}
                   onChange={(e) => setRenumberStart(e.target.value)}
-                  placeholder="Use first entry's order"
+                  placeholder={te('startNumberPlaceholder')}
                 />
               </label>
               <label className={styles.dialogField}>
-                <span className={styles.dialogLabel}>Step</span>
+                <span className={styles.dialogLabel}>{te('step')}</span>
                 <input
                   type="number"
                   min={1}
@@ -1123,16 +1099,16 @@ export default function WorldBookEntriesSection({
                 />
               </label>
               <label className={styles.dialogField}>
-                <span className={styles.dialogLabel}>Direction</span>
+                <span className={styles.dialogLabel}>{te('direction')}</span>
                 <select className={styles.dialogSelect} value={renumberDirection} onChange={(e) => setRenumberDirection(e.target.value as 'asc' | 'desc')}>
-                  <option value="asc">Ascending</option>
-                  <option value="desc">Descending</option>
+                  <option value="asc">{te('sortAsc')}</option>
+                  <option value="desc">{te('sortDesc')}</option>
                 </select>
               </label>
             </div>
             <div className={styles.dialogActions}>
-              <button type="button" className={styles.dialogBtn} onClick={() => setRenumberState(null)} disabled={pendingAction}>Cancel</button>
-              <button type="button" className={styles.dialogPrimaryBtn} onClick={() => void handleBulkRenumber()} disabled={pendingAction}>Apply</button>
+              <button type="button" className={styles.dialogBtn} onClick={() => setRenumberState(null)} disabled={pendingAction}>{tc('actions.cancel')}</button>
+              <button type="button" className={styles.dialogPrimaryBtn} onClick={() => void handleBulkRenumber()} disabled={pendingAction}>{tc('actions.apply')}</button>
             </div>
           </div>
         </ModalShell>
@@ -1141,29 +1117,29 @@ export default function WorldBookEntriesSection({
       {keywordState && (
         <ModalShell isOpen={true} onClose={() => !pendingAction && setKeywordState(null)} maxWidth="520px">
           <div className={styles.dialogBody}>
-            <h3 className={styles.dialogTitle}>Add Keyword</h3>
+            <h3 className={styles.dialogTitle}>{te('keywordTitle')}</h3>
             <div className={styles.dialogGrid}>
               <label className={styles.dialogField}>
-                <span className={styles.dialogLabel}>Keyword</span>
+                <span className={styles.dialogLabel}>{te('keyword')}</span>
                 <input
                   type="text"
                   className={styles.dialogInput}
                   value={keywordValue}
                   onChange={(e) => setKeywordValue(e.target.value)}
-                  placeholder="Enter keyword"
+                  placeholder={te('keywordPlaceholder')}
                 />
               </label>
               <label className={styles.dialogField}>
-                <span className={styles.dialogLabel}>Keyword List</span>
+                <span className={styles.dialogLabel}>{te('keywordList')}</span>
                 <select className={styles.dialogSelect} value={keywordTarget} onChange={(e) => setKeywordTarget(e.target.value as 'primary' | 'secondary')}>
-                  <option value="primary">Primary</option>
-                  <option value="secondary">Secondary</option>
+                  <option value="primary">{te('keywordPrimary')}</option>
+                  <option value="secondary">{te('keywordSecondary')}</option>
                 </select>
               </label>
             </div>
             <div className={styles.dialogActions}>
-              <button type="button" className={styles.dialogBtn} onClick={() => setKeywordState(null)} disabled={pendingAction}>Cancel</button>
-              <button type="button" className={styles.dialogPrimaryBtn} onClick={() => void handleBulkKeyword()} disabled={pendingAction || !keywordValue.trim()}>Add</button>
+              <button type="button" className={styles.dialogBtn} onClick={() => setKeywordState(null)} disabled={pendingAction}>{tc('actions.cancel')}</button>
+              <button type="button" className={styles.dialogPrimaryBtn} onClick={() => void handleBulkKeyword()} disabled={pendingAction || !keywordValue.trim()}>{tc('actions.add')}</button>
             </div>
           </div>
         </ModalShell>
@@ -1180,7 +1156,7 @@ export default function WorldBookEntriesSection({
                   value={bulkPosition}
                   onChange={(e) => setBulkPosition(Number(e.target.value))}
                 >
-                  {POSITION_OPTIONS.map((opt) => (
+                  {labels.positionOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
