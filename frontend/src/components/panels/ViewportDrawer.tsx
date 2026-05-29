@@ -151,7 +151,6 @@ export default function ViewportDrawer() {
 
   const panelWidthCSS = (() => {
     switch (drawerSettings.panelWidthMode) {
-      case 'stChat': return '376px'
       case 'custom': return `${Math.max(20, Math.min(80, drawerSettings.customPanelWidth))}vw`
       default: return 'min(420px, calc(100vw - 64px))'
     }

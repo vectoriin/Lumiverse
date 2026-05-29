@@ -632,17 +632,21 @@ export default function ChatView() {
   // Sync bubble opt-out attributes so CSS can suppress effects.
   const bubbleDisableHover = useStore((s) => s.bubbleDisableHover)
   const bubbleHideAvatarBg = useStore((s) => s.bubbleHideAvatarBg)
+  const bubbleOpacity = useStore((s) => s.bubbleOpacity ?? 1)
   useEffect(() => {
     const root = document.documentElement
     if (bubbleDisableHover) root.setAttribute('data-no-bubble-hover', '')
     else root.removeAttribute('data-no-bubble-hover')
     if (bubbleHideAvatarBg) root.setAttribute('data-no-bubble-avatar-bg', '')
     else root.removeAttribute('data-no-bubble-avatar-bg')
+    // Drives the bubble card background fill alpha (see BubbleMessage.module.css).
+    root.style.setProperty('--lcs-bubble-opacity', String(bubbleOpacity))
     return () => {
       root.removeAttribute('data-no-bubble-hover')
       root.removeAttribute('data-no-bubble-avatar-bg')
+      root.style.removeProperty('--lcs-bubble-opacity')
     }
-  }, [bubbleDisableHover, bubbleHideAvatarBg])
+  }, [bubbleDisableHover, bubbleHideAvatarBg, bubbleOpacity])
 
   if (!chatId) return null
 

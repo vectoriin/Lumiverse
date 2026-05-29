@@ -60,7 +60,6 @@
       "showTabLabelsHint": "在侧栏每个标签图标下方显示短名称",
       "panelWidth": "面板宽度",
       "panelDefault": "默认",
-      "panelStChat": "ST 聊天",
       "panelCustom": "自定义",
       "customWidthVw": "自定义宽度 (vw)"
     },
@@ -310,6 +309,7 @@
     "right": "右",
     "bubbleAvatarBg": "在气泡背景中显示角色图",
     "bubbleAvatarBgHint": "在气泡模式下将消息头像用作淡淡的溶解背景",
+    "bubbleOpacity": "气泡不透明度（{{pct}}%）",
     "widthTitle": "聊天宽度",
     "widthHelper": "限制聊天消息区域宽度，适合超宽屏上避免消息拉得过宽。",
     "contentWidth": "内容宽度",
@@ -724,6 +724,7 @@
     "validate": "验证",
     "validatingMessage": "正在检查 SillyTavern 数据…",
     "validFound": "找到有效的 SillyTavern 安装（{{layout}} 布局{{users}}）",
+    "looksLikeFolder": "看起来像是 SillyTavern 文件夹 — 点击「验证」确认",
     "validFoundUsers": "，{{count}} 个用户配置",
     "invalidDirectory": "不是有效的 SillyTavern 目录",
     "next": "下一步",

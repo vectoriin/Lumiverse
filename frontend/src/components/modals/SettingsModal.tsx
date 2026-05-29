@@ -316,17 +316,10 @@ function DisplaySettings() {
         <div className={styles.segmented}>
           <button
             type="button"
-            className={clsx(styles.segmentedBtn, drawerSettings.panelWidthMode === 'default' && styles.segmentedBtnActive)}
+            className={clsx(styles.segmentedBtn, drawerSettings.panelWidthMode !== 'custom' && styles.segmentedBtnActive)}
             onClick={() => updateDrawer({ panelWidthMode: 'default' })}
           >
             {t('display.drawer.panelDefault')}
-          </button>
-          <button
-            type="button"
-            className={clsx(styles.segmentedBtn, drawerSettings.panelWidthMode === 'stChat' && styles.segmentedBtnActive)}
-            onClick={() => updateDrawer({ panelWidthMode: 'stChat' })}
-          >
-            {t('display.drawer.panelStChat')}
           </button>
           <button
             type="button"
@@ -341,14 +334,18 @@ function DisplaySettings() {
       {drawerSettings.panelWidthMode === 'custom' && (
         <div className={styles.field}>
           <label className={styles.fieldLabel}>{t('display.drawer.customWidthVw')}</label>
-          <NumericInput
-            className={styles.numberInput}
-            min={20}
-            max={80}
-            value={drawerSettings.customPanelWidth}
-            integer
-            onChange={(value) => updateDrawer({ customPanelWidth: value ?? 35 })}
-          />
+          <div className={styles.rangeRow}>
+            <input
+              type="range"
+              className={styles.rangeSlider}
+              min={20}
+              max={80}
+              step={1}
+              value={drawerSettings.customPanelWidth}
+              onChange={(e) => updateDrawer({ customPanelWidth: parseInt(e.target.value, 10) })}
+            />
+            <span className={styles.rangeValue}>{drawerSettings.customPanelWidth}vw</span>
+          </div>
         </div>
       )}
 
@@ -640,6 +637,7 @@ function ChatSettings() {
   const displayMode = useStore((s) => s.chatSheldDisplayMode)
   const bubbleUserAlign = useStore((s) => s.bubbleUserAlign)
   const bubbleHideAvatarBg = useStore((s) => s.bubbleHideAvatarBg)
+  const bubbleOpacity = useStore((s) => s.bubbleOpacity ?? 1)
   const enterToSend = useStore((s) => s.chatSheldEnterToSend)
   const saveDraftInput = useStore((s) => s.saveDraftInput)
   const portraitPanelSide = useStore((s) => s.portraitPanelSide)
@@ -758,6 +756,22 @@ function ChatSettings() {
             label={t('chat.bubbleAvatarBg')}
             hint={t('chat.bubbleAvatarBgHint')}
           />
+
+          <div className={styles.field}>
+            <label className={styles.fieldLabel}>{t('chat.bubbleOpacity', { pct: Math.round(bubbleOpacity * 100) })}</label>
+            <div className={styles.rangeRow}>
+              <input
+                type="range"
+                className={styles.rangeSlider}
+                min={20}
+                max={100}
+                step={5}
+                value={Math.round(bubbleOpacity * 100)}
+                onChange={(e) => setSetting('bubbleOpacity', parseInt(e.target.value, 10) / 100)}
+              />
+              <span className={styles.rangeValue}>{Math.round(bubbleOpacity * 100)}%</span>
+            </div>
+          </div>
         </>
       )}
 

@@ -144,7 +144,6 @@
       "showTabLabelsHint": "Afficher les noms courts sous chaque icône d'onglet dans la barre latérale",
       "panelWidth": "LARGEUR DU PANNEAU",
       "panelDefault": "Défaut",
-      "panelStChat": "Bavarder",
       "panelCustom": "Personnalisé",
       "customWidthVw": "LARGEUR PERSONNALISÉE (vw)"
     },
@@ -394,6 +393,7 @@
     "right": "Droite",
     "bubbleAvatarBg": "Afficher les illustrations des personnages dans les arrière-plans de bulles",
     "bubbleAvatarBgHint": "Utilise l'avatar du message comme arrière-plan à dissolution subtile en mode Bulle",
+    "bubbleOpacity": "Opacité des bulles ({{pct}} %)",
     "widthTitle": "Largeur du chat",
     "widthHelper": "Contraint la largeur de la zone du message de chat. Utile pour les moniteurs ultra-larges où les messages pleine largeur s'étendent trop loin.",
     "contentWidth": "LARGEUR DU CONTENU",
@@ -808,6 +808,7 @@
     "validate": "Valider",
     "validatingMessage": "Vérification des données SillyTavern...",
     "validFound": "Installation SillyTavern valide trouvée ({{layout}} layout{{users}})",
+    "looksLikeFolder": "Ressemble à un dossier SillyTavern — cliquez sur Valider pour confirmer",
     "validFoundUsers": ", {{count}} profil(s) utilisateur",
     "invalidDirectory": "Pas un répertoire SillyTavern valide",
     "next": "Suivant",

@@ -144,7 +144,6 @@
       "showTabLabelsHint": "サイドバーの各タブ アイコンの下に短い名前を表示",
       "panelWidth": "パネル幅",
       "panelDefault": "デフォルト",
-      "panelStChat": "ST チャット",
       "panelCustom": "カスタム",
       "customWidthVw": "カスタム幅 (vw)"
     },
@@ -394,6 +393,7 @@
     "right": "右",
     "bubbleAvatarBg": "バブル背景にキャラクター アートを表示",
     "bubbleAvatarBgHint": "バブル モードで微妙なディゾルビング背景としてメッセージ アバターを使用します",
+    "bubbleOpacity": "バブルの不透明度（{{pct}}%）",
     "widthTitle": "チャット幅",
     "widthHelper": "チャット メッセージ領域の幅を制限します。全幅メッセージが広がりすぎるウルトラワイド モニターに役立ちます。",
     "contentWidth": "コンテンツの幅",
@@ -808,6 +808,7 @@
     "validate": "検証",
     "validatingMessage": "SillyTavern データをチェック中...",
     "validFound": "有効な SillyTavern インストールが見つかりました ({{layout}} レイアウト{{users}})",
+    "looksLikeFolder": "SillyTavern フォルダーのようです — 「検証」をクリックして確認してください",
     "validFoundUsers": "、{{count}} ユーザー プロフィール",
     "invalidDirectory": "有効な SillyTavern ディレクトリではありません",
     "next": "次",

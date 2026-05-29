@@ -144,7 +144,6 @@
       "showTabLabelsHint": "在側欄每個標籤圖標下方顯示短名稱",
       "panelWidth": "面板寬度",
       "panelDefault": "默認",
-      "panelStChat": "ST 聊天",
       "panelCustom": "自定義",
       "customWidthVw": "自定義寬度 (vw)"
     },
@@ -394,6 +393,7 @@
     "right": "右",
     "bubbleAvatarBg": "在氣泡背景中顯示角色圖",
     "bubbleAvatarBgHint": "在氣泡模式下將消息頭像用作淡淡的溶解背景",
+    "bubbleOpacity": "氣泡不透明度（{{pct}}%）",
     "widthTitle": "聊天寬度",
     "widthHelper": "限制聊天消息區域寬度，適合超寬屏上避免消息拉得過寬。",
     "contentWidth": "內容寬度",
@@ -808,6 +808,7 @@
     "validate": "驗證",
     "validatingMessage": "正在檢查 SillyTavern 數據…",
     "validFound": "找到有效的 SillyTavern 安裝（{{layout}} 佈局{{users}}）",
+    "looksLikeFolder": "看起來像是 SillyTavern 資料夾 — 點擊「驗證」確認",
     "validFoundUsers": "，{{count}} 個用戶配置",
     "invalidDirectory": "不是有效的 SillyTavern 目錄",
     "next": "下一步",

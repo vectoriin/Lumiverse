@@ -6,6 +6,7 @@ import * as embeddingsSvc from "../services/embeddings.service";
 import * as personasSvc from "../services/personas.service";
 import * as settingsSvc from "../services/settings.service";
 import { parsePagination } from "../services/pagination";
+import { REVALIDATE_PRIVATE, ifNoneMatchSatisfies } from "../utils/http-cache";
 import {
   collectWorldInfoSources,
   collectVectorActivatedWorldInfoDetailed,
@@ -370,6 +371,16 @@ function resolveDiagnosticVectorTraceOutcome(
 app.get("/", (c) => {
   const userId = c.get("userId");
   const pagination = parsePagination(c.req.query("limit"), c.req.query("offset"));
+
+  // ETag off a cheap list signature so re-opening the Lorebook tab returns 304
+  // (no body) until a book or any entry changes.
+  const sig = svc.getWorldBookListSignature(userId);
+  const etag = `"wb-list-${sig.count}-${sig.maxUpdatedAt}-${pagination.limit}-${pagination.offset}"`;
+  if (ifNoneMatchSatisfies(c.req.header("if-none-match"), etag)) {
+    return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": REVALIDATE_PRIVATE } });
+  }
+  c.header("ETag", etag);
+  c.header("Cache-Control", REVALIDATE_PRIVATE);
   return c.json(svc.listWorldBooks(userId, pagination));
 });
 
@@ -385,6 +396,17 @@ app.get("/:id", (c) => {
   const book = svc.getWorldBook(userId, c.req.param("id"));
   if (!book) return c.json({ error: "Not found" }, 404);
   const pagination = parsePagination(c.req.query("limit"), c.req.query("offset"));
+
+  // book.updated_at is bumped on any entry mutation (touchWorldBook), and the
+  // entries signature covers count/content; together they version the embedded
+  // entries page so an unchanged book+page returns 304 without re-serializing.
+  const sig = svc.getWorldBookEntriesSignature(book.id);
+  const etag = `"wb-${book.id}-${book.updated_at}-${sig.count}-${sig.maxUpdatedAt}-${pagination.limit}-${pagination.offset}"`;
+  if (ifNoneMatchSatisfies(c.req.header("if-none-match"), etag)) {
+    return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": REVALIDATE_PRIVATE } });
+  }
+  c.header("ETag", etag);
+  c.header("Cache-Control", REVALIDATE_PRIVATE);
   const entries = svc.listEntriesPaginated(userId, book.id, pagination);
   return c.json({ ...book, entries });
 });
@@ -853,6 +875,20 @@ app.get("/:id/entries", (c) => {
   const sortBy = rawSortBy && VALID_ENTRY_SORT_KEYS.has(rawSortBy) ? (rawSortBy as svc.EntrySortKey) : undefined;
   const sortDir = rawSortDir === "desc" || rawSortDir === "asc" ? rawSortDir : undefined;
   const search = c.req.query("search") || undefined;
+
+  // Selecting a book for edit loads a page of (full-content) entries — the
+  // heavy read. ETag from book.updated_at (bumped on any entry mutation) + the
+  // entries signature + the safe sort/page params lets a re-select return 304.
+  // The search string is omitted from the ETag on purpose (the browser cache is
+  // keyed by the full URL, so distinct searches never collide), keeping any
+  // user input out of the response header.
+  const sig = svc.getWorldBookEntriesSignature(book.id);
+  const etag = `"wb-entries-${book.id}-${book.updated_at}-${sig.count}-${sig.maxUpdatedAt}-${pagination.limit}-${pagination.offset}-${sortBy ?? ""}-${sortDir ?? ""}"`;
+  if (ifNoneMatchSatisfies(c.req.header("if-none-match"), etag)) {
+    return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": REVALIDATE_PRIVATE } });
+  }
+  c.header("ETag", etag);
+  c.header("Cache-Control", REVALIDATE_PRIVATE);
   return c.json(svc.listEntriesPaginated(userId, book.id, pagination, { sortBy, sortDir, search }));
 });
 

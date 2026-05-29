@@ -401,6 +401,8 @@ export interface SettingsSlice {
   bubbleUserAlign: 'left' | 'right'
   bubbleDisableHover: boolean
   bubbleHideAvatarBg: boolean
+  /** Bubble background opacity, 0–1. 1 = the theme's natural bubble fill (default). */
+  bubbleOpacity: number
   chatSheldEnterToSend: boolean
   saveDraftInput: boolean
   chatWidthMode: 'full' | 'comfortable' | 'compact' | 'custom'
@@ -483,7 +485,7 @@ export interface DrawerSettings {
   side: 'left' | 'right'
   verticalPosition: number
   tabSize: 'large' | 'compact'
-  panelWidthMode: 'default' | 'stChat' | 'custom'
+  panelWidthMode: 'default' | 'custom'
   customPanelWidth: number
   showTabLabels: boolean
   hiddenTabIds: string[]

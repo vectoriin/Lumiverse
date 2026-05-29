@@ -65,7 +65,17 @@ function buildStoredEntryExtensions(raw: unknown, outletValue: unknown): string 
 }
 
 function rowToBook(row: any): WorldBook {
-  return { ...row, folder: row.folder ?? "", metadata: JSON.parse(row.metadata) };
+  // Explicit field mapping rather than `...row` so internal columns (user_id)
+  // aren't shipped to the client.
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    folder: row.folder ?? "",
+    metadata: JSON.parse(row.metadata),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
 function normalizeVectorIndexStatus(row: any): WorldBookVectorIndexStatus {
@@ -415,6 +425,32 @@ export function listWorldBooks(userId: string, pagination: PaginationParams): Pa
 export function getWorldBook(userId: string, id: string): WorldBook | null {
   const row = getDb().query("SELECT * FROM world_books WHERE id = ? AND user_id = ?").get(id, userId) as any;
   return row ? rowToBook(row) : null;
+}
+
+/**
+ * Cheap signature of a user's world-book list for ETag generation: count +
+ * max(updated_at). Creating/deleting a book changes the count; editing a book
+ * OR any of its entries bumps updated_at (entry mutations call touchWorldBook),
+ * so this uniquely identifies the list without serializing it.
+ */
+export function getWorldBookListSignature(userId: string): { count: number; maxUpdatedAt: number } {
+  const row = getDb()
+    .query("SELECT COUNT(*) as count, COALESCE(MAX(updated_at), 0) as maxUpdatedAt FROM world_books WHERE user_id = ?")
+    .get(userId) as { count: number; maxUpdatedAt: number };
+  return { count: row.count, maxUpdatedAt: row.maxUpdatedAt };
+}
+
+/**
+ * Cheap signature of a book's entries for ETag generation: count +
+ * max(updated_at) over world_book_entries (index-backed by world_book_id).
+ * Caller must have already verified ownership of the book. Combined with the
+ * book's own updated_at this covers entry CRUD, content edits, and reorders.
+ */
+export function getWorldBookEntriesSignature(worldBookId: string): { count: number; maxUpdatedAt: number } {
+  const row = getDb()
+    .query("SELECT COUNT(*) as count, COALESCE(MAX(updated_at), 0) as maxUpdatedAt FROM world_book_entries WHERE world_book_id = ?")
+    .get(worldBookId) as { count: number; maxUpdatedAt: number };
+  return { count: row.count, maxUpdatedAt: row.maxUpdatedAt };
 }
 
 export function createWorldBook(userId: string, input: CreateWorldBookInput): WorldBook {
