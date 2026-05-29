@@ -108,6 +108,8 @@ export interface CortexEntity {
   confidence: "confirmed" | "provisional";
   userEditedAt: number | null;
   saliencePeak: number;
+  // Enriched by route: excerpt from the most recent mention (display only)
+  latestExcerpt?: string | null;
 }
 
 export interface CortexRelation {

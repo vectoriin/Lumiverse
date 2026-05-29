@@ -49,7 +49,8 @@
     "migrate:st": "bun run scripts/migrate-sillytavern.ts",
     "release": "bash scripts/release.sh",
     "backfill-thumbnails": "bun run scripts/backfill-thumbnails.ts",
-    "bench:mmap": "bun run scripts/bench-mmap.ts"
+    "bench:mmap": "bun run scripts/bench-mmap.ts",
+    "edit-env": "bun run scripts/edit-env.ts"
   },
   "type": "module"
 }

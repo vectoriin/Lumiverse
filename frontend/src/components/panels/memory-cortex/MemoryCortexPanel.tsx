@@ -387,6 +387,20 @@ function EntityCard({
 
   const lastSeenTs = entity.lastMentionTimestamp ?? entity.lastSeenAt
   const lastSeen = lastSeenTs ? formatRelativeTime(lastSeenTs) : null
+
+  // Blurb shown in the expanded card body. A user-edited entity surfaces its
+  // curated description — the manual edit must win. Otherwise we keep the
+  // original behaviour: prefer the freshest mention excerpt over the
+  // auto-backfilled (first-mention) description. Each side falls back to the
+  // other so the line is never blank.
+  const rawBlurb = entity.userEditedAt
+    ? (entity.description || entity.latestExcerpt)
+    : (entity.latestExcerpt || entity.description);
+  const blurb = (rawBlurb || "")
+    .replace(/^\.*\s*\[(?:CHARACTER|USER)\s*\|\s*[^\]]*\]\s*:\s*/i, "")
+    .replace(/^\.{3}\s*/, "")
+    .replace(/\s*\.{3}$/, "")
+    .trim();
   const handleHeaderClick = () => {
     if (selectionMode) onSelect();
     else onToggle();
@@ -477,15 +491,9 @@ function EntityCard({
 
       {expanded && (
         <div className={styles.entityBody}>
-          {/* Show the latest mention excerpt — the actual chunk text, not a stale description */}
-          {((entity as any).latestExcerpt || entity.description) && (
-            <p className={styles.entityDescription}>
-              {((entity as any).latestExcerpt || entity.description)
-                .replace(/^\.*\s*\[(?:CHARACTER|USER)\s*\|\s*[^\]]*\]\s*:\s*/i, "")
-                .replace(/^\.{3}\s*/, "")
-                .replace(/\s*\.{3}$/, "")
-                .trim() || null}
-            </p>
+          {/* User edits win; otherwise show the latest mention excerpt (see `blurb` above). */}
+          {blurb && (
+            <p className={styles.entityDescription}>{blurb}</p>
           )}
 
           {entity.aliases.length > 0 && (

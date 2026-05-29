@@ -14,6 +14,7 @@
     dev          - Start backend in watch mode
     setup           - Run setup wizard only
     reset-password  - Reset owner account password
+    edit-env        - Edit the .env file ($env:VISUAL/$env:EDITOR, else Notepad)
     migrate-st      - Run SillyTavern migration helper
     kill-pkgs       - Nuke lockfiles + node_modules, reinstall backend deps
 
@@ -22,6 +23,9 @@
 
 .PARAMETER KillPkgs
     Nuke lockfiles and node_modules, then reinstall backend dependencies
+
+.PARAMETER EditEnv
+    Open the .env file in an editor ($env:VISUAL/$env:EDITOR if set, else Notepad)
 
 .PARAMETER FrontendPath
     Path to frontend directory (default: ./frontend)
@@ -37,7 +41,7 @@
 #>
 
 param(
-    [ValidateSet("all", "build-only", "backend-only", "dev", "setup", "reset-password", "migrate-st", "kill-pkgs")]
+    [ValidateSet("all", "build-only", "backend-only", "dev", "setup", "reset-password", "edit-env", "migrate-st", "kill-pkgs")]
     [string]$Mode = "all",
 
     [Alias("b")]
@@ -52,6 +56,8 @@ param(
 
     [Alias("k")]
     [switch]$KillPkgs,
+
+    [switch]$EditEnv,
 
     [switch]$UpgradeBun,
 
@@ -214,6 +220,13 @@ function Invoke-MigrateST {
     try { & bun run migrate:st } finally { Pop-Location }
 }
 
+function Invoke-EditEnv {
+    # No dep install - edit-env.ts only uses Bun built-ins + local ui/input
+    # helpers, so it's a quick hop to the editor (handy before first setup).
+    Push-Location $BackendDir
+    try { & bun run scripts/edit-env.ts } finally { Pop-Location }
+}
+
 # ─── Kill packages (nuke + reinstall) ──────────────────────────────────────
 
 function Invoke-KillPkgs {
@@ -345,6 +358,7 @@ Update-BunChannel
 # Allow switches as shorthand for -Mode
 if ($MigrateST) { $Mode = "migrate-st" }
 if ($KillPkgs)  { $Mode = "kill-pkgs" }
+if ($EditEnv)   { $Mode = "edit-env" }
 
 switch ($Mode) {
     "all" {
@@ -373,6 +387,9 @@ switch ($Mode) {
     }
     "migrate-st" {
         Invoke-MigrateST
+    }
+    "edit-env" {
+        Invoke-EditEnv
     }
     "kill-pkgs" {
         Invoke-KillPkgs

@@ -11,6 +11,7 @@ set -euo pipefail
 #   ./start.sh --dev            Start backend in watch mode (no frontend build)
 #   ./start.sh --setup          Run setup wizard only
 #   ./start.sh --reset-password  Reset owner account password
+#   ./start.sh --edit-env       Edit the .env configuration file in a terminal editor
 #   ./start.sh -m|--migrate-st  Run SillyTavern migration helper
 #   ./start.sh -k|--kill-pkgs   Nuke lockfiles + node_modules, reinstall backend deps
 #   ./start.sh --no-runner      Start without the visual runner
@@ -95,7 +96,7 @@ _proot_bun() {
 
 # ─── Parse arguments ─────────────────────────────────────────────────────────
 
-MODE="all"  # all | build-only | backend-only | dev | setup | reset-password | migrate-st | kill-pkgs
+MODE="all"  # all | build-only | backend-only | dev | setup | reset-password | edit-env | migrate-st | kill-pkgs
 USE_RUNNER=true
 FORCE_BUILD=false
 AUTO_OPEN=false
@@ -109,13 +110,14 @@ for arg in "$@"; do
     --dev)          MODE="dev" ;;
     --setup)        MODE="setup" ;;
     --reset-password) MODE="reset-password" ;;
+    --edit-env)     MODE="edit-env" ;;
     --migrate-st|-m) MODE="migrate-st" ;;
     --kill-pkgs|-k) MODE="kill-pkgs" ;;
     --no-runner)    USE_RUNNER=false ;;
     --upgrade-bun)        BUN_UPGRADE_CHANNEL="stable" ;;
     --upgrade-bun-canary) BUN_UPGRADE_CHANNEL="canary" ;;
     --help|-h)
-      sed -n '3,18p' "$0" | sed 's/^# *//'
+      sed -n '3,19p' "$0" | sed 's/^# *//'
       exit 0
       ;;
     *) err "Unknown argument: $arg"; exit 1 ;;
@@ -511,6 +513,12 @@ run_migrate_st() {
   (cd "$BACKEND_DIR" && _bun run migrate:st)
 }
 
+run_edit_env() {
+  # No dep install — edit-env.ts only uses Bun built-ins + local ui/input
+  # helpers, so it's a quick hop to the editor (handy before first setup).
+  (cd "$BACKEND_DIR" && _bun run scripts/edit-env.ts)
+}
+
 open_browser() {
   local url="$1"
 
@@ -740,6 +748,9 @@ case "$MODE" in
     ;;
   migrate-st)
     run_migrate_st
+    ;;
+  edit-env)
+    run_edit_env
     ;;
   kill-pkgs)
     kill_pkgs
