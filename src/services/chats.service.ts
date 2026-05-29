@@ -694,6 +694,30 @@ export function listChatSummaries(userId: string, characterId: string): ChatSumm
   }));
 }
 
+/**
+ * Delete every non-group chat for a character in one call. Loops the
+ * individual `deleteChat()` per chat (rather than a single bulk SQL DELETE) so
+ * each chat still runs its full cleanup — audio attachments, LanceDB chunk
+ * embeddings, memory-cortex caches/ingestion, generation pools, debounced
+ * vectorizations, and the CHAT_DELETED event. Chat counts per character are
+ * small, so N small deletes is a fine trade-off. Group chats are excluded,
+ * matching `listChatSummaries`; they are managed separately. Returns the
+ * number of chats actually deleted.
+ */
+export function deleteAllChatsForCharacter(userId: string, characterId: string): number {
+  const rows = getDb().query(`
+    SELECT id FROM chats
+    WHERE user_id = ? AND character_id = ?
+      AND COALESCE(json_extract(metadata, '$.group'), 0) != 1
+  `).all(userId, characterId) as { id: string }[];
+
+  let deleted = 0;
+  for (const row of rows) {
+    if (deleteChat(userId, row.id)) deleted++;
+  }
+  return deleted;
+}
+
 export function listGroupChatSummaries(userId: string, characterIds?: string[]): ChatSummary[] {
   const db = getDb();
   const normalizedIds = Array.isArray(characterIds)

@@ -322,8 +322,8 @@ export function useMessageCard(message: Message, chatId: string) {
         onSecondary: doDeleteSwipe,
         secondaryVariant: 'warning',
       })
-    } else if (!message.is_user) {
-      // Assistant message without swipes: simple confirm
+    } else {
+      // Single-message delete (assistant without swipes, or any user message)
       openModal('confirm', {
         title: tc('deleteMessage.title'),
         message: tc('deleteMessage.message'),
@@ -331,9 +331,6 @@ export function useMessageCard(message: Message, chatId: string) {
         confirmText: tc('deleteMessage.confirm'),
         onConfirm: doDeleteMessage,
       })
-    } else {
-      // User messages: delete directly (existing behavior)
-      doDeleteMessage()
     }
   }, [message.is_user, message.swipes, openModal, doDeleteMessage, doDeleteSwipe, tc])
 

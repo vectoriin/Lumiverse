@@ -255,7 +255,7 @@ function ChatCard({ item, onClick, onDelete }: ChatCardProps) {
               e.stopPropagation()
               onDelete()
             }}
-            title={t('deleteChat')}
+            title={!item.is_group && item.chat_count > 1 ? t('deleteAllChats') : t('deleteChat')}
           >
             <Trash2 size={14} strokeWidth={1.5} />
           </button>
@@ -475,6 +475,27 @@ export default function LandingPage() {
     [openModal, t, tc]
   )
 
+  const handleDeleteAllChats = useCallback(
+    (item: GroupedRecentChat) => {
+      openModal('confirm', {
+        title: t('deleteAllChatsTitle'),
+        message: t('deleteAllChatsConfirm', { count: item.chat_count, name: item.character_name }),
+        variant: 'danger',
+        confirmText: tc('actions.delete'),
+        onConfirm: async () => {
+          try {
+            await chatsApi.deleteCharacterChats(item.character_id)
+            setItems((prev) => prev.filter((i) => i.character_id !== item.character_id))
+            setTotal((prev) => prev - 1)
+          } catch (err: any) {
+            console.error('[Lumiverse] Error deleting all chats:', err)
+          }
+        },
+      })
+    },
+    [openModal, t, tc]
+  )
+
   const handleNewChat = useCallback(() => {
     navigate('/characters')
   }, [navigate])
@@ -600,14 +621,22 @@ export default function LandingPage() {
                       key={getRecentChatKey(item)}
                       item={item}
                       onClick={() => handleChatClick(item)}
-                      onDelete={item.chat_count === 1 ? () => handleDeleteChat(item) : undefined}
+                      onDelete={
+                        item.is_group
+                          ? (item.chat_count === 1 ? () => handleDeleteChat(item) : undefined)
+                          : () => (item.chat_count > 1 ? handleDeleteAllChats(item) : handleDeleteChat(item))
+                      }
                     />
                   ) : (
                     <ChatCard
                       key={getRecentChatKey(item)}
                       item={item}
                       onClick={() => handleChatClick(item)}
-                      onDelete={item.chat_count === 1 ? () => handleDeleteChat(item) : undefined}
+                      onDelete={
+                        item.is_group
+                          ? (item.chat_count === 1 ? () => handleDeleteChat(item) : undefined)
+                          : () => (item.chat_count > 1 ? handleDeleteAllChats(item) : handleDeleteChat(item))
+                      }
                     />
                   )
                 ))}

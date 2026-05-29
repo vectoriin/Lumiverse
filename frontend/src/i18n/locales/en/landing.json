@@ -23,6 +23,9 @@
   "deleteChatConfirm": "This will permanently delete your {{label}}. This action cannot be undone.",
   "deleteLabelGroup": "group chat \"{{name}}\"",
   "deleteLabelChat": "chat with {{name}}",
+  "deleteAllChats": "Delete all chats",
+  "deleteAllChatsTitle": "Delete All Chats",
+  "deleteAllChatsConfirm": "This will permanently delete all {{count}} chats with {{name}}. This action cannot be undone.",
   "untitled": "Untitled",
   "logOut": {
     "title": "Log out",

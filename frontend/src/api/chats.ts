@@ -60,6 +60,10 @@ export const chatsApi = {
     return del<void>(`/chats/${id}`)
   },
 
+  deleteCharacterChats(characterId: string) {
+    return del<{ success: boolean; deleted: number }>(`/chats/character-chats/${characterId}`)
+  },
+
   createGroup(input: CreateGroupChatInput) {
     return post<Chat>('/chats/group', input)
   },

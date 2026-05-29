@@ -146,6 +146,12 @@ app.get("/character-chats/:characterId", (c) => {
   return c.json(svc.listChatSummaries(userId, characterId));
 });
 
+app.delete("/character-chats/:characterId", (c) => {
+  const userId = c.get("userId");
+  const deleted = svc.deleteAllChatsForCharacter(userId, c.req.param("characterId"));
+  return c.json({ success: true, deleted });
+});
+
 app.get("/group-chats", (c) => {
   const userId = c.get("userId");
   const rawCharacterIds = c.req.query("character_ids");

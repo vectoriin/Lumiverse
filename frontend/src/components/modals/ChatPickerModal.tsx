@@ -51,6 +51,7 @@ export default function ChatPickerModal({
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<ChatSummary | null>(null)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   const renameInputRef = useRef<HTMLInputElement>(null)
 
@@ -109,6 +110,10 @@ export default function ChatPickerModal({
           setDeleteTarget(null)
           return
         }
+        if (confirmDeleteAll) {
+          setConfirmDeleteAll(false)
+          return
+        }
         onDismiss()
       }
     }
@@ -116,7 +121,7 @@ export default function ChatPickerModal({
     return () => {
       document.removeEventListener('keydown', handleEscape)
     }
-  }, [onDismiss, renamingId, activeMenuId, deleteTarget, closeActiveMenu])
+  }, [onDismiss, renamingId, activeMenuId, deleteTarget, confirmDeleteAll, closeActiveMenu])
 
   const handleConfirmRename = async (chatId: string) => {
     const trimmed = renameValue.trim()
@@ -164,6 +169,17 @@ export default function ChatPickerModal({
       console.error('[Lumiverse] Failed to delete chat:', err)
     }
     setDeleteTarget(null)
+  }
+
+  const handleDeleteAll = async () => {
+    try {
+      await chatsApi.deleteCharacterChats(characterId)
+      setItems([])
+      onDismiss()
+    } catch (err) {
+      console.error('[Lumiverse] Failed to delete all chats:', err)
+    }
+    setConfirmDeleteAll(false)
   }
 
   const handleNewChat = async (options?: { memoryIsolation?: boolean }) => {
@@ -223,15 +239,28 @@ export default function ChatPickerModal({
 
         <div className={styles.header}>
           <h3 className={styles.title}>{t('chatPicker.title', { name: characterName })}</h3>
-          <span className={styles.count}>
-            {loading ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                <Spinner size={10} /> {t('chatPicker.loading')}
-              </span>
-            ) : (
-              t('chatPicker.chatCount', { count: items.length })
+          <div className={styles.headerActions}>
+            <span className={styles.count}>
+              {loading ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <Spinner size={10} /> {t('chatPicker.loading')}
+                </span>
+              ) : (
+                t('chatPicker.chatCount', { count: items.length })
+              )}
+            </span>
+            {!loading && items.length > 1 && (
+              <button
+                type="button"
+                className={styles.deleteAllBtn}
+                onClick={() => setConfirmDeleteAll(true)}
+                title={t('chatPicker.deleteAllChats')}
+              >
+                <Trash2 size={13} />
+                {t('chatPicker.deleteAllChats')}
+              </button>
             )}
-          </span>
+          </div>
         </div>
 
         <div className={styles.list}>
@@ -371,6 +400,17 @@ export default function ChatPickerModal({
         onCancel={() => setDeleteTarget(null)}
         title={t('chatPicker.deleteTitle')}
         message={t('chatPicker.deleteMessage', { name: deleteTarget ? formatChatName(deleteTarget) : '' })}
+        variant="danger"
+        confirmText={tc('actions.delete')}
+        cancelText={tc('actions.cancel')}
+      />
+
+      <ConfirmationModal
+        isOpen={confirmDeleteAll}
+        onConfirm={handleDeleteAll}
+        onCancel={() => setConfirmDeleteAll(false)}
+        title={t('chatPicker.deleteAllTitle')}
+        message={t('chatPicker.deleteAllMessage', { count: items.length, name: characterName })}
         variant="danger"
         confirmText={tc('actions.delete')}
         cancelText={tc('actions.cancel')}
