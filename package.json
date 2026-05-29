@@ -48,7 +48,8 @@
     "backfill-character-world-book-ownership": "bun run scripts/backfill-character-world-book-ownership.ts",
     "migrate:st": "bun run scripts/migrate-sillytavern.ts",
     "release": "bash scripts/release.sh",
-    "backfill-thumbnails": "bun run scripts/backfill-thumbnails.ts"
+    "backfill-thumbnails": "bun run scripts/backfill-thumbnails.ts",
+    "bench:mmap": "bun run scripts/bench-mmap.ts"
   },
   "type": "module"
 }

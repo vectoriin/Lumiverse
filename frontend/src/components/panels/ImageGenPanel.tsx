@@ -11,6 +11,7 @@ import { Toggle } from '@/components/shared/Toggle'
 import { Button, FormField, Select, TextInput, EditorSection, TextArea } from '@/components/shared/FormComponents'
 import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
 import { LabeledRangeSlider } from '@/components/shared/RangeSlider'
+import { useTouchActivate } from '@/hooks/useTouchActivate'
 import ModelCombobox from './connection-manager/ModelCombobox'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import { getMacroCatalog } from '@/api/macros'
@@ -957,6 +958,14 @@ export default function ImageGenPanel() {
     await runGenerationCall(baseInput)
   }
 
+  // The Generate buttons sit directly below the prompt textareas. On Android,
+  // tapping them blurs the input and dismisses the keyboard, which reflows the
+  // layout and moves the button before the synthetic click lands (the click is
+  // then dropped — the button only flashes). Activate on pointerup instead.
+  const genDisabled = sceneGenerating || !activeChatId || !activeImageGenConnectionId
+  const generateNowTap = useTouchActivate(() => handleGenerate(false), genDisabled)
+  const forceGenerateTap = useTouchActivate(() => handleGenerate(true), genDisabled)
+
   const onPickRefs = () => refInputRef.current?.click()
   const onRefFiles: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const files = Array.from(e.target.files || [])
@@ -1567,8 +1576,8 @@ export default function ImageGenPanel() {
           {lastScene && <div className={styles.sceneInfo}><div><strong>{t('imageGenPanel.scene')}:</strong> {lastScene.environment}</div><div><strong>{t('imageGenPanel.time')}:</strong> {lastScene.time_of_day}</div><div><strong>{t('imageGenPanel.mood')}:</strong> {lastScene.mood}</div></div>}
 
           <div className={styles.actions}>
-            <Button variant="primary" size="sm" icon={<ImageIcon size={14} />} onClick={() => handleGenerate(false)} disabled={sceneGenerating || !activeChatId || !activeImageGenConnectionId}>{sceneGenerating ? t('imageGenPanel.generating') : t('imageGenPanel.generateNow')}</Button>
-            <Button variant="secondary" size="sm" icon={<IconBrush size={14} />} onClick={() => handleGenerate(true)} disabled={sceneGenerating || !activeChatId || !activeImageGenConnectionId}>{t('imageGenPanel.forceGenerate')}</Button>
+            <Button variant="primary" size="sm" icon={<ImageIcon size={14} />} {...generateNowTap} disabled={genDisabled}>{sceneGenerating ? t('imageGenPanel.generating') : t('imageGenPanel.generateNow')}</Button>
+            <Button variant="secondary" size="sm" icon={<IconBrush size={14} />} {...forceGenerateTap} disabled={genDisabled}>{t('imageGenPanel.forceGenerate')}</Button>
             {generatedPreview && <Button variant="secondary" size="sm" onClick={() => { setSceneBackground(generatedPreview); setGeneratedPreview(null) }}>{t('imageGenPanel.useAsBackground')}</Button>}
             {previewSrc && <Button variant="danger" size="sm" icon={<Trash2 size={14} />} onClick={() => { setSceneBackground(null); setGeneratedPreview(null) }}>{t('imageGenPanel.clear')}</Button>}
           </div>
