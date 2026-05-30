@@ -2,6 +2,9 @@ import { useCallback, useMemo } from 'react'
 import { useMessageCard } from '@/hooks/useMessageCard'
 import { useComponentOverride } from '@/hooks/useComponentOverride'
 import MinimalMessageDefault, { type MinimalMessageDefaultProps } from './MinimalMessageDefault'
+import MessageContent from './MessageContent'
+import ReasoningBlock from './ReasoningBlock'
+import MessageAttachments from './MessageAttachments'
 import { useStore } from '@/store'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import type { Message } from '@/types/api'
@@ -21,7 +24,7 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
   const {
     isEditing, editContent, setEditContent, editReasoning, setEditReasoning, showReasoningEditor,
     isUser, isLastMessage, isActivelyStreaming, displayContent, reasoning, reasoningDuration, reasoningStartedAt,
-    tokenCount, generationMetrics, avatarUrl, fullAvatarUrl, displayName, macroUserName, isHidden,
+    tokenCount, generationMetrics, avatarUrl, fullAvatarUrl, avatar, displayName, macroUserName, isHidden,
     handleEdit, handleSaveEdit, handleCancelEdit, handleDelete, handleToggleHidden, handleFork,
   } = useMessageCard(message, chatId)
 
@@ -40,6 +43,7 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
       displayName,
       avatarUrl,
       fullAvatarUrl,
+      avatar,
       isHidden,
       isStreaming: isActivelyStreaming,
       isLastMessage,
@@ -47,7 +51,6 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
     },
     content: {
       raw: displayContent,
-      html: '', // Will be populated by the override user via dangerouslySetInnerHTML if needed
     },
     reasoning: reasoning ? {
       raw: reasoning,
@@ -85,11 +88,43 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
     }),
     styles,
   }), [
-    message, isUser, displayName, avatarUrl, fullAvatarUrl, isHidden, isActivelyStreaming,
+    message, isUser, displayName, avatarUrl, fullAvatarUrl, avatar, isHidden, isActivelyStreaming,
     isLastMessage, tokenCount, displayContent, reasoning, reasoningDuration,
     isEditing, editContent, editReasoning, setEditContent, setEditReasoning,
     handleSaveEdit, handleCancelEdit, handleEdit, handleDelete, handleToggleHidden,
     handleFork, handlePromptBreakdown,
+  ])
+
+  // ── Host slots: trusted built-in elements an override renders via <Content />,
+  //    <Reasoning /> and <Attachments /> tags (full markdown, code highlighting,
+  //    macros and interactivity — identical to the default renderer). ──
+  const attachments = message.extra?.attachments
+  const hostSlots = useMemo(() => ({
+    Content: (
+      <MessageContent
+        content={displayContent}
+        isUser={isUser}
+        userName={macroUserName}
+        isStreaming={isActivelyStreaming}
+        messageId={message.id}
+        chatId={chatId}
+        depth={depth}
+      />
+    ),
+    Reasoning: reasoning ? (
+      <ReasoningBlock
+        reasoning={reasoning}
+        reasoningDuration={reasoningDuration}
+        reasoningStartedAt={reasoningStartedAt}
+        isStreaming={isActivelyStreaming}
+      />
+    ) : null,
+    Attachments: attachments && attachments.length > 0 ? (
+      <MessageAttachments attachments={attachments} isUser={isUser} chatId={chatId} messageId={message.id} />
+    ) : null,
+  }), [
+    displayContent, isUser, macroUserName, isActivelyStreaming, message.id, chatId, depth,
+    reasoning, reasoningDuration, reasoningStartedAt, attachments,
   ])
 
   // ── Default props for the built-in renderer ──
@@ -102,5 +137,5 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
     handleFork, handlePromptBreakdown,
   }
 
-  return useComponentOverride('MinimalMessage', MinimalMessageDefault, overrideProps, defaultProps)
+  return useComponentOverride('MinimalMessage', MinimalMessageDefault, overrideProps, defaultProps, hostSlots)
 }

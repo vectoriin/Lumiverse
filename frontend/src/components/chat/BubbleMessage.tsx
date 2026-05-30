@@ -1,6 +1,9 @@
 import { useMessageCard } from '@/hooks/useMessageCard'
 import { useComponentOverride } from '@/hooks/useComponentOverride'
 import BubbleMessageDefault, { type BubbleMessageDefaultProps } from './BubbleMessageDefault'
+import MessageContent from './MessageContent'
+import ReasoningBlock from './ReasoningBlock'
+import MessageAttachments from './MessageAttachments'
 import { useStore } from '@/store'
 import { useCallback, useMemo } from 'react'
 import type { Message } from '@/types/api'
@@ -23,7 +26,7 @@ export default function BubbleMessage({ message, chatId, depth = 0, isSelectMode
   const {
     isEditing, editContent, setEditContent, editReasoning, setEditReasoning, showReasoningEditor,
     isUser, isLastMessage, isActivelyStreaming, displayContent, reasoning, reasoningDuration, reasoningStartedAt,
-    tokenCount, generationMetrics, avatarUrl, fullAvatarUrl, displayName, macroUserName, isHidden,
+    tokenCount, generationMetrics, avatarUrl, fullAvatarUrl, avatar, displayName, macroUserName, isHidden,
     handleEdit, handleSaveEdit, handleCancelEdit, handleDelete, handleToggleHidden, handleFork,
   } = useMessageCard(message, chatId)
 
@@ -47,6 +50,7 @@ export default function BubbleMessage({ message, chatId, depth = 0, isSelectMode
       displayName,
       avatarUrl,
       fullAvatarUrl,
+      avatar,
       isHidden,
       isStreaming: isActivelyStreaming,
       isLastMessage,
@@ -54,7 +58,6 @@ export default function BubbleMessage({ message, chatId, depth = 0, isSelectMode
     },
     content: {
       raw: displayContent,
-      html: '', // Will be populated by the override user via dangerouslySetInnerHTML if needed
     },
     reasoning: reasoning ? {
       raw: reasoning,
@@ -92,11 +95,43 @@ export default function BubbleMessage({ message, chatId, depth = 0, isSelectMode
     }),
     styles,
   }), [
-    message, isUser, displayName, avatarUrl, fullAvatarUrl, isHidden, isActivelyStreaming,
+    message, isUser, displayName, avatarUrl, fullAvatarUrl, avatar, isHidden, isActivelyStreaming,
     isLastMessage, tokenCount, displayContent, reasoning, reasoningDuration,
     isEditing, editContent, editReasoning, setEditContent, setEditReasoning,
     handleSaveEdit, handleCancelEdit, handleEdit, handleDelete, handleToggleHidden,
     handleFork, handlePromptBreakdown,
+  ])
+
+  // ── Host slots: trusted built-in elements an override renders via <Content />,
+  //    <Reasoning /> and <Attachments /> tags (full markdown, code highlighting,
+  //    macros and interactivity — identical to the default renderer). ──
+  const attachments = message.extra?.attachments
+  const hostSlots = useMemo(() => ({
+    Content: (
+      <MessageContent
+        content={displayContent}
+        isUser={isUser}
+        userName={macroUserName}
+        isStreaming={isActivelyStreaming}
+        messageId={message.id}
+        chatId={chatId}
+        depth={depth}
+      />
+    ),
+    Reasoning: reasoning ? (
+      <ReasoningBlock
+        reasoning={reasoning}
+        reasoningDuration={reasoningDuration}
+        reasoningStartedAt={reasoningStartedAt}
+        isStreaming={isActivelyStreaming}
+      />
+    ) : null,
+    Attachments: attachments && attachments.length > 0 ? (
+      <MessageAttachments attachments={attachments} isUser={isUser} chatId={chatId} messageId={message.id} />
+    ) : null,
+  }), [
+    displayContent, isUser, macroUserName, isActivelyStreaming, message.id, chatId, depth,
+    reasoning, reasoningDuration, reasoningStartedAt, attachments,
   ])
 
   // ── Default props for the built-in renderer ──
@@ -109,5 +144,5 @@ export default function BubbleMessage({ message, chatId, depth = 0, isSelectMode
     handleFork, handlePromptBreakdown,
   }
 
-  return useComponentOverride('BubbleMessage', BubbleMessageDefault, overrideProps, defaultProps)
+  return useComponentOverride('BubbleMessage', BubbleMessageDefault, overrideProps, defaultProps, hostSlots)
 }

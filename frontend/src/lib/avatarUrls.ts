@@ -117,3 +117,41 @@ export function getActiveAvatarLargeUrl(
   if (overrideImageId) return imagesApi.largeUrl(overrideImageId)
   return getCharacterAvatarLargeUrl(entity)
 }
+
+// ---- Tier matrices (sm / lg / full) for theme overrides ----
+
+/** All three size tiers for one avatar image. `null` when no source resolves. */
+export interface AvatarTierUrls {
+  /** ~300px */
+  sm: string | null
+  /** ~700px */
+  lg: string | null
+  /** Original resolution, no resize. */
+  full: string | null
+}
+
+function buildTierUrls(
+  id: string | null | undefined,
+  imageId: string | null | undefined,
+  fallback: (id: string) => string,
+): AvatarTierUrls {
+  return {
+    sm: resolveAvatarUrl(id, imageId, fallback, 'sm'),
+    lg: resolveAvatarUrl(id, imageId, fallback, 'lg'),
+    full: resolveAvatarUrl(id, imageId, fallback),
+  }
+}
+
+export function getCharacterAvatarTiers(characterId?: string | null, imageId?: string | null): AvatarTierUrls {
+  return buildTierUrls(characterId, imageId, charactersApi.avatarUrl)
+}
+
+export function getPersonaAvatarTiers(personaId?: string | null, imageId?: string | null): AvatarTierUrls {
+  return buildTierUrls(personaId, imageId, personasApi.avatarUrl)
+}
+
+/** Tiers for a bare image id (e.g. a chat-specific avatar override). */
+export function getImageTiers(imageId?: string | null): AvatarTierUrls {
+  if (!imageId) return { sm: null, lg: null, full: null }
+  return { sm: imagesApi.smallUrl(imageId), lg: imagesApi.largeUrl(imageId), full: imagesApi.url(imageId) }
+}

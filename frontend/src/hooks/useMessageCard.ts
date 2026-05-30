@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { useStore } from '@/store'
 import { messagesApi, chatsApi } from '@/api/chats'
-import { getCharacterAvatarThumbUrlById, getCharacterAvatarLargeUrlById, getCharacterAvatarUrlById, getPersonaAvatarThumbUrlById, getPersonaAvatarLargeUrlById, getPersonaAvatarUrlById } from '@/lib/avatarUrls'
+import { getCharacterAvatarThumbUrlById, getCharacterAvatarLargeUrlById, getCharacterAvatarUrlById, getPersonaAvatarThumbUrlById, getPersonaAvatarLargeUrlById, getPersonaAvatarUrlById, getCharacterAvatarTiers, getPersonaAvatarTiers, getImageTiers, type AvatarTierUrls } from '@/lib/avatarUrls'
 import { imagesApi } from '@/api/images'
 import type { Message } from '@/types/api'
 import type { GenerationMetrics } from '@/types/ws-events'
@@ -171,6 +171,36 @@ export function useMessageCard(message: Message, chatId: string) {
             ? effectiveCharacter.extensions.original_image_id
             : effectiveCharacter?.image_id ?? null
         )
+
+  // ── Full sm/lg/full tier matrix for theme overrides. `cropped` is the 1:1
+  //    square variant; `original` is the uploaded aspect ratio. Mirrors the
+  //    avatarUrl/fullAvatarUrl resolution above so they stay consistent. ──
+  const personaAvatarId = userPersonaId ?? activePersona?.id ?? null
+  const personaImageId = messagePersona?.image_id ?? activePersona?.image_id ?? null
+  const characterOriginalImageId = typeof effectiveCharacter?.extensions?.original_image_id === 'string'
+    ? effectiveCharacter.extensions.original_image_id
+    : effectiveCharacter?.image_id ?? null
+  const usesChatAvatar = !!activeChatAvatarId && effectiveCharId === activeCharacterId
+
+  const croppedAvatarTiers: AvatarTierUrls = isUser
+    ? getPersonaAvatarTiers(personaAvatarId, personaImageId)
+    : usesChatAvatar
+      ? getImageTiers(activeChatAvatarId)
+      : getCharacterAvatarTiers(effectiveCharId, characterAvatarCropImageId ?? effectiveCharacter?.image_id ?? null)
+
+  const originalAvatarTiers: AvatarTierUrls = isUser
+    ? getPersonaAvatarTiers(personaAvatarId, personaImageId)
+    : usesChatAvatar
+      ? getImageTiers(activeAltAvatar?.original_image_id || activeChatAvatarId)
+      : getCharacterAvatarTiers(effectiveCharId, characterOriginalImageId)
+
+  const avatar = useMemo(
+    () => ({ cropped: croppedAvatarTiers, original: originalAvatarTiers }),
+    [
+      croppedAvatarTiers.sm, croppedAvatarTiers.lg, croppedAvatarTiers.full,
+      originalAvatarTiers.sm, originalAvatarTiers.lg, originalAvatarTiers.full,
+    ],
+  )
 
   const macroUserName = useMemo(() => {
     const fallback = activePersona?.name ?? 'User'
@@ -352,6 +382,7 @@ export function useMessageCard(message: Message, chatId: string) {
     generationMetrics,
     avatarUrl,
     fullAvatarUrl,
+    avatar,
     displayName,
     macroUserName,
     isHidden,
