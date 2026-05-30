@@ -322,6 +322,14 @@ function Start-Backend {
     $env:FRONTEND_DIR = $frontendDist
     Load-EnvFile
 
+    # smol (low-memory GC mode) defaults on; operators disable it persistently
+    # via LUMIVERSE_SMOL=false in .env (survives auto-updates, unlike bunfig.toml).
+    # The visual runner applies this itself in scripts/runner/server-manager.ts;
+    # this only covers the plain (no-runner) launch below.
+    $smolArgs = @("--smol")
+    $smolVal = if ($env:LUMIVERSE_SMOL) { $env:LUMIVERSE_SMOL.Trim().ToLower() } else { "" }
+    if ($smolVal -in @("false", "0", "off", "no")) { $smolArgs = @() }
+
     # Decide: visual runner or plain process
     $isTTY = [Environment]::UserInteractive -and -not $NoRunner
     if ($isTTY) {
@@ -338,9 +346,9 @@ function Start-Backend {
         Push-Location $BackendDir
         try {
             if ($Mode -eq "dev") {
-                & bun run dev
+                & bun @smolArgs --watch src/index.ts
             } else {
-                & bun run start
+                & bun @smolArgs src/index.ts
             }
         } finally { Pop-Location }
     }

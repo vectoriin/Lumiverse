@@ -652,6 +652,16 @@ start_backend() {
     set +a
   fi
 
+  # smol (low-memory GC mode) defaults on; operators disable it persistently
+  # via LUMIVERSE_SMOL=false in .env (survives auto-updates, unlike bunfig.toml).
+  # The visual runner applies this itself in scripts/runner/server-manager.ts;
+  # this only covers the plain (no-runner) launch below. Use a scalar (not an
+  # array) so the empty case expands cleanly under macOS bash 3.2 + `set -u`.
+  local smol_flag="--smol"
+  case "$(printf '%s' "${LUMIVERSE_SMOL:-}" | tr '[:upper:]' '[:lower:]')" in
+    false|0|off|no) smol_flag="" ;;
+  esac
+
   # Decide: visual runner or plain process
   if [[ "$USE_RUNNER" == true ]] && [[ -t 1 ]]; then
     # Interactive terminal — use the visual runner (fall back to plain if it crashes)
@@ -683,10 +693,11 @@ start_backend() {
       (sleep 2; open_browser "$url") &
     fi
 
+    # $smol_flag is intentionally unquoted: empty -> no arg, "--smol" -> one arg.
     if [[ "$MODE" == "dev" ]]; then
-      (cd "$BACKEND_DIR" && _bun run dev)
+      (cd "$BACKEND_DIR" && _bun $smol_flag --watch src/index.ts)
     else
-      (cd "$BACKEND_DIR" && _bun run start)
+      (cd "$BACKEND_DIR" && _bun $smol_flag src/index.ts)
     fi
   fi
 }

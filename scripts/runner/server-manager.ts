@@ -51,12 +51,22 @@ async function readStream(
   }
 }
 
+// smol (low-memory GC mode) defaults on to preserve historical behavior and
+// keep low-RAM / Termux installs healthy. Operators opt out with
+// LUMIVERSE_SMOL=false (or 0/off/no) in .env — a choice that survives updates,
+// unlike an edit to the committed bunfig.toml.
+function smolEnabled(): boolean {
+  const v = (process.env.LUMIVERSE_SMOL ?? "").trim().toLowerCase();
+  return !(v === "false" || v === "0" || v === "off" || v === "no");
+}
+
 export function startServer(isDev: boolean): void {
   if (instance?.proc) return;
 
+  const smol = smolEnabled() ? ["--smol"] : [];
   const args = isDev
-    ? ["bun", "--watch", ENTRY]
-    : ["bun", ENTRY];
+    ? ["bun", ...smol, "--watch", ENTRY]
+    : ["bun", ...smol, ENTRY];
 
   const restartCount = instance ? instance.restartCount : 0;
 
