@@ -499,9 +499,9 @@ export default function ChatView() {
           }
         } catch { /* no loadout binding — that's fine */ }
 
-        // Resolve council with unified, loadout-aware precedence so a bound
-        // loadout's roster isn't overwritten by the council-profile/defaults
-        // resolver (which previously ran here and clobbered it on every open).
+        // Resolve council (members, tool toggles, sidecar) from the
+        // council-profile system — its sole owner. Loadouts no longer carry
+        // council, so the two can't override each other.
         try {
           const council = await resolveCouncilForChat(chatId, {
             characterId: chat.character_id,
