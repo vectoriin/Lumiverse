@@ -726,7 +726,15 @@ export async function installPreset(
     const name = typeof p.name === "string" && p.name.trim() ? p.name : payload.presetName;
     const blocks = Array.isArray(p.blocks) ? p.blocks : [];
 
-    const created = presetsSvc.createPreset(userId, {
+    // Version sits directly below `name` in the export; fall back to the top-level field.
+    const presetVersion =
+      typeof p.presetVersion === "string" ? p.presetVersion
+      : typeof payload.presetVersion === "string" ? payload.presetVersion
+      : null;
+    const presetSlug = typeof payload.presetSlug === "string" ? payload.presetSlug : null;
+    const presetCreator = typeof payload.presetCreator === "string" ? payload.presetCreator : null;
+
+    const presetInput = {
       name,
       provider: "loom",
       parameters: {
@@ -751,13 +759,26 @@ export async function installPreset(
         coverUrl: typeof exported.cover_url === "string" ? exported.cover_url : null,
         _lumiverse_install_source: "lumihub",
         _lumiverse_lumihub_id: payload.presetId,
+        _lumiverse_preset_version: presetVersion,
+        _lumiverse_preset_slug: presetSlug,
+        _lumiverse_preset_creator: presetCreator,
       },
-    });
+    };
 
-    eventBus.emit(EventType.PRESET_CHANGED, { id: created.id, preset: created }, userId);
+    // Update the existing installation in place when this preset was installed
+    // from LumiHub before, so "Update" advances the version instead of duplicating.
+    const existing = presetsSvc.findPresetByLumihubId(userId, payload.presetId);
+    let saved;
+    if (existing) {
+      saved = presetsSvc.updatePreset(userId, existing.id, presetInput)!;
+    } else {
+      saved = presetsSvc.createPreset(userId, presetInput);
+      eventBus.emit(EventType.PRESET_CHANGED, { id: saved.id, preset: saved }, userId);
+    }
+
     eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
-      characterId: created.id,
-      characterName: created.name,
+      characterId: saved.id,
+      characterName: saved.name,
       source: "lumihub",
       type: "preset",
     }, userId);
@@ -765,8 +786,8 @@ export async function installPreset(
     return {
       requestId,
       success: true,
-      presetId: created.id,
-      presetName: created.name,
+      presetId: saved.id,
+      presetName: saved.name,
     };
   } catch (err: any) {
     console.error("[LumiHub Installer] Preset install error:", err);

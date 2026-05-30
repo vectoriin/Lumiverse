@@ -176,6 +176,42 @@ export function countPresets(userId: string): number {
 }
 
 /**
+ * Find a preset previously installed from LumiHub by its hub preset id (stored in
+ * metadata._lumiverse_lumihub_id). Used to update-in-place on re-install instead of
+ * creating a duplicate.
+ */
+export function findPresetByLumihubId(userId: string, lumihubId: string): Preset | null {
+  const row = getDb()
+    .query(
+      "SELECT * FROM presets WHERE user_id = ? AND json_extract(metadata, '$._lumiverse_lumihub_id') = ? LIMIT 1"
+    )
+    .get(userId, lumihubId) as any;
+  return row ? rowToPreset(row) : null;
+}
+
+export interface PresetManifestRow {
+  name: string;
+  created_at: number;
+  metadata: Record<string, any>;
+}
+
+/** Lightweight preset list for building the LumiHub install manifest. */
+export function listPresetsForManifest(userId: string): PresetManifestRow[] {
+  const rows = getDb()
+    .query("SELECT name, metadata, created_at FROM presets WHERE user_id = ?")
+    .all(userId) as Array<{ name: string; metadata: string; created_at: number }>;
+  return rows.map((r) => {
+    let metadata: Record<string, any> = {};
+    try {
+      metadata = JSON.parse(r.metadata) || {};
+    } catch {
+      metadata = {};
+    }
+    return { name: r.name, created_at: r.created_at, metadata };
+  });
+}
+
+/**
  * Fetch just the preset's updated_at for ETag generation, avoiding the full
  * row read + JSON parse of the (potentially large) preset on a cache hit.
  * Returns null when the preset doesn't exist for this user.
