@@ -222,6 +222,10 @@ export class GoogleVertexProvider implements LlmProvider {
     supportsStreaming: true,
     apiKeyRequired: true, // We use the "API key" slot to store the service account JSON
     modelListStyle: "none", // Vertex model list requires project/location — handled in listModels()
+    // Same as Gemini API: reasoning is preserved across tool calls via the
+    // opaque `thoughtSignature` on each functionCall part, captured onto
+    // ToolCallResult.thought_signature and re-emitted by formatParts.
+    interleavedThinking: true,
   };
 
   /** Build the Vertex AI base URL for model operations (generate, stream, etc.). */

@@ -7,6 +7,62 @@ import { fetchProviderJson, ProviderRequestError, throwProviderResponseError } f
 const GENERATE_OPERATION = "generate";
 const STREAM_OPERATION = "stream";
 
+/** Streamable text-ish fields within a reasoning_details block that are
+ *  concatenated across chunks; everything else (type/id/format/index) is set. */
+const REASONING_DETAIL_APPEND_FIELDS = new Set([
+  "text",
+  "summary",
+  "data",
+  "signature",
+]);
+
+/**
+ * Accumulates OpenRouter `reasoning_details` deltas streamed across chunks into
+ * a single ordered array. OpenRouter sends each reasoning block as it becomes
+ * available; the complete sequence is rebuilt by concatenating the streamable
+ * text fields per block `index` while preserving block metadata. The result is
+ * replayed verbatim on the assistant message to keep chain-of-thought intact
+ * across tool calls (interleaved thinking). Opaque otherwise.
+ */
+export class ReasoningDetailsAccumulator {
+  private byIndex = new Map<number, Record<string, unknown>>();
+  private order = 0;
+  private seen = false;
+
+  push(incoming: unknown): void {
+    if (!Array.isArray(incoming)) return;
+    for (const d of incoming) {
+      if (!d || typeof d !== "object") continue;
+      this.seen = true;
+      const rec = d as Record<string, unknown>;
+      const idx = typeof rec.index === "number" ? rec.index : this.order++;
+      let existing = this.byIndex.get(idx);
+      if (!existing) {
+        existing = {};
+        this.byIndex.set(idx, existing);
+      }
+      for (const [k, v] of Object.entries(rec)) {
+        if (
+          REASONING_DETAIL_APPEND_FIELDS.has(k) &&
+          typeof v === "string" &&
+          typeof existing[k] === "string"
+        ) {
+          existing[k] = (existing[k] as string) + v;
+        } else {
+          existing[k] = v;
+        }
+      }
+    }
+  }
+
+  finalize(): Record<string, unknown>[] | undefined {
+    if (!this.seen) return undefined;
+    return [...this.byIndex.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, v]) => v);
+  }
+}
+
 /**
  * Abstract base class for providers that use the OpenAI-compatible
  * /chat/completions API format. Subclasses override `name`, `defaultUrl`,
@@ -108,11 +164,21 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
       choice?.message?.reasoning || choice?.message?.reasoning_content,
     );
 
+    // OpenRouter (and some routed providers) return normalized `reasoning_details`
+    // blocks that must be replayed verbatim across tool calls for interleaved
+    // thinking. Opaque to us — capture as-is when present.
+    const rawReasoningDetails = choice?.message?.reasoning_details;
+    const reasoningDetails =
+      Array.isArray(rawReasoningDetails) && rawReasoningDetails.length > 0
+        ? (rawReasoningDetails as Record<string, unknown>[])
+        : undefined;
+
     return {
       content: normalized.content,
       reasoning: normalized.reasoning,
       finish_reason: toolCalls ? "tool_calls" : (choice?.finish_reason || "stop"),
       tool_calls: toolCalls,
+      reasoning_details: reasoningDetails,
       usage: data.usage
         ? {
             prompt_tokens: data.usage.prompt_tokens,
@@ -156,6 +222,8 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
 
     // Tool call accumulation — OpenAI streams tool_calls as delta chunks
     const toolCallBuffer: { id: string; name: string; argsJson: string }[] = [];
+    // OpenRouter reasoning_details accumulation (streamed as deltas).
+    const reasoningDetails = new ReasoningDetailsAccumulator();
 
     let streamDoneNaturally = false;
     try {
@@ -187,6 +255,9 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
             if (tc.function?.name) toolCallBuffer[idx].name += tc.function.name;
             if (tc.function?.arguments) toolCallBuffer[idx].argsJson += tc.function.arguments;
           }
+
+          // Accumulate OpenRouter reasoning_details deltas
+          reasoningDetails.push(delta?.reasoning_details);
 
           // Resolve reasoning from the detected key, or auto-detect on first occurrence
           let reasoning: string | undefined;
@@ -223,6 +294,7 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
               reasoning,
               finish_reason: toolCalls ? "tool_calls" : finishReason,
               tool_calls: toolCalls,
+              reasoning_details: reasoningDetails.finalize(),
               usage,
             };
           } else if (reasoning || content) {
@@ -333,7 +405,14 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
           type: "function",
           function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
         })),
-        ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
+        // OpenRouter's `reasoning_details` is the authoritative, normalized
+        // carrier — replay the whole sequence verbatim and prefer it over the
+        // plaintext `reasoning_content` alias when both are present.
+        ...(m.reasoning_details?.length
+          ? { reasoning_details: m.reasoning_details }
+          : m.reasoning_content
+            ? { reasoning_content: m.reasoning_content }
+            : {}),
       });
     } else if (nonTool.length > 0) {
       out.push({ role: m.role, content: this.formatContent({ ...m, content: nonTool }) });

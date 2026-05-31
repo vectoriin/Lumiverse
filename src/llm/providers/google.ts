@@ -40,6 +40,12 @@ export class GoogleProvider implements LlmProvider {
     supportsStreaming: true,
     apiKeyRequired: true,
     modelListStyle: "google",
+    // Gemini preserves reasoning across tool calls via the opaque
+    // `thoughtSignature` attached to each functionCall part. generate()/
+    // generateStream() capture it onto ToolCallResult.thought_signature and
+    // formatParts re-emits it, so the structured continuation round-trips the
+    // signature (mandatory on Gemini 3 when thinking is enabled).
+    interleavedThinking: true,
   };
 
   private baseUrl(apiUrl: string): string {

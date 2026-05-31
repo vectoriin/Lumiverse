@@ -32,7 +32,12 @@ import {
   type ActivatedWorldInfoEntry,
   type ToolDefinition,
   type ToolCallResult,
+  type LlmThinkingBlock,
 } from "../llm/types";
+import {
+  buildInlineToolContinuation,
+  type InlineCouncilToolResult,
+} from "./inline-tool-continuation";
 import type { Message } from "../types/message";
 import type { ConnectionProfile } from "../types/connection-profile";
 import {
@@ -415,15 +420,6 @@ interface PromptPipelineResult {
   macroEnvSeed?: import("../macros/types").MacroEnv;
 }
 
-interface InlineCouncilToolResult {
-  callId: string;
-  qualifiedName: string;
-  toolName: string;
-  toolDisplayName: string;
-  memberName?: string;
-  result: string;
-}
-
 /**
  * If the generated content contains an unclosed reasoning/thinking tag
  * (e.g. generation was interrupted mid-thought), append the closing tag
@@ -608,7 +604,10 @@ async function executeInlineCouncilToolCalls(
       const contextSummary = contextMessages
         .map((m) => {
           const prefix = m.role === "system" ? "" : `${m.role}: `;
-          return `${prefix}${typeof m.content === "string" ? m.content : ""}`;
+          // getTextContent handles both string and multipart (tool_use/
+          // tool_result) message content so structured interleaved-thinking
+          // continuations still render a readable context for extension tools.
+          return `${prefix}${getTextContent(m)}`;
         })
         .join("\n\n");
 
@@ -657,26 +656,6 @@ async function executeInlineCouncilToolCalls(
   return results;
 }
 
-function formatInlineCouncilToolResults(
-  results: InlineCouncilToolResult[],
-): string {
-  const lines = [
-    "## Inline Council Tool Results",
-    "The model requested council tool calls during generation. Use these results to continue the reply naturally.",
-    "",
-  ];
-
-  for (const result of results) {
-    lines.push(
-      `### ${result.memberName ? `${result.memberName} - ` : ""}${result.toolDisplayName}`,
-    );
-    lines.push(result.result || "(empty result)");
-    lines.push("");
-  }
-
-  return lines.join("\n");
-}
-
 /**
  * Race a promise against an AbortSignal. If the signal fires before the
  * promise settles, rejects with the signal's reason (or a standard AbortError).
@@ -721,6 +700,14 @@ const GENERATION_MAX_RETRIES = (() => {
 })();
 const GENERATION_RETRY_BASE_MS = 500;
 const GENERATION_RETRY_MAX_MS = 8_000;
+
+// Max inline tool-call rounds within a single generation (model → tools →
+// model → …). Interleaved-thinking agents can chain many tool calls, so this
+// is tunable; defaults to 3 to preserve historical behaviour.
+const INLINE_TOOL_MAX_ROUNDS = (() => {
+  const raw = Number(process.env.LUMIVERSE_INLINE_TOOL_MAX_ROUNDS);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 3;
+})();
 
 function computeBackoffMs(attempt: number, retryAfterMs?: number): number {
   // Honor a server Retry-After hint when present, clamped to our ceiling.
@@ -3000,8 +2987,27 @@ async function runGeneration(
       : 30_000;
     let generationMessages = messages;
 
-    for (let inlineRound = 0; inlineRound < 3; inlineRound++) {
+    // Providers that round-trip reasoning across tool calls (DeepSeek thinking
+    // mode, etc.) get a native tool_use/tool_result continuation so the model
+    // can keep reasoning between tool calls — interleaved thinking. Everything
+    // else keeps the legacy text continuation (and providers like Anthropic
+    // would *break* on structured tool_use without their thinking blocks, so
+    // they must stay on the legacy path until their carrier is wired).
+    const interleavedStructured =
+      !!tools?.length && provider.capabilities.interleavedThinking === true;
+
+    for (let inlineRound = 0; inlineRound < INLINE_TOOL_MAX_ROUNDS; inlineRound++) {
+      // fullContent/fullReasoning accumulate across rounds for the final
+      // persisted message; capture the start offsets so we can slice out just
+      // this round's delta for the continuation we feed back to the provider.
+      const roundContentStart = fullContent.length;
+      const roundReasoningStart = fullReasoning.length;
       let pendingToolCalls: ToolCallResult[] | undefined;
+      // Provider-native reasoning blocks (Anthropic thinking blocks with
+      // signatures) captured this round, replayed on the structured continuation.
+      let pendingThinkingBlocks: LlmThinkingBlock[] | undefined;
+      // OpenRouter reasoning_details captured this round, replayed likewise.
+      let pendingReasoningDetails: Record<string, unknown>[] | undefined;
 
       // Non-streaming path: call generate() once, then synthesize a single-chunk stream.
       // Wrapped in a factory so the pre-token retry below can re-issue a clean request.
@@ -3028,6 +3034,8 @@ async function runGeneration(
               reasoning: result.reasoning,
               finish_reason: result.finish_reason,
               tool_calls: result.tool_calls,
+              thinking_blocks: result.thinking_blocks,
+              reasoning_details: result.reasoning_details,
               usage: result.usage,
             };
           })();
@@ -3134,6 +3142,14 @@ async function runGeneration(
           pendingToolCalls = chunk.tool_calls;
         }
 
+        if (chunk.thinking_blocks) {
+          pendingThinkingBlocks = chunk.thinking_blocks;
+        }
+
+        if (chunk.reasoning_details) {
+          pendingReasoningDetails = chunk.reasoning_details;
+        }
+
         // Capture provider usage data (token counts) from the stream
         if (chunk.usage) {
           streamUsage = chunk.usage;
@@ -3150,9 +3166,15 @@ async function runGeneration(
         break;
       }
 
+      // This round's freshly-streamed deltas (not the cross-round accumulation).
+      const roundContent = fullContent.slice(roundContentStart);
+      const roundReasoning = fullReasoning.slice(roundReasoningStart);
+
       // Reconstruct the full assistant output including any guided CoT
       // reasoning block so the model sees its own <think>...</think> on
-      // continuation rounds and doesn't re-enter the planning phase.
+      // continuation rounds and doesn't re-enter the planning phase. This text
+      // rendering is used for the legacy continuation and as the context
+      // summary handed to extension tools during execution.
       const fullAssistantOutput = fullReasoning
         ? `${cotDelimiters.prefix}${fullReasoning}${cotDelimiters.suffix}\n${fullContent}`
         : fullContent;
@@ -3182,13 +3204,16 @@ async function runGeneration(
 
       generationMessages = [
         ...generationMessages,
-        ...(fullAssistantOutput
-          ? [{ role: "assistant", content: fullAssistantOutput } satisfies LlmMessage]
-          : []),
-        {
-          role: "system",
-          content: formatInlineCouncilToolResults(inlineCouncilResults),
-        },
+        ...buildInlineToolContinuation({
+          structured: interleavedStructured,
+          legacyAssistantOutput: fullAssistantOutput,
+          roundContent,
+          roundReasoning,
+          toolCalls: pendingToolCalls ?? [],
+          results: inlineCouncilResults,
+          thinkingBlocks: pendingThinkingBlocks,
+          reasoningDetails: pendingReasoningDetails,
+        }),
       ];
     }
 
