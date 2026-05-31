@@ -49,6 +49,7 @@ export default function BubbleMessage({ message, chatId, depth = 0, isSelectMode
       isUser,
       displayName,
       avatarUrl: displayAvatarUrl,
+      initial: (displayName || '').charAt(0).toUpperCase() || '?',
       fullAvatarUrl,
       avatar,
       isHidden,
