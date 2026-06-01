@@ -834,6 +834,10 @@ type ReasoningSettingsSnapshot = {
 type CouncilResultCache = CachedCouncilResult & {
   fingerprint?: string;
   historicalDeliberationBlock?: string;
+  /** Set when the council was active but no member survived their dice roll, so
+   *  the run produced no results. Retained so a regen/swipe with retain enabled
+   *  reuses the "stayed silent" outcome instead of re-rolling. */
+  emptyRoll?: boolean;
 };
 
 function stableJson(value: unknown): string {
@@ -910,9 +914,18 @@ function isReusableCouncilCache(
   cached: CouncilResultCache | undefined,
   fingerprint: string,
 ): boolean {
-  if (!cached?.results?.length) return false;
+  if (!cached) return false;
+  if (cached.fingerprint !== fingerprint) return false;
+  // An empty-roll outcome (council was active but no member survived the dice
+  // roll) is a valid result to retain — freezing "the council stayed silent"
+  // keeps regens/swipes deterministic instead of re-rolling into a different
+  // (or suddenly non-empty) outcome.
+  if (cached.emptyRoll) return true;
+  if (!cached.results?.length) return false;
+  // Non-empty caches only ever store successful results (failures are dropped
+  // at write time), so the run is reusable once the fingerprint matches.
   if (cached.results.some((result) => !result.success)) return false;
-  return cached.fingerprint === fingerprint;
+  return true;
 }
 
 function getEffectiveReasoningSettings(
@@ -2260,18 +2273,27 @@ export async function startGeneration(
             }
           }
 
-          // Persist fully successful council results for potential reuse on regens/swipes.
-          // Only cache when results were freshly executed (totalDurationMs > 0 distinguishes
-          // a live execution from a cache hit which sets totalDurationMs to 0). Failed
-          // results are intentionally not cached; otherwise one bad sidecar/tool call can
-          // poison later regens and prevent council tools from re-firing.
+          // Persist successful council results for potential reuse on
+          // regens/swipes. Only cache freshly executed runs (totalDurationMs > 0
+          // distinguishes a live execution from a cache hit, which sets it to 0).
+          //
+          // Cache the *successful subset* rather than requiring every tool to
+          // succeed: failed results are already excluded from the deliberation
+          // block (formatDeliberation skips them), so a single flaky tool no
+          // longer prevents the whole council from being retained — which would
+          // otherwise force a full re-execution on the next regen even with
+          // "Retain results for regens" enabled. The failed tools still surface
+          // the COUNCIL_TOOLS_FAILED retry prompt on the original run.
+          const successfulResults = councilResult.results.filter(
+            (result) => result.success,
+          );
           if (
             councilResult.totalDurationMs > 0 &&
-            councilResult.results.every((result) => result.success) &&
+            successfulResults.length > 0 &&
             councilContextHash !== undefined
           ) {
             const cachedResult: CouncilResultCache = {
-              results: councilResult.results,
+              results: successfulResults,
               deliberationBlock: councilResult.deliberationBlock,
               ...(councilResult.historicalDeliberationBlock
                 ? { historicalDeliberationBlock: councilResult.historicalDeliberationBlock }
@@ -2297,6 +2319,40 @@ export async function startGeneration(
                 err,
               );
             }
+          }
+        } else if (
+          councilResult === null &&
+          councilContextHash !== undefined
+        ) {
+          // Empty dice roll: the council was active (sidecar mode, tools
+          // assigned) but no member survived their `chance` roll, so
+          // executeCouncil returned null. Cache that "stayed silent" outcome
+          // keyed by the same fingerprint so a retained regen/swipe reuses it
+          // instead of silently re-rolling — the most common reason a regen
+          // appeared to re-run the council despite Retain being on.
+          // councilContextHash is only set on the sidecar execution path, so
+          // this never fires for inline-mode or council-disabled generations.
+          const emptyRollCache: CouncilResultCache = {
+            results: [],
+            deliberationBlock: "",
+            namedResults: {},
+            cachedAt: Date.now(),
+            emptyRoll: true,
+            fingerprint: buildCouncilCacheFingerprint(
+              councilSettings,
+              resolvedCouncilProfile.sidecar_settings,
+              councilContextHash,
+            ),
+          };
+          try {
+            chatsSvc.mergeChatMetadata(input.userId, input.chat_id, {
+              last_council_results: emptyRollCache,
+            });
+          } catch (err) {
+            console.warn(
+              "[council] Failed to cache empty-roll outcome to chat metadata:",
+              err,
+            );
           }
         }
 

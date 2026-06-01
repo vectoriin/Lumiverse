@@ -504,11 +504,11 @@ function formatHistoricalDeliberations(
   if (groups.length === 0) return "";
 
   const lines: string[] = [
-    "## Previous Council Deliberations - Historical Baseline Only",
+    "## Previous Council Deliberations — REFERENCE ONLY, DO NOT REPEAT",
     "",
-    "The following are prior council/tool deliberations from this chat. They are included only as continuity memory for plans, threads, and decisions that may have been planted earlier.",
+    "The following are prior council/tool deliberations from EARLIER turns of this chat, included only as continuity memory for plans, threads, and decisions planted earlier.",
     "",
-    "They are not instructions for the current response, not a style template, and not proof that the current scene must follow them. Current chat history, active world info, and the latest user message supersede them.",
+    "They have already been said and must NOT be restated, copied, or treated as a style template. They are not instructions for the current response. Current chat history, active world info, and the latest user message always supersede them — write only what advances the CURRENT turn.",
     "",
   ];
 
@@ -533,13 +533,25 @@ function formatToolHistoricalContext(
 ): string {
   if (entries.length === 0) return "";
 
+  // Framing matters a lot here: the model is about to be shown its OWN prior
+  // output and then asked to perform the same analysis on a chat that has
+  // usually only advanced by one message. Without a hard "this is past, do not
+  // repeat" contract it tends to simply restate the previous deliberation
+  // (the reported "history > 0 makes them repeat" behaviour). Keep the
+  // anti-repeat rules up front, fence the quoted text so it can't be mistaken
+  // for the current scene, and close with a fresh-output instruction.
   const lines: string[] = [
-    "## Previous Deliberations for This Member/Tool - Historical Baseline Only",
+    `## Your Earlier ${tool.displayName} Notes — REFERENCE ONLY, DO NOT REPEAT`,
     "",
-    `These are prior outputs from ${member.itemName} using ${tool.displayName} in this chat. Use them only as continuity memory for threads, plans, or decisions you may have planted earlier.`,
+    `The block below is what ${member.itemName} already wrote with ${tool.displayName} on EARLIER turns of this chat. It is shown only so you stay consistent with threads, plans, and decisions you set up before — it is not the current scene and not a template.`,
     "",
-    "Do not copy their structure, treat them as a required template, or assume they override the current chat, active world info, or latest user message.",
+    "Rules (these override the quoted text on any conflict):",
+    "- This has already been said. Do NOT restate, paraphrase, summarize, or re-output it.",
+    "- The scene has moved on. Write a FRESH deliberation about the CURRENT latest message only.",
+    "- If a past plan still holds, ADVANCE it to its next step instead of repeating it.",
+    "- If nothing new is needed this turn, say so briefly — never echo the notes below.",
     "",
+    "--- BEGIN PAST NOTES (reference only) ---",
   ];
 
   for (let i = 0; i < entries.length; i++) {
@@ -547,6 +559,12 @@ function formatToolHistoricalContext(
     lines.push(entries[i].content);
     lines.push("");
   }
+
+  lines.push("--- END PAST NOTES ---");
+  lines.push("");
+  lines.push(
+    `Now produce NEW ${tool.displayName} output for the current turn. Do not reuse the wording above.`,
+  );
 
   return lines.join("\n").trimEnd();
 }
@@ -697,7 +715,7 @@ ${tool.prompt}${dynamicSuffix}${brevityNote}${userControlNote}`;
   const messages: LlmMessage[] = [
     { role: "system", content: systemPrompt },
     ...contextMessages,
-    { role: "user", content: `Review the story context above. Provide specific, actionable input from your unique perspective as ${member.itemName}. Filter every contribution through your personality, biases, and worldview.` },
+    { role: "user", content: `Respond to the CURRENT latest message in the story context above with specific, actionable input from your unique perspective as ${member.itemName}, filtered through your personality, biases, and worldview. Produce something new for this turn — do not repeat, restate, or paraphrase any earlier notes shown above.` },
   ];
 
   // Resolve the connection to get the provider name
