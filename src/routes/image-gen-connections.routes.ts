@@ -1,14 +1,13 @@
 import { Hono } from "hono";
 import * as svc from "../services/image-gen-connections.service";
 import { getImageProviderList } from "../image-gen/registry";
-import { normalizeComfyUIWorkflow } from "../image-gen/comfyui-import";
+import { normalizeComfyUIWorkflow, detectComfyUIWorkflowFormat } from "../image-gen/comfyui-import";
 import { discoverCapabilities, getComfyUIObjectInfo, resolveComfyTarget } from "../image-gen/comfyui-discovery";
-import { detectInjectionPoints } from "../image-gen/comfyui-workflow-parser";
 import {
   readComfyUIConfig,
   writeComfyUIConfig,
 } from "../image-gen/comfyui-workflow-storage";
-import { buildComfyUIWorkflowFieldOptions } from "../services/dream-weaver/visual-studio/comfyui-workflow-field-options";
+import { buildComfyUIWorkflowFieldOptions } from "../image-gen/comfyui-workflow-field-options";
 import type { ComfyUIFieldMapping } from "../image-gen/comfyui-workflow-patch";
 import { parsePagination } from "../services/pagination";
 import * as secretsSvc from "../services/secrets.service";
@@ -125,6 +124,13 @@ app.post("/:id/comfyui/workflow/import", async (c) => {
     return c.json({ error: "Connection does not support ComfyUI workflows" }, 400);
   }
 
+  if (detectComfyUIWorkflowFormat(workflow) === "ui_workflow") {
+    return c.json({
+      error:
+        "That's the UI workflow export. Import the API-format export instead: in ComfyUI enable Settings -> Enable Dev mode Options, then use Save (API Format).",
+    }, 400);
+  }
+
   const target = await resolveComfyConnectionTarget(userId, connection);
   const objectInfo = await getComfyUIObjectInfo(target.baseUrl, false, { cookie: target.cookie });
   let normalized: ReturnType<typeof normalizeComfyUIWorkflow>;
@@ -135,20 +141,11 @@ app.post("/:id/comfyui/workflow/import", async (c) => {
     return c.json({ error: message }, 400);
   }
 
-  const mappings: ComfyUIFieldMapping[] = detectInjectionPoints(normalized.apiWorkflow)
-    .filter((point) => point.suggestedAs !== null)
-    .map((point) => ({
-      nodeId: point.nodeId,
-      fieldName: point.fieldName,
-      mappedAs: point.suggestedAs as ComfyUIFieldMapping["mappedAs"],
-      autoDetected: true,
-    }));
-
   const config = {
     workflow_json: normalized.graphWorkflow,
     workflow_api_json: normalized.apiWorkflow,
     workflow_format: normalized.format,
-    field_mappings: mappings,
+    field_mappings: [] as ComfyUIFieldMapping[],
     field_options: buildComfyUIWorkflowFieldOptions(normalized.apiWorkflow, objectInfo),
     imported_at: Date.now(),
   };

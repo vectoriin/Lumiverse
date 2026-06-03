@@ -90,7 +90,6 @@ import * as databankSvc from "./databank";
 import { getCharacterDatabankIds } from "../utils/character-databanks";
 import { getSidecarSettings } from "./sidecar-settings.service";
 import { getChatBackgroundSignal, trackChatBackgroundTask } from "./chat-background.service";
-import { getDreamWeaverRuntimeBlocks } from "./dream-weaver/runtime-prompt";
 import * as regexScriptsSvc from "./regex-scripts.service";
 import { createPromptAssemblyProfiler } from "./prompt-assembly-profiler";
 import { rankVectorWorldInfoCandidatesInWorker } from "./world-info-vector-ranking-worker-host";
@@ -2376,20 +2375,6 @@ export async function assemblePrompt(
   // Use the count tracked during chat_history insertion (respects message limit + exclusions)
   const lastChatIdx =
     firstChatIdx >= 0 ? firstChatIdx + chatHistoryCount : result.length;
-
-  const dreamWeaverRuntimeBlocks = getDreamWeaverRuntimeBlocks(
-    effectiveCharacter,
-  ).map((entry) => ({ ...entry, role: "system" as const }));
-  if (dreamWeaverRuntimeBlocks.length > 0) {
-    const insertAt = firstChatIdx >= 0 ? firstChatIdx : result.length;
-    const inserted = injectPromptBlocksAt(
-      result,
-      breakdown,
-      dreamWeaverRuntimeBlocks,
-      insertAt,
-    );
-    if (firstChatIdx >= 0) firstChatIdx += inserted;
-  }
 
   // Position 0: "before" — insert just before chat history
   if (!hasWiBefore && wiCache.before.length > 0) {
@@ -5795,16 +5780,6 @@ async function legacyAssembly(
       name: "Character Card (legacy)",
       role: "system",
       content: systemContent,
-    });
-  }
-
-  for (const block of getDreamWeaverRuntimeBlocks(legacyChar as Character)) {
-    llmMessages.push({ role: "system", content: block.content });
-    breakdown.push({
-      type: "block",
-      name: block.name,
-      role: "system",
-      content: block.content,
     });
   }
 
