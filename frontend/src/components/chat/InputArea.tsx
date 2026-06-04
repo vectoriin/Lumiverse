@@ -194,6 +194,8 @@ export default function InputArea({ chatId }: InputAreaProps) {
   const [impersonationPresetId, setImpersonationPresetId] = useState<string | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<(MessageAttachment & { previewUrl?: string })[]>([])
   const [uploading, setUploading] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const dragCounterRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
@@ -1009,7 +1011,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     return DOCUMENT_EXTENSIONS.has(ext)
   }, [DOCUMENT_EXTENSIONS])
 
-  const handleAttachFiles = useCallback(async (files: FileList | null) => {
+  const handleAttachFiles = useCallback(async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return
     setUploading(true)
     try {
@@ -1061,6 +1063,61 @@ export default function InputArea({ chatId }: InputAreaProps) {
   const removeAttachment = useCallback((imageId: string) => {
     setPendingAttachments((prev) => prev.filter((a) => a.image_id !== imageId))
   }, [])
+
+  // Paste-to-attach: pull any files (e.g. screenshots) out of the clipboard and
+  // route them through the same pipeline as the file picker. Plain-text pastes
+  // contain no files, so we leave the default behavior untouched for those.
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const files: File[] = []
+    for (const item of Array.from(items)) {
+      if (item.kind !== 'file') continue
+      const file = item.getAsFile()
+      if (!file) continue
+      // Clipboard images arrive with a generic name like "image.png"; stamp a
+      // friendlier, unique name so the attachment strip and saved filename read clearly.
+      if (file.type.startsWith('image/') && /^image\.\w+$/i.test(file.name)) {
+        const ext = file.name.slice(file.name.lastIndexOf('.'))
+        files.push(new File([file], `pasted-image-${Date.now()}${ext}`, { type: file.type }))
+      } else {
+        files.push(file)
+      }
+    }
+    if (files.length === 0) return
+    e.preventDefault()
+    handleAttachFiles(files)
+  }, [handleAttachFiles])
+
+  // Drag-and-drop: a counter tracks enter/leave across child elements so the
+  // overlay doesn't flicker as the cursor moves over nested nodes.
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return
+    e.preventDefault()
+    dragCounterRef.current += 1
+    setDragActive(true)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return
+    e.preventDefault()
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (dragCounterRef.current === 0) return
+    e.preventDefault()
+    dragCounterRef.current -= 1
+    if (dragCounterRef.current === 0) setDragActive(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    const files = e.dataTransfer?.files
+    if (!files || files.length === 0) return
+    e.preventDefault()
+    dragCounterRef.current = 0
+    setDragActive(false)
+    handleAttachFiles(files)
+  }, [handleAttachFiles])
 
   // Detect trailing consecutive user messages (queued messages awaiting generation)
   const hasQueuedMessages = useMemo(() => {
@@ -1958,6 +2015,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
       data-component="InputArea"
       ref={containerRef}
       className={styles.container}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       style={(() => {
         const s: CSSProperties = {}
         if (screenCornerRadius) {
@@ -1969,6 +2030,13 @@ export default function InputArea({ chatId }: InputAreaProps) {
         return Object.keys(s).length ? s : undefined
       })()}
     >
+      {dragActive && (
+        <div className={styles.dropOverlay} aria-hidden="true">
+          <Paperclip size={20} />
+          <span>{t('input.dropToAttach')}</span>
+        </div>
+      )}
+
       {/* Author's Note Panel */}
       <AuthorsNotePanel
         chatId={chatId}
@@ -2936,6 +3004,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
               onChange={handleInput}
               onScroll={handleTextareaScroll}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               onCompositionStart={handleCompositionStart}
               onCompositionEnd={handleCompositionEnd}
               onFocus={() => setInputFocused(true)}

@@ -58,6 +58,7 @@
     "attachFiles": "Attach files",
     "attachFile": "Attach file",
     "attachImageOrAudio": "Attach image or audio",
+    "dropToAttach": "Drop files to attach",
     "removeAttachment": "Remove attachment",
     "message": "Message",
     "stopGeneration": "Stop generation",
