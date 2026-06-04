@@ -2,7 +2,7 @@ import { getSession, updateSession } from "./session.service";
 import { getBible } from "./bible.service";
 import { getFields } from "./render.service";
 import { FIELD_IDS, getField as getFieldDef } from "./fields";
-import { ensureWeaverPreset } from "./governance-preset";
+import { buildGovernanceEntries } from "./governance-entries";
 import * as charactersSvc from "../characters.service";
 import * as chatsSvc from "../chats.service";
 import type { Character, CreateCharacterInput } from "../../types/character";
@@ -84,12 +84,10 @@ function buildWeaverExtension(sessionId: string, spine: WeaverBibleSpine): Recor
 
 export interface WeaverFinalizeResult {
   character: Character;
-  preset_id: string;
 }
 
 export interface WeaverStartChatResult {
   chat: Chat;
-  preset_id: string;
 }
 
 export function finalizeSession(userId: string, sessionId: string): WeaverFinalizeResult {
@@ -123,17 +121,21 @@ export function finalizeSession(userId: string, sessionId: string): WeaverFinali
     system_prompt: "",
     post_history_instructions: "",
     creator: WEAVER_CREATOR,
-    creator_notes: "Authored with the Lumiverse Weaver. Pairs with the Lumiverse Weaver governance preset.",
+    creator_notes: "Authored with the Lumiverse Weaver. Governance travels on the card (character_book), so it works under any preset.",
     tags: [WEAVER_TAG],
     alternate_greetings: [],
     extensions: {
-      character_book: { entries: [buildReanchorEntry(name, bible.spine)] },
+      character_book: {
+        entries: [
+          buildReanchorEntry(name, bible.spine),
+          ...buildGovernanceEntries(bible.spine),
+        ],
+      },
       weaver: buildWeaverExtension(sessionId, bible.spine),
     },
   };
 
   const character = charactersSvc.createCharacter(userId, input);
-  const preset = ensureWeaverPreset(userId);
 
   updateSession(userId, sessionId, {
     stage: "finalize",
@@ -141,7 +143,7 @@ export function finalizeSession(userId: string, sessionId: string): WeaverFinali
     character_id: character.id,
   });
 
-  return { character, preset_id: preset.id };
+  return { character };
 }
 
 export function startChat(userId: string, sessionId: string): WeaverStartChatResult {
@@ -149,9 +151,8 @@ export function startChat(userId: string, sessionId: string): WeaverStartChatRes
   if (!session) throw new Error("Session not found");
   if (!session.character_id) throw new Error("Finalize the card first — there is nothing to start a chat with");
 
-  const preset = ensureWeaverPreset(userId);
   const chat = chatsSvc.createChat(userId, { character_id: session.character_id });
   updateSession(userId, sessionId, { launch_chat_id: chat.id });
 
-  return { chat, preset_id: preset.id };
+  return { chat };
 }

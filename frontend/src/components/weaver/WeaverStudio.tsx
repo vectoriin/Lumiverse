@@ -397,18 +397,16 @@ export function WeaverStudio() {
 function useStartWeaverChat(sessionId: string) {
   const startChat = useStore((s) => s.startWeaverChat)
   const setActiveChat = useStore((s) => s.setActiveChat)
-  const setActiveLoomPreset = useStore((s) => s.setActiveLoomPreset)
   const closeModal = useStore((s) => s.closeModal)
   const starting = useStore((s) => s.weaverStartingChat)
   const run = useCallback(async () => {
     try {
       const r = await startChat(sessionId)
-      setActiveLoomPreset(r.preset_id)
       setActiveChat(r.chat.id, r.chat.character_id)
       closeModal()
     } catch {
     }
-  }, [sessionId, startChat, setActiveChat, setActiveLoomPreset, closeModal])
+  }, [sessionId, startChat, setActiveChat, closeModal])
   return { run, starting }
 }
 
@@ -1798,7 +1796,6 @@ function FinalizeStage({ session, onBack, onOpenStudio }: { session: WeaverSessi
   const finalize = useStore((s) => s.finalizeWeaver)
   const startChat = useStore((s) => s.startWeaverChat)
   const setActiveChat = useStore((s) => s.setActiveChat)
-  const setActiveLoomPreset = useStore((s) => s.setActiveLoomPreset)
   const closeModal = useStore((s) => s.closeModal)
   const loadFields = useStore((s) => s.loadWeaverFields)
   const loadFieldDefs = useStore((s) => s.loadWeaverFieldDefs)
@@ -1821,7 +1818,6 @@ function FinalizeStage({ session, onBack, onOpenStudio }: { session: WeaverSessi
   const onStart = async () => {
     try {
       const r = await startChat(session.id)
-      setActiveLoomPreset(r.preset_id)
       setActiveChat(r.chat.id, r.chat.character_id)
       closeModal()
     } catch {

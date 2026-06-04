@@ -492,12 +492,10 @@ export function nudgeField(sessionId: string, fieldId: string, nudge: string, fo
 
 export interface WeaverFinalizeResult {
   character: Character
-  preset_id: string
 }
 
 export interface WeaverStartChatResult {
   chat: Chat
-  preset_id: string
 }
 
 export function finalizeSession(sessionId: string): Promise<WeaverFinalizeResult> {

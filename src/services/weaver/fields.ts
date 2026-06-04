@@ -1,4 +1,5 @@
 import { isSlotId } from "./slots";
+import { buildDescriptionBundleGuidance } from "./description-sections";
 
 export type WeaverFieldId =
   | "name"
@@ -55,8 +56,7 @@ export const FIELD_DEFS: readonly WeaverFieldDef[] = [
       "negative_space",
       "gradient",
     ],
-    renderGuidance:
-      "Write the description as a single TAGGED BUNDLE: a sequence of bracket-tagged sections, load-bearing first, in this exact order — [CORE], [ARC], [FORM], [TENSIONS], [INTENT], [NEGATIVE SPACE], [GRADIENT]. Add [AXIS] after [GRADIENT] ONLY if the Bible carries a relational arc, and [INTIMACY] ONLY if the Bible carries intimacy material; omit them otherwise. Each section is drawn faithfully from the matching Bible material and never softened toward the generic. [CORE]: the one-line essence and silhouette plus the psychometric read (OCEAN if present) and the ranked values, each tied to the concrete behavior that proves it — keep it compact and re-injectable. [ARC]: the formative experiences that forged the values, in brief past-tense beats. [FORM]: prefix it literally with \"(consult for spatial tracking — never narrated)\" and give the body as a consult-only reference led by what it lets the character do or prevents; state details plainly, do NOT narrate or rhapsodize them. [TENSIONS]: the central contradiction plus the IF-THEN behavioral signatures. [INTENT]: super-objective, obstacle, strategy. [NEGATIVE SPACE]: what they won't say, how they deflect, the tells when cornered. [GRADIENT]: WON'T / NEUTRAL (the flat band, load-bearing) / WILL / CRAVES (each craving paired with its aversion) / TRUST GATE. Use the literal bracket tags as headers. No preamble, no closing summary, no meta.",
+    renderGuidance: buildDescriptionBundleGuidance(),
   },
   {
     id: "personality",
