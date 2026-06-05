@@ -44,6 +44,7 @@ export type DreamWeaverVisualProvider =
   | 'google_gemini'
   | 'a1111'
   | 'swarmui'
+  | 'openrouter'
 
 export interface DreamWeaverVisualReference {
   id: string
@@ -376,7 +377,8 @@ function isVisualProvider(value: unknown): value is DreamWeaverVisualProvider {
     value === 'nanogpt' ||
     value === 'google_gemini' ||
     value === 'a1111' ||
-    value === 'swarmui'
+    value === 'swarmui' ||
+    value === 'openrouter'
   )
 }
 
