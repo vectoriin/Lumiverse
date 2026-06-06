@@ -128,14 +128,33 @@ export type {
 // outbound requests, so the tag never leaks to the LLM.
 
 const CHAT_HISTORY_KEY = "__chatHistorySource";
+const SOURCE_ID_KEY = "__sourceMessageId";
+const SOURCE_INDEX_KEY = "__sourceIndexInChat";
 
-function markAsChatHistory(msg: LlmMessage): LlmMessage {
+function markAsChatHistory(
+  msg: LlmMessage,
+  source?: { id: string; index_in_chat: number },
+): LlmMessage {
   (msg as any)[CHAT_HISTORY_KEY] = true;
+  if (source) {
+    (msg as any)[SOURCE_ID_KEY] = source.id;
+    (msg as any)[SOURCE_INDEX_KEY] = source.index_in_chat;
+  }
   return msg;
 }
 
 export function isChatHistoryMessage(msg: LlmMessage): boolean {
   return (msg as any)[CHAT_HISTORY_KEY] === true;
+}
+
+export function getSourceMessageId(msg: LlmMessage): string | undefined {
+  const v = (msg as any)[SOURCE_ID_KEY];
+  return typeof v === "string" ? v : undefined;
+}
+
+export function getSourceIndexInChat(msg: LlmMessage): number | undefined {
+  const v = (msg as any)[SOURCE_INDEX_KEY];
+  return typeof v === "number" ? v : undefined;
 }
 
 export function resolveChatHistoryInsertionIndex(
@@ -2100,13 +2119,19 @@ export async function assemblePrompt(
               });
             }
           }
+          const source = { id: msg.id, index_in_chat: msg.index_in_chat };
           if (parts.length > 0) {
-            result.push(markAsChatHistory({ role, content: parts }));
+            result.push(markAsChatHistory({ role, content: parts }, source));
           } else {
-            result.push(markAsChatHistory({ role, content: resolvedContent }));
+            result.push(markAsChatHistory({ role, content: resolvedContent }, source));
           }
         } else {
-          result.push(markAsChatHistory({ role, content: resolvedContent }));
+          result.push(
+            markAsChatHistory(
+              { role, content: resolvedContent },
+              { id: msg.id, index_in_chat: msg.index_in_chat },
+            ),
+          );
         }
         historyCount++;
       }
@@ -4616,6 +4641,10 @@ function mergeConsecutiveUserMessages(
       // — both are typically chat-history user turns being merged.
       const wasChatHistory =
         isChatHistoryMessage(result[i]) || isChatHistoryMessage(result[i + 1]);
+      const mergedSourceId =
+        getSourceMessageId(result[i]) ?? getSourceMessageId(result[i + 1]);
+      const mergedSourceIndex =
+        getSourceIndexInChat(result[i]) ?? getSourceIndexInChat(result[i + 1]);
       if (allParts.length > 0) {
         result[i] = {
           role: "user",
@@ -4624,7 +4653,14 @@ function mergeConsecutiveUserMessages(
       } else {
         result[i] = { role: "user", content: mergedText };
       }
-      if (wasChatHistory) markAsChatHistory(result[i]);
+      if (wasChatHistory) {
+        markAsChatHistory(
+          result[i],
+          typeof mergedSourceId === "string" && typeof mergedSourceIndex === "number"
+            ? { id: mergedSourceId, index_in_chat: mergedSourceIndex }
+            : undefined,
+        );
+      }
       result.splice(i + 1, 1);
       remaining--;
       // Don't increment — next element slid into i+1, check again
