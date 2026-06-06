@@ -15,6 +15,7 @@ import {
 } from "../spindle/message-content-processor";
 import { resolveRenderedMessageContent } from "../services/chat-macro-render.service";
 import { contentHasMacroHints } from "../services/vectorization-content.service";
+import { computeMessageTokenCount } from "../services/message-token-count";
 
 async function runMessageContentProcessors(
   ctx: MessageContentProcessorCtx,
@@ -650,6 +651,14 @@ app.post("/:chatId/messages", async (c) => {
   body.content = processed.content;
   if (processed.extra !== undefined) body.extra = processed.extra;
 
+  // Tokenize user-sent (and any manually-created) messages so they carry a
+  // tokenCount just like assistant messages do. Inline so the count rides the
+  // creation response/MESSAGE_SENT broadcast, avoiding a follow-up edit event.
+  const tokenCount = await computeMessageTokenCount(userId, body.content, body.connection_id);
+  if (tokenCount != null) {
+    body.extra = { ...(body.extra || {}), tokenCount };
+  }
+
   const msg = svc.createMessage(chatId, body, userId);
   return c.json(msg, 201);
 });
@@ -692,6 +701,15 @@ app.put("/:chatId/messages/:id", async (c) => {
           0,
         );
       }
+    }
+
+    // Content changed → refresh the stored tokenCount so it doesn't reflect the
+    // pre-edit text. Merge onto the extra being saved (the edit may omit extra,
+    // in which case base off the message's current extra to avoid clobbering it).
+    const tokenCount = await computeMessageTokenCount(userId, body.content, body.connection_id);
+    if (tokenCount != null) {
+      const baseExtra = body.extra ?? svc.getMessage(userId, messageId)?.extra ?? {};
+      body.extra = { ...baseExtra, tokenCount };
     }
   }
 
