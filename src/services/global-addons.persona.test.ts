@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { closeDatabase, getDb, initDatabase } from "../db/connection";
 import { resolvePersonaGlobalAddons } from "./global-addons.service";
+import { resolvePersonaForChatMacros } from "./persona-addon-states";
 import { buildEnv } from "../macros/MacroEnv";
 import type { Persona } from "../types/persona";
 import type { Character } from "../types/character";
@@ -107,5 +108,77 @@ describe("{{persona}} macro includes resolved global add-ons", () => {
     expect(env.character.persona).toBe(
       "Base persona description.\nLocal addon content\nGlobal addon content",
     );
+  });
+});
+
+function personaText(persona: Persona | null): string {
+  const env = buildEnv({
+    character: { id: "c1", name: "Bob", description: "" } as Character,
+    persona,
+    chat: { id: "chat1", character_id: "c1", name: "", metadata: {}, created_at: 0, updated_at: 0 } as Chat,
+    messages: [],
+    generationType: "normal",
+  });
+  return env.character.persona;
+}
+
+function chatMetaWithStates(states: Record<string, boolean>): Record<string, any> {
+  // Per-chat add-on bindings are keyed by persona id (see getChatPersonaAddonStates).
+  return { persona_addon_states: { p1: states } };
+}
+
+describe("resolvePersonaForChatMacros applies per-chat add-on bindings over defaults", () => {
+  test("local add-on disabled by default but enabled in the chat binding shows up", () => {
+    const persona = makePersona({
+      addons: [{ id: "l1", label: "", content: "Local addon", enabled: false, sort_order: 0 }],
+    });
+
+    expect(personaText(resolvePersonaForChatMacros(USER, persona, null))).toBe(
+      "Base persona description.",
+    );
+    expect(
+      personaText(resolvePersonaForChatMacros(USER, persona, chatMetaWithStates({ l1: true }))),
+    ).toBe("Base persona description.\nLocal addon");
+  });
+
+  test("local add-on enabled by default but disabled in the chat binding is hidden", () => {
+    const persona = makePersona({
+      addons: [{ id: "l1", label: "", content: "Local addon", enabled: true, sort_order: 0 }],
+    });
+
+    expect(personaText(resolvePersonaForChatMacros(USER, persona, null))).toBe(
+      "Base persona description.\nLocal addon",
+    );
+    expect(
+      personaText(resolvePersonaForChatMacros(USER, persona, chatMetaWithStates({ l1: false }))),
+    ).toBe("Base persona description.");
+  });
+
+  test("global add-on attached-disabled by default but enabled in the chat binding shows up", () => {
+    insertGlobalAddon({ id: "g1", user_id: USER, content: "Global addon" });
+    const persona = makePersona({
+      attached_global_addons: [{ id: "g1", enabled: false }],
+    });
+
+    expect(personaText(resolvePersonaForChatMacros(USER, persona, null))).toBe(
+      "Base persona description.",
+    );
+    expect(
+      personaText(resolvePersonaForChatMacros(USER, persona, chatMetaWithStates({ g1: true }))),
+    ).toBe("Base persona description.\nGlobal addon");
+  });
+
+  test("global add-on attached-enabled by default but disabled in the chat binding is hidden", () => {
+    insertGlobalAddon({ id: "g1", user_id: USER, content: "Global addon" });
+    const persona = makePersona({
+      attached_global_addons: [{ id: "g1", enabled: true }],
+    });
+
+    expect(personaText(resolvePersonaForChatMacros(USER, persona, null))).toBe(
+      "Base persona description.\nGlobal addon",
+    );
+    expect(
+      personaText(resolvePersonaForChatMacros(USER, persona, chatMetaWithStates({ g1: false }))),
+    ).toBe("Base persona description.");
   });
 });

@@ -6,7 +6,7 @@ import type { MacroEnv } from "../macros";
 import * as chatsSvc from "../services/chats.service";
 import * as charactersSvc from "../services/characters.service";
 import * as personasSvc from "../services/personas.service";
-import { resolvePersonaGlobalAddons } from "../services/global-addons.service";
+import { resolvePersonaForChatMacros } from "../services/persona-addon-states";
 import * as connectionsSvc from "../services/connections.service";
 import { populateLumiaLoomContext } from "../services/prompt-assembly.service";
 
@@ -144,7 +144,11 @@ function buildEnvFromIds(userId: string, body: {
       const messages = chatsSvc.getMessages(userId, body.chat_id);
       const character = charactersSvc.getCharacter(userId, chat.character_id);
       if (character) {
-        const persona = resolvePersonaGlobalAddons(userId, personasSvc.resolvePersonaOrDefault(userId, body.persona_id));
+        const persona = resolvePersonaForChatMacros(
+          userId,
+          personasSvc.resolvePersonaOrDefault(userId, body.persona_id),
+          chat.metadata,
+        );
 
         const connection = body.connection_id
           ? connectionsSvc.getConnection(userId, body.connection_id)
@@ -176,7 +180,12 @@ function buildEnvFromIds(userId: string, body: {
   if (body.character_id) {
     const character = charactersSvc.getCharacter(userId, body.character_id);
     if (character) {
-      const persona = resolvePersonaGlobalAddons(userId, personasSvc.resolvePersonaOrDefault(userId, body.persona_id));
+      // No chat context here, so there are no per-chat add-on bindings to apply.
+      const persona = resolvePersonaForChatMacros(
+        userId,
+        personasSvc.resolvePersonaOrDefault(userId, body.persona_id),
+        null,
+      );
 
       const connection = body.connection_id
         ? connectionsSvc.getConnection(userId, body.connection_id)
@@ -204,7 +213,11 @@ function buildEnvFromIds(userId: string, body: {
     }
   }
 
-  const persona = resolvePersonaGlobalAddons(userId, personasSvc.resolvePersonaOrDefault(userId, body.persona_id));
+  const persona = resolvePersonaForChatMacros(
+    userId,
+    personasSvc.resolvePersonaOrDefault(userId, body.persona_id),
+    null,
+  );
   const personaPronouns = resolvePersonaPronouns(persona);
   const connection = connectionsSvc.getDefaultConnection(userId);
 

@@ -10277,7 +10277,7 @@ export class WorkerHost {
       const charactersSvc = await import("../services/characters.service");
       const personasSvc = await import("../services/personas.service");
       const connectionsSvc = await import("../services/connections.service");
-      const globalAddonsSvc = await import("../services/global-addons.service");
+      const personaAddonStatesSvc = await import("../services/persona-addon-states");
 
       let env;
 
@@ -10287,7 +10287,7 @@ export class WorkerHost {
           const charId = characterId || chat.character_id;
           const character = charactersSvc.getCharacter(resolvedUserId, charId);
           if (character) {
-            const persona = globalAddonsSvc.resolvePersonaGlobalAddons(resolvedUserId, personasSvc.resolvePersonaOrDefault(resolvedUserId));
+            const persona = personaAddonStatesSvc.resolvePersonaForChatMacros(resolvedUserId, personasSvc.resolvePersonaOrDefault(resolvedUserId), chat.metadata);
             const messages = chatsSvc.getMessages(resolvedUserId, chatId);
             const connection = connectionsSvc.getDefaultConnection(resolvedUserId);
 
@@ -10307,7 +10307,7 @@ export class WorkerHost {
       if (!env && characterId) {
         const character = charactersSvc.getCharacter(resolvedUserId, characterId);
         if (character) {
-          const persona = globalAddonsSvc.resolvePersonaGlobalAddons(resolvedUserId, personasSvc.resolvePersonaOrDefault(resolvedUserId));
+          const persona = personaAddonStatesSvc.resolvePersonaForChatMacros(resolvedUserId, personasSvc.resolvePersonaOrDefault(resolvedUserId), null);
           const connection = connectionsSvc.getDefaultConnection(resolvedUserId);
 
           env = buildEnv({

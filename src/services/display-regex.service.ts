@@ -8,7 +8,7 @@ import * as charactersSvc from "./characters.service";
 import * as chatsSvc from "./chats.service";
 import * as connectionsSvc from "./connections.service";
 import * as personasSvc from "./personas.service";
-import { resolvePersonaGlobalAddons } from "./global-addons.service";
+import { resolvePersonaForChatMacros } from "./persona-addon-states";
 import { populateLumiaLoomContext } from "./prompt-assembly.service";
 import { applyRegexScripts } from "./regex-scripts.service";
 import { eventBus } from "../ws/bus";
@@ -45,7 +45,11 @@ function buildEnvFromContext(userId: string, ctx: DisplayRegexContext): MacroEnv
       const messages = chatsSvc.getMessages(userId, ctx.chat_id);
       const character = charactersSvc.getCharacter(userId, chat.character_id);
       if (character) {
-        const persona = resolvePersonaGlobalAddons(userId, personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id));
+        const persona = resolvePersonaForChatMacros(
+          userId,
+          personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id),
+          chat.metadata,
+        );
         const connection = connectionsSvc.getDefaultConnection(userId);
         const groupCharacterNames = resolveGroupCharacterNames(chat, (cid) => {
           const c = charactersSvc.getCharacter(userId, cid);
@@ -71,7 +75,12 @@ function buildEnvFromContext(userId: string, ctx: DisplayRegexContext): MacroEnv
   if (ctx.character_id) {
     const character = charactersSvc.getCharacter(userId, ctx.character_id);
     if (character) {
-      const persona = resolvePersonaGlobalAddons(userId, personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id));
+      // No chat context here, so there are no per-chat add-on bindings to apply.
+      const persona = resolvePersonaForChatMacros(
+        userId,
+        personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id),
+        null,
+      );
       const connection = connectionsSvc.getDefaultConnection(userId);
       const chat: Chat = {
         id: "",
@@ -94,7 +103,11 @@ function buildEnvFromContext(userId: string, ctx: DisplayRegexContext): MacroEnv
     }
   }
 
-  const persona = resolvePersonaGlobalAddons(userId, personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id));
+  const persona = resolvePersonaForChatMacros(
+    userId,
+    personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id),
+    null,
+  );
   const personaPronouns = resolvePersonaPronouns(persona);
   const connection = connectionsSvc.getDefaultConnection(userId);
   return {
