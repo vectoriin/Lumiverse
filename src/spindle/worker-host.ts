@@ -3311,11 +3311,18 @@ export class WorkerHost {
         // (depth gating is chat-history-only; injected non-history blocks are
         // ungated and must not shift real-turn numbering). Shallow-copy so the
         // synthetic flag never leaks onto the outbound LLM payload.
-        const messagesWithHistoryFlag = messages.map((m) =>
-          promptAssemblySvc.isChatHistoryMessage(m as unknown as LlmMessage)
-            ? { ...m, __isChatHistory: true }
-            : m,
-        );
+        const messagesWithHistoryFlag = messages.map((m) => {
+          const llm = m as unknown as LlmMessage;
+          if (!promptAssemblySvc.isChatHistoryMessage(llm)) return m;
+          const sourceMessageId = promptAssemblySvc.getSourceMessageId(llm);
+          const sourceIndexInChat = promptAssemblySvc.getSourceIndexInChat(llm);
+          return {
+            ...m,
+            __isChatHistory: true,
+            ...(sourceMessageId !== undefined ? { sourceMessageId } : {}),
+            ...(sourceIndexInChat !== undefined ? { sourceIndexInChat } : {}),
+          };
+        });
 
         this.postToWorker({
           type: "intercept_request",
