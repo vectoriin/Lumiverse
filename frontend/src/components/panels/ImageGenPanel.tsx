@@ -17,6 +17,7 @@ import SearchableSelect from '@/components/shared/SearchableSelect'
 import { getMacroCatalog } from '@/api/macros'
 import { getAvailableMacros } from '@/lib/loom/service'
 import type { MacroGroup } from '@/lib/loom/types'
+import { uuidv7 } from '@/lib/uuid'
 import ImageLightbox from '@/components/shared/ImageLightbox'
 import { WorkflowEditorModal } from '@/components/dream-weaver/visual-studio/comfyui/WorkflowEditorModal'
 import { buildMappedFieldControls, type ComfyMappedFieldControl } from '@/components/dream-weaver/visual-studio/comfyui/mapped-fields'
@@ -736,7 +737,7 @@ export default function ImageGenPanel() {
     const name = presetName.trim() || loadedPreset?.name || targetLabel
     const existingId = loadedPresetId
     const nextPreset: ImageGenPromptPreset = {
-      id: existingId || crypto.randomUUID(),
+      id: existingId || uuidv7(),
       name,
       mode: imageGeneration.promptMode === 'parsed_custom' ? 'parsed_custom' : 'custom',
       prompt: draftPrompt,
@@ -832,7 +833,7 @@ export default function ImageGenPanel() {
     attachToMessageId?: string
     skipParse?: boolean
   }) => {
-    const jobId = crypto.randomUUID()
+    const jobId = uuidv7()
     setCurrentJobId(jobId)
     setSceneGenerating(true)
     try {
