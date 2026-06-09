@@ -114,7 +114,12 @@ export default function ConnectionSelect({
   const [modelLabels, setModelLabels] = useState<Record<string, string>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
 
+  // Sequence guard: `value` can change while a fetch is in flight, and a slow
+  // response for the OLD connection must not overwrite the new one's list (the
+  // clear path bumps the sequence too, so it also invalidates in-flight fetches).
+  const loadSeqRef = useRef(0)
   const loadModels = useCallback(async () => {
+    const seq = ++loadSeqRef.current
     if (!withModel || !value) {
       setModels([])
       setModelLabels({})
@@ -123,13 +128,15 @@ export default function ConnectionSelect({
     setModelsLoading(true)
     try {
       const result = await fetchConnectionModels(kind, value)
+      if (seq !== loadSeqRef.current) return
       setModels(result.models)
       setModelLabels(result.labels)
     } catch {
+      if (seq !== loadSeqRef.current) return
       setModels([])
       setModelLabels({})
     } finally {
-      setModelsLoading(false)
+      if (seq === loadSeqRef.current) setModelsLoading(false)
     }
   }, [withModel, value, kind])
 
@@ -141,12 +148,16 @@ export default function ConnectionSelect({
   // (rather than the dropdown's onChange) does this so it covers BOTH a dropdown
   // pick and a programmatic `value` change (e.g. a panel bound to the active
   // connection that gets switched out from under it):
-  //  - first reconcile (mount): seed an empty model from the connection's default,
-  //    but leave an already-set model alone (e.g. a restored saved value);
-  //  - any later connection change: reset the model to the new connection's
-  //    default (the old model may not exist on it).
-  // With `seedDefaultModel` off, the model is only ever cleared (a stale model is
-  // still wrong on the new connection) — '' means "use connection default".
+  //  - first connection (mount, or a '' → id transition): seed an empty model
+  //    from the connection's default, but never clear or overwrite a set model.
+  //    '' → id is not a *switch* — it's either the saved connection+model
+  //    hydrating in late (settings arrive async after the store's profiles, and
+  //    a cross-tab SETTINGS_UPDATED re-sync takes the same path; the arriving
+  //    model must survive) or the user picking a first connection (the model
+  //    combobox was disabled at '', so there's no stale model to reset);
+  //  - a real id → id/'' change: reset the model to the new connection's
+  //    default (the old model may not exist on it), or to '' with
+  //    `seedDefaultModel` off ('' = "use connection default").
   // `prevConnRef` tracks the last reconciled connection, so editing or clearing
   // the model on its own never triggers a reseed.
   const prevConnRef = useRef<string | null>(null)
@@ -155,15 +166,11 @@ export default function ConnectionSelect({
     const prev = prevConnRef.current
     if (prev === value) return
     prevConnRef.current = value
-    if (!seedDefaultModel) {
-      if (prev !== null) onModelChange?.('')
-      return
-    }
     const profile = profiles.find((p) => p.id === value) || null
-    if (prev === null) {
-      if (value && !modelValue && profile?.model) onModelChange?.(profile.model)
+    if (prev === null || prev === '') {
+      if (seedDefaultModel && value && !modelValue && profile?.model) onModelChange?.(profile.model)
     } else {
-      onModelChange?.(profile?.model || '')
+      onModelChange?.(seedDefaultModel ? profile?.model || '' : '')
     }
   }, [withModel, seedDefaultModel, value, profiles, modelValue, onModelChange])
 

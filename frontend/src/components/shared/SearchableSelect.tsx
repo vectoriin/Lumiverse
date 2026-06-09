@@ -158,7 +158,10 @@ export default function SearchableSelect(props: SearchableSelectProps) {
         const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
         ;(props.onChange as (value: string[]) => void)(next)
       } else {
-        ;(props.onChange as (value: string) => void)(v)
+        // Match native <select>: re-picking the already-selected option is not
+        // a change — just close. Consumers treat onChange as "the value
+        // changed" (e.g. CouncilManager reseeds its sidecar model on it).
+        if (v !== props.value) (props.onChange as (value: string) => void)(v)
         setOpen(false)
         setSearch('')
       }
@@ -259,9 +262,17 @@ export default function SearchableSelect(props: SearchableSelectProps) {
     const spaceAbove = r.top - margin - gap
     const placeAbove = spaceBelow < desired && spaceAbove > spaceBelow
     const renderedMaxHeight = Math.max(120, Math.min(desired, placeAbove ? spaceAbove : spaceBelow))
+    // The 120px floor can exceed spaceAbove on tiny viewports; bottom-anchored,
+    // that would push the popover's top — the search input that takes focus on
+    // open — above the screen, unreachable under position:fixed. Lower the
+    // anchor just enough to keep the worst-case top at the margin: overlapping
+    // the trigger beats being off-screen.
+    const renderedBottom = placeAbove
+      ? Math.min(vh - r.top + gap, Math.max(margin, vh - margin - renderedMaxHeight))
+      : null
     setPos({
       top: placeAbove ? null : (r.bottom + gap) / uiScale,
-      bottom: placeAbove ? (vh - r.top + gap) / uiScale : null,
+      bottom: renderedBottom === null ? null : renderedBottom / uiScale,
       left: renderedLeft / uiScale,
       width: layoutWidth,
       maxHeight: renderedMaxHeight / uiScale,

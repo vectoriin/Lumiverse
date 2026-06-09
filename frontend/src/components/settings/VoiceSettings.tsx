@@ -5,7 +5,6 @@ import { useStore } from '@/store'
 import { sttConnectionsApi } from '@/api/stt-connections'
 import { ttsConnectionsApi } from '@/api/tts-connections'
 import { ttsApi } from '@/api/tts'
-import { listAllConnections } from '@/api/listAllConnections'
 import { Toggle } from '@/components/shared/Toggle'
 import ConnectionSelect from '@/components/shared/ConnectionSelect'
 import VoicePicker from '@/components/shared/VoicePicker'
@@ -19,31 +18,25 @@ export default function VoiceSettings() {
   const voiceSettings = useStore((s) => s.voiceSettings)
   const setVoiceSettings = useStore((s) => s.setVoiceSettings)
   const sttProfiles = useStore((s) => s.sttProfiles)
-  const setSttProfiles = useStore((s) => s.setSttProfiles)
   const setSttProviders = useStore((s) => s.setSttProviders)
   const ttsProfiles = useStore((s) => s.ttsProfiles)
-  const setTtsProfiles = useStore((s) => s.setTtsProfiles)
   const setTtsProviders = useStore((s) => s.setTtsProviders)
   const addToast = useStore((s) => s.addToast)
   const openDrawer = useStore((s) => s.openDrawer)
 
   const [testing, setTesting] = useState(false)
 
-  // Load voice connections on mount
+  // Connection lists come from the store (loaded in full at app init, kept
+  // current by the managers' store writes); only the provider registries need
+  // a refresh here for labels/capabilities.
   useEffect(() => {
-    listAllConnections(sttConnectionsApi).then((res) => {
-      setSttProfiles(res.data || [])
-    }).catch(() => {})
     sttConnectionsApi.providers().then((res) => {
       setSttProviders(res.providers || [])
-    }).catch(() => {})
-    listAllConnections(ttsConnectionsApi).then((res) => {
-      setTtsProfiles(res.data || [])
     }).catch(() => {})
     ttsConnectionsApi.providers().then((res) => {
       setTtsProviders(res.providers || [])
     }).catch(() => {})
-  }, [setSttProfiles, setSttProviders, setTtsProfiles, setTtsProviders])
+  }, [setSttProviders, setTtsProviders])
 
   const activeSttConnection = useMemo(
     () => sttProfiles.find((p) => p.id === voiceSettings.sttConnectionId) || null,
