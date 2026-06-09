@@ -263,6 +263,10 @@ export interface GenerationStatusResponse {
   }
   content?: string
   reasoning?: string
+  /** Char position where the returned content/reasoning slice begins (0 = full
+   *  buffer). Non-zero only when the poll sent matching known lengths. */
+  contentOffset?: number
+  reasoningOffset?: number
   tokenSeq?: number
   generationType?: string
   targetMessageId?: string
@@ -348,8 +352,8 @@ export const generateApi = {
     return get<BreakdownResponse>(`/generate/breakdown/${messageId}`)
   },
 
-  getStatus(chatId: string) {
-    return get<GenerationStatusResponse>(`/generate/status/${chatId}`)
+  getStatus(chatId: string, known?: { generationId: string; contentLen: number; reasoningLen: number }) {
+    return get<GenerationStatusResponse>(`/generate/status/${chatId}`, known)
   },
 
   getActive() {

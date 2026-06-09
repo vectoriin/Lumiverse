@@ -18,7 +18,7 @@ import {
   invalidateDisplayRegexCacheForVars,
 } from '@/hooks/useDisplayRegex'
 import { triggerTTSAutoPlay } from '@/hooks/useTTSAutoPlay'
-import { recoverPooledGeneration } from '@/lib/generation-recovery'
+import { recoverPooledGeneration, requestStreamGapRecovery } from '@/lib/generation-recovery'
 import { checkForBundleUpdate } from '@/lib/swUpdater'
 import type {
   StreamTokenPayload,
@@ -467,23 +467,16 @@ export function useWebSocket() {
       wsClient.on(EventType.STREAM_TOKEN_RECEIVED, (payload: StreamTokenPayload) => {
         const state = store.getState()
         if (payload.generationId === state.activeGenerationId) {
-          if (state.lastPooledSeq != null) {
-            // startSeq..seq is this segment's coalesced tokenSeq range. If its
-            // start is at/below the recovery watermark, the leading tokens are
-            // already present in the backfilled pool content — drop the whole
-            // segment instead of re-appending the overlapping prefix (the
-            // recovery double-render). Any new tail tokens are reconciled by the
-            // authoritative pool (watchdog re-poll + final DB message), so this
-            // defers rather than loses content.
-            const segStart = payload.startSeq ?? payload.seq
-            if (segStart != null && segStart <= state.lastPooledSeq) return
-            // First segment fully past the watermark — clear it and render normally.
-            state.setLastPooledSeq(null as any)
-          }
-          if (payload.type === 'reasoning') {
-            state.appendStreamReasoning(payload.token)
-          } else {
-            state.appendStreamToken(payload.token)
+          // `offset` (char position of the segment in the server's cumulative
+          // buffer) gives exact reconciliation: overlap with recovery-backfilled
+          // content is sliced off inside the append, and a segment starting
+          // beyond our buffer means we missed tokens — pull the authoritative
+          // pool immediately instead of waiting for the 4s watchdog.
+          const result = payload.type === 'reasoning'
+            ? state.appendStreamReasoning(payload.token, payload.offset)
+            : state.appendStreamToken(payload.token, payload.offset)
+          if (result === 'gap' && payload.chatId) {
+            requestStreamGapRecovery(payload.chatId)
           }
         }
         // Phase transitions are now handled explicitly by GENERATION_PHASE_CHANGED
@@ -883,7 +876,7 @@ export function useWebSocket() {
         // Re-sync any pooled generation for the active chat. Covers sockets
         // that were killed during backgrounding (mobile OS suspend, long tab
         // switch) — tokens streamed while we were offline are pulled from the
-        // server pool and the seq watermark de-dupes the live WS replay.
+        // server pool and segment offsets de-dupe the live WS replay exactly.
         const activeChatId = store.getState().activeChatId
         if (activeChatId) {
           recoverPooledGeneration(activeChatId).catch(() => { /* best-effort */ })
@@ -1395,7 +1388,7 @@ export function useWebSocket() {
     // background tabs may miss live STREAM_TOKEN_RECEIVED events while hidden
     // even when the WS stays open; the server pool is authoritative, so a
     // status poll on every visible transition restores all accumulated content
-    // (and the tokenSeq watermark drops tokens the client already rendered).
+    // (segment offsets slice off anything the client already rendered).
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return
       const activeChatId = store.getState().activeChatId

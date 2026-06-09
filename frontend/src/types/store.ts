@@ -31,7 +31,6 @@ export interface ChatSlice {
   streamingGenerationType: string | null
   /** The generation type of the last completed generation — survives endStreaming() */
   lastCompletedGenerationType: string | null
-  lastPooledSeq: number | null
   /** messageId → index of a freshly-generated swipe the user hasn't navigated to
    *  yet (they stayed on an older swipe while it generated). Drives the
    *  "new swipe ready" badge; cleared once they land on that swipe. */
@@ -51,12 +50,20 @@ export interface ChatSlice {
   removeMessage: (id: string) => void
   beginStreaming: (regeneratingMessageId?: string, generationType?: string) => void
   startStreaming: (generationId: string, regeneratingMessageId?: string, generationType?: string) => void
-  appendStreamToken: (token: string) => void
-  appendStreamReasoning: (token: string) => void
-  replaceStreamContent: (content: string) => void
-  replaceStreamReasoning: (reasoning: string) => void
+  /** Append a live stream segment. When `offset` (char position of the segment
+   *  start in the server's cumulative buffer) is provided, overlap with already-
+   *  rendered content is sliced off exactly; returns 'gap' when the segment
+   *  starts beyond the local buffer (missed tokens — caller should re-poll the
+   *  pool), 'stale' when fully covered, 'appended' otherwise. */
+  appendStreamToken: (token: string, offset?: number) => 'appended' | 'stale' | 'gap'
+  appendStreamReasoning: (token: string, offset?: number) => 'appended' | 'stale' | 'gap'
+  /** Apply a pool snapshot (offset 0) or delta (offset = where `content` begins).
+   *  Monotonic: never rewinds the local buffer (snapshots race live WS tokens). */
+  reconcileStreamContent: (content: string, offset: number) => void
+  reconcileStreamReasoning: (reasoning: string, offset: number) => void
+  /** Current raw (unflushed) streaming buffers — used to request pool deltas. */
+  getStreamBuffers: () => { content: string; reasoning: string }
   setStreamingReasoningStartedAt: (ts: number | null) => void
-  setLastPooledSeq: (seq: number) => void
   /** Set the swipe index the active generation streams into (null when unknown). */
   setStreamingSwipeId: (swipeId: number | null) => void
   /** Flag a freshly-generated swipe as unseen (drives the "new swipe ready" badge). */

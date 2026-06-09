@@ -2784,11 +2784,15 @@ async function runGeneration(
     token: string;
     type?: "reasoning";
     // seq is the tokenSeq of the LAST token merged into this segment; startSeq
-    // is the FIRST. Carrying both lets a client that recovered via GET /status
-    // mid-batch drop a segment whose entire range it has already rendered,
-    // instead of re-appending the prefix (the recovery double-render bug).
+    // is the FIRST. Retained for Spindle extensions and stale (pre-refresh)
+    // clients; the frontend now reconciles via `offset` instead.
     seq: number;
     startSeq: number;
+    // Char position of this segment's first token within the cumulative pool
+    // buffer for its stream type (content or reasoning). Lets clients dedupe
+    // exactly against recovery snapshots (slice off the overlap) and detect
+    // gaps (offset ahead of local buffer → re-poll immediately).
+    offset: number;
   };
 
   const streamTopic = `stream:${userId}:${chatId}`;
@@ -2797,6 +2801,7 @@ async function runGeneration(
   let pendingStreamSegments: PendingStreamSegment[] = [];
   let pendingStreamChars = 0;
   let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastStreamFlushAt = 0;
 
   function flushPendingStreamSegments(): void {
     if (streamFlushTimer) {
@@ -2808,6 +2813,7 @@ async function runGeneration(
     const segments = pendingStreamSegments;
     pendingStreamSegments = [];
     pendingStreamChars = 0;
+    lastStreamFlushAt = Date.now();
 
     for (const segment of segments) {
       eventBus.emit(
@@ -2819,6 +2825,7 @@ async function runGeneration(
           ...(segment.type ? { type: segment.type } : {}),
           seq: segment.seq,
           startSeq: segment.startSeq,
+          offset: segment.offset,
         },
         userId,
         { topic: streamTopic },
@@ -2828,18 +2835,25 @@ async function runGeneration(
 
   function schedulePendingStreamFlush(): void {
     if (streamFlushTimer) return;
+    // Leading-edge after idle: if the last flush is older than the emit
+    // interval, fire immediately (delay 0) instead of holding the buffer the
+    // full interval. Takes ~40ms off TTFT and off every quiet-period
+    // resumption (reasoning→content transitions) without raising the steady
+    // emit rate.
+    const elapsed = Date.now() - lastStreamFlushAt;
+    const delay = Math.max(0, STREAM_EMIT_INTERVAL_MS - elapsed);
     streamFlushTimer = setTimeout(() => {
       flushPendingStreamSegments();
-    }, STREAM_EMIT_INTERVAL_MS);
+    }, delay);
   }
 
-  function queueStreamSegment(token: string, seq: number, type?: "reasoning"): void {
+  function queueStreamSegment(token: string, seq: number, offset: number, type?: "reasoning"): void {
     const previous = pendingStreamSegments[pendingStreamSegments.length - 1];
     if (previous && previous.type === type) {
       previous.token += token;
       previous.seq = seq;
     } else {
-      pendingStreamSegments.push({ token, seq, startSeq: seq, ...(type ? { type } : {}) });
+      pendingStreamSegments.push({ token, seq, startSeq: seq, offset, ...(type ? { type } : {}) });
     }
 
     pendingStreamChars += token.length;
@@ -2896,16 +2910,16 @@ async function runGeneration(
       reasoningDurationMs = Date.now() - reasoningStartedAt;
     }
     fullContent += text;
-    const seq = pool.appendPoolContent(generationId, text);
-    queueStreamSegment(text, seq);
+    const appended = pool.appendPoolContent(generationId, text);
+    queueStreamSegment(text, appended.seq, appended.offset);
   }
 
   function emitReasoningToken(text: string) {
     if (!text) return;
     if (!reasoningStartedAt) reasoningStartedAt = Date.now();
     fullReasoning += text;
-    const seq = pool.appendPoolReasoning(generationId, text);
-    queueStreamSegment(text, seq, "reasoning");
+    const appended = pool.appendPoolReasoning(generationId, text);
+    queueStreamSegment(text, appended.seq, appended.offset, "reasoning");
   }
 
   function processContentToken(token: string) {
@@ -3221,8 +3235,8 @@ async function runGeneration(
         if (chunk.reasoning) {
           if (!reasoningStartedAt) reasoningStartedAt = Date.now();
           fullReasoning += chunk.reasoning;
-          const seq = pool.appendPoolReasoning(generationId, chunk.reasoning);
-          queueStreamSegment(chunk.reasoning, seq, "reasoning");
+          const appended = pool.appendPoolReasoning(generationId, chunk.reasoning);
+          queueStreamSegment(chunk.reasoning, appended.seq, appended.offset, "reasoning");
         }
 
         if (chunk.token) {

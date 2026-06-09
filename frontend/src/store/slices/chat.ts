@@ -111,7 +111,6 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
     streamingSwipeId: null,
     streamingGenerationType: null,
     lastCompletedGenerationType: null,
-    lastPooledSeq: null,
     unseenSwipes: {},
     totalChatLength: 0,
     impersonateDraftContent: null,
@@ -134,7 +133,6 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
         regeneratingMessageId: null,
         streamingSwipeId: null,
         streamingGenerationType: null,
-    lastPooledSeq: null,
         unseenSwipes: {},
         messageSelectMode: false,
         selectedMessageIds: [],
@@ -245,9 +243,6 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
         regeneratingMessageId: nextRegeneratingMessageId,
         streamingSwipeId: null,
         streamingGenerationType: generationType ?? null,
-        // Clear any stale recovery watermark from a prior generation so this
-        // fresh stream's opening tokens (seq 1..N) are not dropped as dupes.
-        lastPooledSeq: null,
       })
     },
 
@@ -311,9 +306,6 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
         regeneratingMessageId: nextRegeneratingMessageId,
         streamingSwipeId: null,
         streamingGenerationType: resolvedGenerationType ?? null,
-        // Clear any stale recovery watermark from a prior generation. Recovery
-        // re-sets it via setLastPooledSeq() immediately after this call.
-        lastPooledSeq: null,
       })
     },
 
@@ -337,19 +329,28 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
       })
     },
 
-    replaceStreamContent: (content) => {
-      rawStreamContent = content
-      set({ streamingContent: content })
+    reconcileStreamContent: (content, offset) => {
+      // Apply a pool snapshot (offset 0 = full) or a delta (offset = char
+      // position where `content` begins). The pool buffer is append-only
+      // within a generation, so a candidate that doesn't extend what's already
+      // rendered is a stale snapshot (tokens arrived over WS during the poll's
+      // round-trip) — applying it would rewind or hole the visible text.
+      if (offset > rawStreamContent.length) return
+      const candidate = rawStreamContent.slice(0, offset) + content
+      if (candidate.length < rawStreamContent.length) return
+      rawStreamContent = candidate
+      set({ streamingContent: candidate })
     },
 
-    replaceStreamReasoning: (reasoning) => {
-      rawStreamReasoning = reasoning
-      set({ streamingReasoning: reasoning })
+    reconcileStreamReasoning: (reasoning, offset) => {
+      if (offset > rawStreamReasoning.length) return
+      const candidate = rawStreamReasoning.slice(0, offset) + reasoning
+      if (candidate.length < rawStreamReasoning.length) return
+      rawStreamReasoning = candidate
+      set({ streamingReasoning: candidate })
     },
 
-    setLastPooledSeq: (seq) => {
-      set({ lastPooledSeq: seq })
-    },
+    getStreamBuffers: () => ({ content: rawStreamContent, reasoning: rawStreamReasoning }),
 
     setStreamingReasoningStartedAt: (ts) => {
       // Also restore the closure variable so appendStreamToken can finalize
@@ -358,7 +359,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
       set({ streamingReasoningStartedAt: ts })
     },
 
-    appendStreamToken: (token) => {
+    appendStreamToken: (token, offset) => {
       // CoT detection (reasoning prefix/suffix separation) is now handled
       // server-side in generate.service.ts. The backend emits pre-separated
       // tokens: regular content tokens here, reasoning tokens via
@@ -366,14 +367,39 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
       if (reasoningStartedAt && !get().streamingReasoningDuration) {
         set({ streamingReasoningDuration: Date.now() - reasoningStartedAt })
       }
+      if (offset != null) {
+        const localLen = rawStreamContent.length
+        // Segment starts beyond our buffer — we missed tokens (subscription
+        // race after reconnect, events dropped while hidden). Don't append out
+        // of place; the caller re-polls the authoritative pool.
+        if (offset > localLen) return 'gap'
+        if (offset < localLen) {
+          // Overlaps content we already hold (recovery snapshot raced the live
+          // stream). Slice off exactly the overlap; drop if fully covered.
+          const overlap = localLen - offset
+          if (token.length <= overlap) return 'stale'
+          token = token.slice(overlap)
+        }
+      }
       rawStreamContent += token
       scheduleStreamFlush()
+      return 'appended'
     },
 
-    appendStreamReasoning: (token) => {
+    appendStreamReasoning: (token, offset) => {
       if (!reasoningStartedAt) reasoningStartedAt = Date.now()
+      if (offset != null) {
+        const localLen = rawStreamReasoning.length
+        if (offset > localLen) return 'gap'
+        if (offset < localLen) {
+          const overlap = localLen - offset
+          if (token.length <= overlap) return 'stale'
+          token = token.slice(overlap)
+        }
+      }
       rawStreamReasoning += token
       scheduleStreamFlush()
+      return 'appended'
     },
 
     endStreaming: () => {
@@ -390,7 +416,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
       reasoningStartedAt = 0
       // Preserve the generation type before clearing — auto-summarization
       // needs to know what kind of generation just finished.
-      set({ isStreaming: false, streamingContent: '', streamingReasoning: '', streamingReasoningDuration: null, streamingReasoningStartedAt: null, streamingError: null, activeGenerationId: null, regeneratingMessageId: null, streamingSwipeId: null, lastCompletedGenerationType: get().streamingGenerationType, streamingGenerationType: null, lastPooledSeq: null })
+      set({ isStreaming: false, streamingContent: '', streamingReasoning: '', streamingReasoningDuration: null, streamingReasoningStartedAt: null, streamingError: null, activeGenerationId: null, regeneratingMessageId: null, streamingSwipeId: null, lastCompletedGenerationType: get().streamingGenerationType, streamingGenerationType: null })
     },
 
     stopStreaming: () => {
@@ -419,7 +445,6 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
           regeneratingMessageId: null,
           streamingSwipeId: null,
           streamingGenerationType: null,
-          lastPooledSeq: null,
         }
       })
     },
@@ -450,7 +475,6 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
           regeneratingMessageId: null,
           streamingSwipeId: null,
           streamingGenerationType: null,
-          lastPooledSeq: null,
         }
       })
     },
