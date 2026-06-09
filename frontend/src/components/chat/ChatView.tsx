@@ -394,6 +394,70 @@ export default function ChatView() {
         useStore.getState().setActiveChatDisplayOwner(chat.character_display_owner ?? null)
         setMessages(msgPage.data, msgPage.total)
 
+        // Chat-derived store state, applied synchronously with setMessages so
+        // it lands in the same render batch. Each of these used to trickle in
+        // after the network-dependent steps below, re-rendering every mounted
+        // message card once per write.
+
+        // Snapshot chat metadata into the store so features like TTS voice
+        // resolution can read it without an extra fetch.
+        useStore.getState().setActiveChatMetadata(chat.metadata ?? null)
+
+        // Load per-chat wallpaper from metadata
+        const wp = chat.metadata?.wallpaper as import('@/types/store').WallpaperRef | undefined
+        if (wp?.image_id) {
+          useStore.getState().setActiveChatWallpaper(wp)
+        }
+
+        // Restore active avatar override from metadata
+        const avatarOverride = chat.metadata?.active_avatar_id as string | undefined
+        useStore.getState().setActiveChatAvatarId(avatarOverride || null)
+
+        // Detect group chat and initialize group state
+        const isGroup = chat.metadata?.group === true
+        const groupCharIds: string[] = isGroup ? (chat.metadata.character_ids || []) : []
+        const mutedIds: string[] = isGroup ? (chat.metadata.muted_character_ids || []) : []
+
+        if (isGroup && groupCharIds.length > 0) {
+          useStore.getState().setGroupChat(true, groupCharIds, mutedIds)
+
+          // Restore per-character group expressions
+          const savedGroupExprs = chat.metadata?.group_expressions as Record<string, { label: string; imageId: string }> | undefined
+          if (savedGroupExprs && Object.keys(savedGroupExprs).length > 0) {
+            useStore.getState().setGroupExpressions(savedGroupExprs)
+          } else {
+            useStore.getState().clearGroupExpressions()
+          }
+
+          // Refresh group members on every chat open so avatars/profile data
+          // don't get stuck on an older in-memory character snapshot.
+          Promise.all(groupCharIds.map((id) => charactersApi.get(id).catch(() => null)))
+            .then((chars) => {
+              if (cancelled) return
+              const valid = chars.filter(Boolean) as import('@/types/api').Character[]
+              if (valid.length === 0) return
+
+              const store = useStore.getState()
+              for (const char of valid) {
+                store.updateCharacter(char.id, char)
+              }
+            })
+        } else {
+          useStore.getState().clearGroupChat()
+          useStore.getState().clearGroupExpressions()
+        }
+
+        // Restore active expression from chat metadata (async, fire-and-forget)
+        const savedExpr = chat.metadata?.active_expression as string | undefined
+        if (savedExpr && chat.character_id) {
+          expressionsApi.get(chat.character_id).then((config) => {
+            if (cancelled) return
+            if (config?.enabled && config.mappings?.[savedExpr]) {
+              useStore.getState().setActiveExpression(savedExpr, config.mappings[savedExpr], chat.character_id!)
+            }
+          }).catch(() => {})
+        }
+
         // If there's a pending council tools failure for this chat, show the retry modal now
         const pendingFailure = useStore.getState().councilToolsFailure
         if (pendingFailure && pendingFailure.chatId === chatId) {
@@ -469,9 +533,11 @@ export default function ChatView() {
               const existing = (chat.metadata?.persona_addon_states ?? {}) as Record<string, Record<string, boolean>>
               if (!existing[resolvedBinding.personaId]) {
                 const nextStates = { ...existing, [resolvedBinding.personaId]: { ...resolvedBinding.addonStates } }
-                // Fold into chat.metadata so the canonical setActiveChatMetadata
-                // below publishes it too; persist for future opens.
+                // Fold into chat.metadata and re-publish the snapshot (the
+                // canonical publish already happened alongside setMessages);
+                // persist for future opens.
                 chat.metadata = { ...(chat.metadata ?? {}), persona_addon_states: nextStates }
+                useStore.getState().setActiveChatMetadata(chat.metadata)
                 chatsApi.patchMetadata(chatId, { persona_addon_states: nextStates }).catch(() => {})
               }
             }
@@ -529,85 +595,18 @@ export default function ChatView() {
           // no council profile binding or resolution issue - keep current settings
         }
 
-        // Snapshot chat metadata into the store so features like TTS voice
-        // resolution can read it without an extra fetch.
-        useStore.getState().setActiveChatMetadata(chat.metadata ?? null)
-
-        // Load per-chat wallpaper from metadata
-        const wp = chat.metadata?.wallpaper as import('@/types/store').WallpaperRef | undefined
-        if (wp?.image_id) {
-          useStore.getState().setActiveChatWallpaper(wp)
-        }
-
-        // Restore active avatar override from metadata
-        const avatarOverride = chat.metadata?.active_avatar_id as string | undefined
-        useStore.getState().setActiveChatAvatarId(avatarOverride || null)
-
-        // Detect group chat and initialize group state
-        const isGroup = chat.metadata?.group === true
-        const groupCharIds: string[] = isGroup ? (chat.metadata.character_ids || []) : []
-        const mutedIds: string[] = isGroup ? (chat.metadata.muted_character_ids || []) : []
-
-        // Restore active expression from chat metadata
-        if (isGroup && groupCharIds.length > 0) {
-          // Restore per-character group expressions
-          const savedGroupExprs = chat.metadata?.group_expressions as Record<string, { label: string; imageId: string }> | undefined
-          if (savedGroupExprs && Object.keys(savedGroupExprs).length > 0) {
-            useStore.getState().setGroupExpressions(savedGroupExprs)
+        // Refresh the active character on every chat open so profile/chat
+        // surfaces don't rely on a stale cached avatar/image_id. The store
+        // skips no-op updates, so the cached-snapshot case doesn't re-render
+        // the message list. (Group member refresh happens above, alongside
+        // the group state setup.)
+        if (!isGroup && chat.character_id) {
+          if (openedCharacter) {
+            if (!cancelled) useStore.getState().updateCharacter(openedCharacter.id, openedCharacter)
           } else {
-            useStore.getState().clearGroupExpressions()
-          }
-          // Also restore the last single active_expression for the primary character
-          const savedExpr = chat.metadata?.active_expression as string | undefined
-          if (savedExpr && chat.character_id) {
-            expressionsApi.get(chat.character_id).then((config) => {
-              if (cancelled) return
-              if (config?.enabled && config.mappings?.[savedExpr]) {
-                useStore.getState().setActiveExpression(savedExpr, config.mappings[savedExpr], chat.character_id!)
-              }
+            charactersApi.get(chat.character_id).then((char) => {
+              if (!cancelled) useStore.getState().updateCharacter(char.id, char)
             }).catch(() => {})
-          }
-        } else {
-          useStore.getState().clearGroupExpressions()
-          const savedExpr = chat.metadata?.active_expression as string | undefined
-          if (savedExpr && chat.character_id) {
-            expressionsApi.get(chat.character_id).then((config) => {
-              if (cancelled) return
-              if (config?.enabled && config.mappings?.[savedExpr]) {
-                useStore.getState().setActiveExpression(savedExpr, config.mappings[savedExpr], chat.character_id!)
-              }
-            }).catch(() => {})
-          }
-        }
-
-        if (isGroup && groupCharIds.length > 0) {
-          useStore.getState().setGroupChat(true, groupCharIds, mutedIds)
-          // Refresh group members on every chat open so avatars/profile data
-          // don't get stuck on an older in-memory character snapshot.
-          Promise.all(groupCharIds.map((id) => charactersApi.get(id).catch(() => null)))
-            .then((chars) => {
-              if (cancelled) return
-              const valid = chars.filter(Boolean) as import('@/types/api').Character[]
-              if (valid.length === 0) return
-
-              const store = useStore.getState()
-              for (const char of valid) {
-                store.updateCharacter(char.id, char)
-              }
-            })
-        } else {
-          useStore.getState().clearGroupChat()
-          useStore.getState().clearGroupExpressions()
-          // Refresh the active character on every chat open so profile/chat
-          // surfaces don't rely on a stale cached avatar/image_id.
-          if (chat.character_id) {
-            if (openedCharacter) {
-              if (!cancelled) useStore.getState().updateCharacter(openedCharacter.id, openedCharacter)
-            } else {
-              charactersApi.get(chat.character_id).then((char) => {
-                if (!cancelled) useStore.getState().updateCharacter(char.id, char)
-              }).catch(() => {})
-            }
           }
         }
       } catch (err) {

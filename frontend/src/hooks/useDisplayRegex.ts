@@ -8,6 +8,7 @@ import { toast } from '@/lib/toast'
 import i18n from '@/i18n'
 import type { DisplayMacroContext } from '@/lib/resolveDisplayMacros'
 import type { RegexScript } from '@/types/regex'
+import type { Message } from '@/types/api'
 
 interface ResolvedDisplayRegexTemplates {
   resolvedFindPatterns: Map<string, string>
@@ -325,6 +326,21 @@ export function useDisplayPreprocessed(
 
 const RAW_MACRO_RE = /\{\{(?!\s*(?:user|char|bot|notChar|not_char|charName)\s*\}\})/i
 
+// id→index lookup shared across every mounted message card, built once per
+// messages-array identity. The previous per-card findIndex selector was
+// O(messages) per card per store update — O(n²) on chat open.
+const messageIndexMaps = new WeakMap<readonly Message[], Map<string, number>>()
+
+function getMessageIndex(messages: readonly Message[], messageId: string): number {
+  let map = messageIndexMaps.get(messages)
+  if (!map) {
+    map = new Map()
+    for (let i = 0; i < messages.length; i++) map.set(messages[i]!.id, i)
+    messageIndexMaps.set(messages, map)
+  }
+  return map.get(messageId) ?? -1
+}
+
 /** Quick check for macro syntax in a string. */
 function hasMacroSyntax(s: string): boolean {
   return s.includes('{{') || s.includes('<USER>') || s.includes('<BOT>') || s.includes('<CHAR>')
@@ -450,7 +466,7 @@ export function useDisplayRegex(
   const activePersonaId = useStore((s) => s.activePersonaId)
   const messageIndex = useStore((s) => {
     if (!preprocessOpts?.messageId) return -1
-    return s.messages.findIndex((m) => m.id === preprocessOpts.messageId)
+    return getMessageIndex(s.messages, preprocessOpts.messageId)
   })
   const messageIdForSnapshot = preprocessOpts?.messageId ?? null
   const getSnapshotForThisMessage = useCallback(

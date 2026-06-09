@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode, type TouchEvent, type WheelEvent } from 'react'
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, useSyncExternalStore, startTransition, type ReactNode, type TouchEvent, type WheelEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
 import { useChunkedMessages } from '@/hooks/useChunkedMessages'
@@ -28,6 +28,11 @@ const MIN_MEASURED_ROW_HEIGHT = 32
 const MAX_ESTIMATED_ROW_HEIGHT = 900
 const MOBILE_MOMENTUM_SETTLE_MS = 260
 const MOBILE_RANGE_WARM_MS = 1200
+// How long after the first rows render before the mounted range widens from
+// the cold-start window to the full warm range. Long enough for the initial
+// frame to paint on slow devices, short enough that early scrolling still
+// finds rows mounted.
+const INITIAL_RANGE_WARM_DELAY_MS = 300
 
 type VirtualListItem =
   | { type: 'loadingOlder'; key: string }
@@ -164,6 +169,12 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
   )
   const [mobileRangeWarm, setMobileRangeWarm] = useState(true)
+  // Initial mount staging: the first paint of a freshly opened chat mounts
+  // only the viewport plus a tight overscan. The wide warm range (which can
+  // mount the entire loaded page on touch devices) flips on shortly after, so
+  // the per-message render pipeline doesn't block the first visible frame.
+  const [initialRangeWarm, setInitialRangeWarm] = useState(false)
+  const initialWarmTimerRef = useRef<number | null>(null)
   const [prependVisualOffset, setPrependVisualOffsetState] = useState(0)
   const interceptorRegistryVersion = useSyncExternalStore(
     subscribeTagInterceptorRegistry,
@@ -301,8 +312,35 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   }, [displayMode, isCoarsePointer, lumiaOOCStyle])
 
   useEffect(() => {
-    warmMobileRange()
-  }, [chatId, warmMobileRange])
+    setInitialRangeWarm(false)
+    if (initialWarmTimerRef.current != null) {
+      window.clearTimeout(initialWarmTimerRef.current)
+      initialWarmTimerRef.current = null
+    }
+  }, [chatId])
+
+  // Widen to the warm range once the first rows have painted. The flip mounts
+  // the remaining offscreen rows in one go, so run it as a transition to keep
+  // scrolling responsive while React renders them. The chat_id check matters
+  // on chat switch: the previous chat's rows linger in the store until the new
+  // tail arrives, and they must not start the warm timer early.
+  const hasRows = visibleMessages.length > 0 && visibleMessages[0]?.chat_id === chatId
+  useEffect(() => {
+    if (!hasRows || initialRangeWarm) return
+    initialWarmTimerRef.current = window.setTimeout(() => {
+      initialWarmTimerRef.current = null
+      startTransition(() => {
+        setInitialRangeWarm(true)
+        warmMobileRange()
+      })
+    }, INITIAL_RANGE_WARM_DELAY_MS)
+    return () => {
+      if (initialWarmTimerRef.current != null) {
+        window.clearTimeout(initialWarmTimerRef.current)
+        initialWarmTimerRef.current = null
+      }
+    }
+  }, [hasRows, initialRangeWarm, warmMobileRange])
 
   useEffect(() => {
     if (interceptorRegistryVersion === 0) return
@@ -316,6 +354,9 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       }
       if (rangeWarmTimerRef.current != null) {
         window.clearTimeout(rangeWarmTimerRef.current)
+      }
+      if (initialWarmTimerRef.current != null) {
+        window.clearTimeout(initialWarmTimerRef.current)
       }
     }
   }, [])
@@ -394,10 +435,13 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
 
   const rangeExtractor = useCallback((range: Range) => {
     const indexes = new Set(defaultRangeExtractor(range))
-    const nearTail = range.endIndex >= range.count - (isCoarsePointer ? 10 : 8)
-    const isWarm = mobileRangeWarm || nearTail
-    const extraBefore = isCoarsePointer ? (isWarm ? 32 : 18) : (isWarm ? 18 : 8)
-    const extraAfter = isCoarsePointer ? (isWarm ? 10 : 6) : (isWarm ? 5 : 3)
+    // Cold start: only a tight band around the viewport so the expensive
+    // per-message pipeline can't block the first paint of a freshly opened
+    // chat. The warm flip shortly after mounts the rest.
+    const nearTail = initialRangeWarm && range.endIndex >= range.count - (isCoarsePointer ? 10 : 8)
+    const isWarm = initialRangeWarm && (mobileRangeWarm || nearTail)
+    const extraBefore = !initialRangeWarm ? 4 : isCoarsePointer ? (isWarm ? 32 : 18) : (isWarm ? 18 : 8)
+    const extraAfter = !initialRangeWarm ? 2 : isCoarsePointer ? (isWarm ? 10 : 6) : (isWarm ? 5 : 3)
     const start = Math.max(0, range.startIndex - extraBefore)
     const end = Math.min(range.count - 1, range.endIndex + extraAfter)
 
@@ -406,7 +450,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     }
 
     return Array.from(indexes).sort((a, b) => a - b)
-  }, [isCoarsePointer, mobileRangeWarm])
+  }, [isCoarsePointer, mobileRangeWarm, initialRangeWarm])
 
   const getItemKey = useCallback(
     (index: number) => {
@@ -436,7 +480,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
           return 1
       }
     },
-    overscan: isCoarsePointer ? 12 : 8,
+    overscan: initialRangeWarm ? (isCoarsePointer ? 12 : 8) : 3,
     getItemKey,
     rangeExtractor,
     useAnimationFrameWithResizeObserver: true,

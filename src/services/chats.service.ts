@@ -482,6 +482,65 @@ function rowToMessage(row: any): Message {
   };
 }
 
+const SWIPE_SCOPED_EXTRA_ARRAY_KEYS = [
+  "reasoningBySwipe",
+  "reasoningDurationBySwipe",
+  "tokenCountBySwipe",
+  "generationMetricsBySwipe",
+  "usageBySwipe",
+] as const;
+
+/**
+ * Light projection for chat-open / history-paging list responses. Non-active
+ * swipe texts and per-swipe extra arrays dominate the payload (measured ~75%
+ * of a 50-message tail) but the UI only renders the active swipe — its values
+ * are already projected to top-level extra keys by projectActiveSwipeExtra.
+ *
+ * Keeps `swipes.length` intact (the n/m indicator and at-first/at-last checks
+ * depend on it) by nulling the non-active slots. Any action that needs full
+ * swipe data (cycle/add/delete swipe, single-message GET, WS events) goes
+ * through rowToMessage and re-hydrates the client copy.
+ */
+/**
+ * Light list payloads omit the *BySwipe arrays (see rowToMessageLight), so a
+ * client echoing `message.extra` back on edit / hide-toggle would otherwise
+ * wipe the stored per-swipe history. An omitted array key means "untouched",
+ * not "delete" — seed it from the stored extra before normalization. Callers
+ * that really want to clear an array must send it explicitly (e.g.
+ * `reasoningBySwipe: []`); per-slot clearing still works via the top-level
+ * projected keys (`reasoning: null`).
+ */
+function preserveSwipeScopedExtraArrays(
+  incoming: Record<string, unknown>,
+  stored: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!stored) return incoming;
+  const merged = { ...incoming };
+  for (const key of SWIPE_SCOPED_EXTRA_ARRAY_KEYS) {
+    if (merged[key] === undefined && stored[key] !== undefined) {
+      merged[key] = stored[key];
+    }
+  }
+  return merged;
+}
+
+function rowToMessageLight(row: any): Message {
+  const msg = rowToMessage(row);
+  if (msg.swipes.length > 1) {
+    // The active slot must stay populated: `content` usually mirrors it, but
+    // extension rewrites can drift the two apart, and display prefers
+    // `swipes[swipe_id]` over `content`. Non-active slots are only read by
+    // swipe actions, which re-hydrate from full-message responses.
+    const activeIdx =
+      msg.swipe_id >= 0 && msg.swipe_id < msg.swipes.length ? msg.swipe_id : 0;
+    const lightSwipes: (string | null)[] = new Array(msg.swipes.length).fill(null);
+    lightSwipes[activeIdx] = msg.swipes[activeIdx] ?? null;
+    msg.swipes = lightSwipes as string[];
+  }
+  for (const key of SWIPE_SCOPED_EXTRA_ARRAY_KEYS) delete msg.extra[key];
+  return msg;
+}
+
 function rowToRecentChat(row: any): RecentChat {
   return {
     ...row,
@@ -1357,17 +1416,17 @@ export function getMessages(userId: string, chatId: string): Message[] {
   return rows.map(rowToMessage);
 }
 
-export function listMessages(userId: string, chatId: string, pagination: PaginationParams): PaginatedResult<Message> {
+export function listMessages(userId: string, chatId: string, pagination: PaginationParams, opts?: { light?: boolean }): PaginatedResult<Message> {
   return paginatedQuery(
     "SELECT m.* FROM messages m JOIN chats c ON m.chat_id = c.id WHERE m.chat_id = ? AND c.user_id = ? ORDER BY m.index_in_chat ASC",
     "SELECT COUNT(*) as count FROM messages m JOIN chats c ON m.chat_id = c.id WHERE m.chat_id = ? AND c.user_id = ?",
     [chatId, userId],
     pagination,
-    rowToMessage
+    opts?.light ? rowToMessageLight : rowToMessage
   );
 }
 
-export function listMessagesTail(userId: string, chatId: string, limit: number): PaginatedResult<Message> {
+export function listMessagesTail(userId: string, chatId: string, limit: number, opts?: { light?: boolean }): PaginatedResult<Message> {
   const stmts = getMsgStmts();
   const countRow = stmts.count.get(chatId, userId) as { count: number } | null;
   const total = countRow?.count ?? 0;
@@ -1378,7 +1437,7 @@ export function listMessagesTail(userId: string, chatId: string, limit: number):
 
   const offset = Math.max(0, total - rows.length);
   return {
-    data: rows.map(rowToMessage),
+    data: rows.map(opts?.light ? rowToMessageLight : rowToMessage),
     total,
     limit,
     offset,
@@ -1684,7 +1743,9 @@ export function updateMessage(userId: string, id: string, input: UpdateMessageIn
   const normalizedExtra =
     input.extra !== undefined || swipeShapeTouched
       ? normalizeStoredMessageExtra(
-          input.extra ?? existing.extra,
+          input.extra !== undefined
+            ? preserveSwipeScopedExtraArrays(input.extra, existing.extra)
+            : existing.extra,
           newSwipes.length,
           input.extra !== undefined ? newSwipeId : existing.swipe_id,
         )

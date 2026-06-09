@@ -586,14 +586,19 @@ app.get("/:chatId/messages", (c) => {
   const chat = svc.getChat(userId, chatId);
   if (!chat) return c.json({ error: "Chat not found" }, 404);
 
+  // Lists ship the light projection (active swipe only, no per-swipe extra
+  // arrays) — non-active swipe data dominated the payload but is only needed
+  // by swipe actions, which re-fetch the full message. ?full=true opts out.
+  const light = c.req.query("full") !== "true";
+
   // tail=true fetches the last N messages efficiently (single index scan from end)
   if (c.req.query("tail") === "true") {
     const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50", 10) || 50, 1), 1000);
-    return c.json(svc.listMessagesTail(userId, chatId, limit));
+    return c.json(svc.listMessagesTail(userId, chatId, limit, { light }));
   }
 
   const pagination = parsePagination(c.req.query("limit"), c.req.query("offset"));
-  return c.json(svc.listMessages(userId, chatId, pagination));
+  return c.json(svc.listMessages(userId, chatId, pagination, { light }));
 });
 
 app.post("/:chatId/messages/bulk-hide", async (c) => {

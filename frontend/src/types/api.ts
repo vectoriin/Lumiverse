@@ -196,7 +196,13 @@ export interface Message {
   content: string;
   send_date: number;
   swipe_id: number;
-  swipes: string[];
+  /**
+   * List endpoints deliver a light projection: only the active swipe's text
+   * is populated, non-active slots are null (length is preserved for the n/m
+   * indicator and at-first/at-last checks). Swipe actions and single-message
+   * fetches return fully populated arrays.
+   */
+  swipes: (string | null)[];
   swipe_dates: number[];
   extra: MessageExtra;
   parent_message_id: string | null;
