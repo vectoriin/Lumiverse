@@ -458,6 +458,24 @@ export default function ChatView() {
           }).catch(() => {})
         }
 
+        // Start the character fetch now, in parallel with the generation
+        // recovery below. Character-aware theming can't sample the avatar
+        // until the character record is in the store, so every await ahead
+        // of this fetch used to delay the chat's theme tint by one round trip.
+        const cachedCharacter = chat.character_id
+          ? useStore.getState().characters.find((c) => c.id === chat.character_id) ?? null
+          : null
+        const characterPromise: Promise<import('@/types/api').Character | null> = cachedCharacter
+          ? Promise.resolve(cachedCharacter)
+          : chat.character_id
+            ? charactersApi.get(chat.character_id)
+                .then((char) => {
+                  if (!cancelled) useStore.getState().updateCharacter(char.id, char)
+                  return char
+                })
+                .catch(() => null)
+            : Promise.resolve(null)
+
         // If there's a pending council tools failure for this chat, show the retry modal now
         const pendingFailure = useStore.getState().councilToolsFailure
         if (pendingFailure && pendingFailure.chatId === chatId) {
@@ -480,16 +498,7 @@ export default function ChatView() {
         }
         generateApi.acknowledge(chatId).catch(() => {})
 
-        let openedCharacter: import('@/types/api').Character | null = null
-        if (chat.character_id) {
-          openedCharacter = useStore.getState().characters.find((c) => c.id === chat.character_id) ?? null
-          if (!openedCharacter) {
-            openedCharacter = await charactersApi.get(chat.character_id).catch(() => null)
-            if (openedCharacter && !cancelled) {
-              useStore.getState().updateCharacter(openedCharacter.id, openedCharacter)
-            }
-          }
-        }
+        const openedCharacter = await characterPromise
 
         // Character bindings are temporary chat-context overrides. When a chat
         // has no binding, fall back to the user's default persona instead of

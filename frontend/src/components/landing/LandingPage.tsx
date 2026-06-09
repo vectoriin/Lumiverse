@@ -11,6 +11,7 @@ import { getCharacterAvatarLargeUrlById } from '@/lib/avatarUrls'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { useStore } from '@/store'
 import { useScrollGate } from '@/hooks/useScrollGate'
+import { warmCharacterPalette } from '@/hooks/useCharacterTheme'
 import LazyImage from '@/components/shared/LazyImage'
 import type { GroupedRecentChat } from '@/types/api'
 import styles from './LandingPage.module.css'
@@ -483,6 +484,11 @@ export default function LandingPage() {
 
   const handleChatClick = useCallback(
     (item: GroupedRecentChat) => {
+      // Warm the avatar palette in parallel with the route change + chat
+      // fetch so character-aware theming applies with first paint instead of
+      // after the character record round-trips.
+      warmCharacterPalette(item.character_id, item.character_image_id)
+
       if (item.is_group) {
         const groupCharacterIds = item.group_character_ids ?? []
         if (item.chat_count > 1 && groupCharacterIds.length > 1) {
