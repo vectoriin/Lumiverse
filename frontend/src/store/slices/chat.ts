@@ -114,6 +114,9 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
     unseenSwipes: {},
     totalChatLength: 0,
     impersonateDraftContent: null,
+    landingRecentChats: null,
+
+    setLandingRecentChats: (result) => set({ landingRecentChats: result }),
 
     setActiveChat: (chatId, characterId = null) => {
       endedGenerationIds.clear()

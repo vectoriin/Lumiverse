@@ -119,7 +119,7 @@ function SkeletonCard({ index }: { index: number }) {
       className={styles.skeletonCard}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.05 }}
+      transition={{ duration: 0.3, delay: Math.min(index * 0.05, 0.35) }}
     >
       <div className={styles.skeletonImage} />
       <div className={styles.skeletonContent}>
@@ -136,7 +136,7 @@ function SkeletonListItem({ index }: { index: number }) {
       className={styles.listSkeleton}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.04 }}
+      transition={{ duration: 0.3, delay: Math.min(index * 0.04, 0.35) }}
     >
       <div className={styles.listSkeletonAvatar} />
       <div className={styles.listSkeletonBody}>
@@ -145,6 +145,33 @@ function SkeletonListItem({ index }: { index: number }) {
       </div>
     </motion.div>
   )
+}
+
+// Last-known landing layout + item count, persisted so the skeleton matches
+// the real layout from the very first frame — before settings arrive from
+// bootstrap. Without it the page sat blank until settingsLoaded, then showed
+// a fixed 8 placeholders regardless of how many items would render.
+const LANDING_HINT_KEY = '__lumiverse_landing_hint'
+const SKELETON_MAX = 24
+
+interface LandingHint {
+  layout?: 'cards' | 'compact'
+  count?: number
+}
+
+function readLandingHint(): LandingHint {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LANDING_HINT_KEY) || '')
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeLandingHint(hint: LandingHint) {
+  try {
+    localStorage.setItem(LANDING_HINT_KEY, JSON.stringify(hint))
+  } catch { /* private mode etc. — hint is best-effort */ }
 }
 
 function EmptyState() {
@@ -357,6 +384,26 @@ export default function LandingPage() {
   const [error, setError] = useState<string | null>(null)
   const [total, setTotal] = useState(0)
 
+  // Skeleton shape/count for the pre-settings window and the fetch window.
+  // Before settings arrive the store only has defaults, so fall back to the
+  // persisted last-known layout and item count.
+  const [landingHint] = useState(readLandingHint)
+  const skeletonLayout = settingsLoaded
+    ? landingPageLayoutMode
+    : landingHint.layout ?? landingPageLayoutMode
+  const expectedCount = settingsLoaded
+    ? Math.min(landingHint.count ?? landingPageChatsDisplayed, landingPageChatsDisplayed)
+    : landingHint.count ?? landingPageChatsDisplayed
+  const skeletonCount = Math.max(1, Math.min(expectedCount, SKELETON_MAX))
+
+  useEffect(() => {
+    if (!settingsLoaded || loading) return
+    writeLandingHint({
+      layout: landingPageLayoutMode,
+      count: Math.min(items.length, landingPageChatsDisplayed),
+    })
+  }, [settingsLoaded, loading, landingPageLayoutMode, items.length, landingPageChatsDisplayed])
+
   const sentinelRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -364,6 +411,20 @@ export default function LandingPage() {
 
   const fetchChats = useCallback(async () => {
     if (!settingsLoaded) return
+
+    // Bootstrap delivers the first recent-chats page alongside settings —
+    // consume it once instead of issuing another round trip. Later runs
+    // (WS chat-deleted, limit changes, revisits) find it cleared and fetch.
+    const preload = useStore.getState().landingRecentChats
+    if (preload) {
+      useStore.getState().setLandingRecentChats(null)
+      setItems(preload.data)
+      setTotal(preload.total)
+      setError(null)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError(null)
     try {
@@ -583,18 +644,16 @@ export default function LandingPage() {
 
         <main className={styles.main}>
           <AnimatePresence mode="wait">
-            {!settingsLoaded ? (
-              <motion.div key="awaiting-settings" />
-            ) : loading && items.length === 0 ? (
+            {!settingsLoaded || (loading && items.length === 0) ? (
               <motion.div
-                key={`loading-${landingPageLayoutMode}`}
-                className={landingPageLayoutMode === 'compact' ? styles.compactList : styles.gridCards}
+                key={`loading-${skeletonLayout}`}
+                className={skeletonLayout === 'compact' ? styles.compactList : styles.gridCards}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
               >
-                {Array.from({ length: 8 }).map((_, i) => (
-                  landingPageLayoutMode === 'compact'
+                {Array.from({ length: skeletonCount }).map((_, i) => (
+                  skeletonLayout === 'compact'
                     ? <SkeletonListItem key={i} index={i} />
                     : <SkeletonCard key={i} index={i} />
                 ))}

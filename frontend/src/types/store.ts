@@ -1,4 +1,4 @@
-import type { Message, Character, Persona, Preset, ConnectionProfile, ProviderInfo, RecentChat, Pack, PackWithItems, LumiaItem, LoomItem, ImageGenConnectionProfile, ImageGenProviderInfo } from './api'
+import type { Message, Character, Persona, Preset, ConnectionProfile, ProviderInfo, RecentChat, GroupedRecentChat, PaginatedResult, Pack, PackWithItems, LumiaItem, LoomItem, ImageGenConnectionProfile, ImageGenProviderInfo } from './api'
 
 // ---- Chat Slice ----
 export interface ChatSlice {
@@ -38,6 +38,13 @@ export interface ChatSlice {
   totalChatLength: number
   /** Content from an impersonate-draft generation, ready to populate the input box */
   impersonateDraftContent: string | null
+  /**
+   * First recent-chats page delivered by GET /bootstrap so the landing page
+   * can render without its own fetch. Consume-once: the landing page clears
+   * it when applied, so later mounts and WS-driven refreshes always refetch.
+   */
+  landingRecentChats: PaginatedResult<GroupedRecentChat> | null
+  setLandingRecentChats: (result: PaginatedResult<GroupedRecentChat> | null) => void
   setActiveChat: (chatId: string | null, characterId?: string | null) => void
   setActiveChatWallpaper: (wallpaper: WallpaperRef | null) => void
   setActiveChatAvatarId: (imageId: string | null) => void
@@ -104,6 +111,8 @@ export interface StartupSettings {
   viewMode?: CharacterViewMode
   charactersPerPage?: number
   theme?: ThemeConfig | null
+  landingPageChatsDisplayed?: number
+  landingPageLayoutMode?: 'cards' | 'compact'
 }
 
 export interface CharactersSlice {
