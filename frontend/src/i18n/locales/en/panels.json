@@ -855,6 +855,8 @@
     "workflowDefault": "(workflow default)",
     "workflowOrConnectionDefault": "(workflow / connection default)",
     "advanced": "Advanced",
+    "rawOverrideInvalidJson": "Invalid JSON — generation will fail until this is fixed or cleared",
+    "rawOverrideNotObject": "Must be a JSON object of request fields, e.g. {\"steps\": 30}",
     "directorReferences": "Director References",
     "includeCharacterAvatar": "Include Character Avatar",
     "includeCharacterAvatarHint": "Send current character avatar as director reference",

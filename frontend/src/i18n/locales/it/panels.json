@@ -853,6 +853,8 @@
     "workflowDefault": "(valore predefinito del flusso di lavoro)",
     "workflowOrConnectionDefault": "(valore predefinito del flusso di lavoro/connessione)",
     "advanced": "Avanzate",
+    "rawOverrideInvalidJson": "JSON non valido — la generazione fallirà finché il campo non viene corretto o svuotato",
+    "rawOverrideNotObject": "Deve essere un oggetto JSON di campi della richiesta, ad es. {\"steps\": 30}",
     "directorReferences": "Riferimenti regista",
     "includeCharacterAvatar": "Includi avatar personaggio",
     "includeCharacterAvatarHint": "Invia l'avatar del personaggio attuale come riferimento regista",

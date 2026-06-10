@@ -143,6 +143,38 @@ function ModelComboField({
 }
 
 /** Render a single parameter from the provider capability schema */
+/** Raw Request Override editor — validates JSON inline so typos don't silently break generation. */
+function RawOverrideField({
+  label,
+  schema,
+  value,
+  onChange,
+}: {
+  label: string
+  schema: ImageGenParameterSchema
+  value: any
+  onChange: (value: string) => void
+}) {
+  const { t } = useTranslation('panels')
+  const text = typeof value === 'string' ? value : ''
+  let error: string | undefined
+  if (text.trim()) {
+    try {
+      const parsed = JSON.parse(text)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        error = t('imageGenPanel.rawOverrideNotObject')
+      }
+    } catch {
+      error = t('imageGenPanel.rawOverrideInvalidJson')
+    }
+  }
+  return (
+    <FormField label={label} hint={schema.description} error={error}>
+      <TextArea rows={3} value={text} onChange={onChange} placeholder='{"steps": 30}' />
+    </FormField>
+  )
+}
+
 function ParamField({
   paramKey,
   schema,
@@ -258,6 +290,16 @@ function ParamField({
       )
 
     case 'string':
+      if (paramKey === 'rawRequestOverride') {
+        return (
+          <RawOverrideField
+            label={displayName}
+            schema={schema}
+            value={value}
+            onChange={(v) => onChange(paramKey, v)}
+          />
+        )
+      }
       if (schema.description?.toLowerCase().includes('prompt') || schema.description?.toLowerCase().includes('negative')) {
         return (
           <FormField label={displayName} hint={schema.description}>

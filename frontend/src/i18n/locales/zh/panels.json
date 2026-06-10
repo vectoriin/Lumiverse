@@ -848,6 +848,8 @@
     "workflowDefault": "（工作流默认）",
     "workflowOrConnectionDefault": "（工作流 / 连接默认）",
     "advanced": "高级",
+    "rawOverrideInvalidJson": "JSON 无效 — 在修复或清空此字段之前，生成将失败",
+    "rawOverrideNotObject": "必须是请求字段的 JSON 对象，例如 {\"steps\": 30}",
     "directorReferences": "导演参考图",
     "includeCharacterAvatar": "包含角色头像",
     "includeCharacterAvatarHint": "将当前角色头像作为导演参考图发送",

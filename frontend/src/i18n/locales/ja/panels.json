@@ -848,6 +848,8 @@
     "workflowDefault": "(ワークフローのデフォルト)",
     "workflowOrConnectionDefault": "(ワークフロー / 接続のデフォルト)",
     "advanced": "高度な",
+    "rawOverrideInvalidJson": "JSONが無効です — 修正またはクリアするまで生成は失敗します",
+    "rawOverrideNotObject": "リクエストフィールドのJSONオブジェクトである必要があります（例: {\"steps\": 30}）",
     "directorReferences": "ディレクター リファレンス",
     "includeCharacterAvatar": "キャラクター アバターを含める",
     "includeCharacterAvatarHint": "現在のキャラクター アバターをディレクター リファレンスとして送信",

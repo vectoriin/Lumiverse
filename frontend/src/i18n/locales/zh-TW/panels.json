@@ -848,6 +848,8 @@
     "workflowDefault": "（工作流默認）",
     "workflowOrConnectionDefault": "（工作流 / 連接默認）",
     "advanced": "高級",
+    "rawOverrideInvalidJson": "JSON 無效 — 在修復或清空此欄位之前，生成將失敗",
+    "rawOverrideNotObject": "必須是請求欄位的 JSON 物件，例如 {\"steps\": 30}",
     "directorReferences": "導演參考圖",
     "includeCharacterAvatar": "包含角色頭像",
     "includeCharacterAvatarHint": "將當前角色頭像作為導演參考圖發送",

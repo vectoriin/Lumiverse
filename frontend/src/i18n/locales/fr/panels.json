@@ -848,6 +848,8 @@
     "workflowDefault": "(workflow par défaut)",
     "workflowOrConnectionDefault": "(workflow/connexion par défaut)",
     "advanced": "Avancé",
+    "rawOverrideInvalidJson": "JSON invalide — la génération échouera tant que ce champ n'est pas corrigé ou vidé",
+    "rawOverrideNotObject": "Doit être un objet JSON de champs de requête, p. ex. {\"steps\": 30}",
     "directorReferences": "Références du réalisateur",
     "includeCharacterAvatar": "Inclure l'avatar du personnage",
     "includeCharacterAvatarHint": "Envoyer l'avatar du personnage actuel comme référence du réalisateur",
