@@ -2252,6 +2252,29 @@ const spindleApi: RuntimeSpindleAPI = {
       });
       return result as import("lumiverse-spindle-types").ActivatedWorldInfoEntryDTO[];
     },
+    async getGlobal(userId?: string): Promise<string[]> {
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "world_books_get_global", requestId, userId });
+      return result as string[];
+    },
+    async setGlobal(worldBookIds: string[], userId?: string): Promise<string[]> {
+      assertMutationAllowed("spindle.world_books.setGlobal()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "world_books_set_global", requestId, worldBookIds, userId });
+      return result as string[];
+    },
+    async activateGlobal(worldBookId: string, userId?: string): Promise<string[]> {
+      assertMutationAllowed("spindle.world_books.activateGlobal()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "world_books_activate_global", requestId, worldBookId, userId });
+      return result as string[];
+    },
+    async deactivateGlobal(worldBookId: string, userId?: string): Promise<string[]> {
+      assertMutationAllowed("spindle.world_books.deactivateGlobal()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "world_books_deactivate_global", requestId, worldBookId, userId });
+      return result as string[];
+    },
   },
 
   regex_scripts: {

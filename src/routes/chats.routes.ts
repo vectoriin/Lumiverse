@@ -2,11 +2,9 @@ import { Hono } from "hono";
 import * as svc from "../services/chats.service";
 import * as personasSvc from "../services/personas.service";
 import * as charactersSvc from "../services/characters.service";
-import * as settingsSvc from "../services/settings.service";
-import * as worldBooksSvc from "../services/world-books.service";
 import * as regexScriptsSvc from "../services/regex-scripts.service";
 import * as managerSvc from "../spindle/manager.service";
-import { getCharacterWorldBookIds } from "../utils/character-world-books";
+import { pruneOrphanedWiState } from "../services/wi-state-prune.service";
 import { parsePagination } from "../services/pagination";
 import { RECENT_CHATS_DEFAULT_LIMIT } from "../types/pagination";
 import { parseStChatJsonl, parseStGroupChatJsonl } from "../migration/st-reader";
@@ -266,7 +264,16 @@ app.put("/:id", async (c) => {
   const chat = svc.getChat(userId, c.req.param("id"));
   if (!chat) return c.json({ error: "Not found" }, 404);
   const body = await c.req.json();
-  const updated = svc.updateChat(userId, chat.id, body);
+  let updated = svc.updateChat(userId, chat.id, body);
+  // PUT replaces metadata wholesale, so book attachments can change (or
+  // vanish) on any metadata write.
+  if (updated && body?.metadata !== undefined) {
+    const beforeIds = JSON.stringify(chat.metadata?.chat_world_book_ids ?? []);
+    const afterIds = JSON.stringify(updated.metadata?.chat_world_book_ids ?? []);
+    if (beforeIds !== afterIds) {
+      updated = pruneOrphanedWiState(userId, updated);
+    }
+  }
   return c.json(updated);
 });
 
@@ -312,46 +319,8 @@ app.patch("/:id/metadata", async (c) => {
   let updated = svc.mergeChatMetadata(userId, chatId, partial);
   if (!updated) return c.json({ error: "Not found" }, 404);
 
-  // When world book attachments change, immediately prune wi_state entries
-  // belonging to books that are no longer attached from any source. Without
-  // this, orphaned sticky/cooldown state survives until the next generation's
-  // activation cleanup — and the deferred WI state write from a concurrent
-  // generation can restore it.
   if ("chat_world_book_ids" in body) {
-    const wiState = updated.metadata?.wi_state as Record<string, any> | undefined;
-    if (wiState && Object.keys(wiState).length > 0) {
-      const character = charactersSvc.getCharacter(userId, updated.character_id);
-      const charBookIds = character ? getCharacterWorldBookIds(character.extensions) : [];
-      const persona = personasSvc.resolvePersonaOrDefault(userId);
-      const chatBookIds = (updated.metadata?.chat_world_book_ids as string[] | undefined) ?? [];
-      const globalBookIds = (settingsSvc.getSetting(userId, "globalWorldBooks")?.value as string[] | undefined) ?? [];
-
-      const allBookIds = new Set<string>();
-      for (const id of charBookIds) allBookIds.add(id);
-      if (persona?.attached_world_book_id) allBookIds.add(persona.attached_world_book_id);
-      for (const id of chatBookIds) allBookIds.add(id);
-      for (const id of globalBookIds) allBookIds.add(id);
-
-      if (allBookIds.size > 0) {
-        const entryMap = worldBooksSvc.listEntriesForBooks(userId, [...allBookIds]);
-        const validUids = new Set<string>();
-        for (const [, entries] of entryMap) {
-          for (const e of entries) validUids.add(e.uid);
-        }
-        let pruned = false;
-        for (const uid in wiState) {
-          if (!validUids.has(uid)) {
-            delete wiState[uid];
-            pruned = true;
-          }
-        }
-        if (pruned) {
-          updated = svc.mergeChatMetadata(userId, chatId, { wi_state: wiState }) ?? updated;
-        }
-      } else {
-        updated = svc.mergeChatMetadata(userId, chatId, { wi_state: undefined }) ?? updated;
-      }
-    }
+    updated = pruneOrphanedWiState(userId, updated);
   }
 
   return c.json(updated);

@@ -1357,7 +1357,8 @@ export async function assemblePrompt(
       chatTurn: messages.length,
       chatMetadata: chat.metadata ?? {},
     },
-    ctx.userId
+    ctx.userId,
+    wiSources.bookSourceMap
   );
   const wiResult = activateWorldInfo({
     entries: intercepted,
