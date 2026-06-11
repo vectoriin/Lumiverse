@@ -17,6 +17,12 @@
   "tempChatWithProfile": "Chat temporaire · {{name}}",
   "tempChatTitle": "Démarrer une discussion jetable — supprimée à votre retour à l'accueil",
   "tempChatTitleWithProfile": "Essayez {{name}} dans une discussion jetable — supprimée à votre retour à l'accueil",
+  "tempChatMenu": {
+    "withPreset": "Avec le préréglage actuel",
+    "withPresetHint": "Utilise votre préréglage actif",
+    "noPreset": "Sans préréglage",
+    "noPresetHint": "Test brut du modèle — sans blocs ni paramètres de préréglage"
+  },
   "logOutTitle": "Déconnectez-vous de cet appareil",
   "loadFailed": "Échec du chargement des discussions",
   "tryAgain": "Réessayez",

@@ -19,7 +19,7 @@ import {
 } from "./prompt-assembly.service";
 import * as charactersSvc from "./characters.service";
 import { getEffectiveCharacterName } from "../types/character";
-import { isTemporaryChatMetadata } from "../types/chat";
+import { isNoPresetChatMetadata, isTemporaryChatMetadata } from "../types/chat";
 import {
   getTextContent,
   type LlmMessage,
@@ -1521,32 +1521,41 @@ export async function startGeneration(
 
   try {
     const connection = resolveConnection(input.userId, input.connection_id);
-    if (!input.preset_id) {
-      input.preset_id = resolveActivePresetId(input.userId);
-    }
-    if (
-      input.force_preset_id &&
-      genType === "impersonate" &&
-      input.impersonate_mode === "oneliner" &&
-      input.preset_id &&
-      !presetsSvc.getPreset(input.userId, input.preset_id)
-    ) {
-      console.warn(
-        "[generate] Clearing stale chat impersonation preset override %s for chat %s",
-        input.preset_id,
-        input.chat_id,
-      );
-      chatsSvc.mergeChatMetadata(input.userId, input.chat_id, {
-        impersonation_preset_id: undefined,
-      });
+    // Loaded before preset resolution: no-preset temp chats bypass the preset
+    // requirement entirely (assertUsablePreset would otherwise reject them).
+    const chat = chatsSvc.getChat(input.userId, input.chat_id);
+    const isNoPresetChat = isNoPresetChatMetadata(chat?.metadata);
+    if (isNoPresetChat) {
       input.preset_id = undefined;
       input.force_preset_id = false;
+    } else {
+      if (!input.preset_id) {
+        input.preset_id = resolveActivePresetId(input.userId);
+      }
+      if (
+        input.force_preset_id &&
+        genType === "impersonate" &&
+        input.impersonate_mode === "oneliner" &&
+        input.preset_id &&
+        !presetsSvc.getPreset(input.userId, input.preset_id)
+      ) {
+        console.warn(
+          "[generate] Clearing stale chat impersonation preset override %s for chat %s",
+          input.preset_id,
+          input.chat_id,
+        );
+        chatsSvc.mergeChatMetadata(input.userId, input.chat_id, {
+          impersonation_preset_id: undefined,
+        });
+        input.preset_id = undefined;
+        input.force_preset_id = false;
+      }
+      presetsSvc.assertUsablePreset(
+        input.userId,
+        input.preset_id,
+        connection.preset_id,
+      );
     }
-    presetsSvc.assertUsablePreset(
-      input.userId,
-      input.preset_id,
-      connection.preset_id,
-    );
     const { provider, apiKey, apiUrl } = await resolveProviderAndKey(
       input.userId,
       connection.id,
@@ -1555,7 +1564,6 @@ export async function startGeneration(
     // Resolve the assistant message being modified before choosing a character.
     // Group retries/continues are tied to the message's speaker, not the chat's
     // primary/greeting character.
-    const chat = chatsSvc.getChat(input.userId, input.chat_id);
     const isGroupChat = chat?.metadata?.group === true;
     const groupCharacterIds =
       isGroupChat && Array.isArray(chat?.metadata?.character_ids)
@@ -2662,7 +2670,14 @@ export async function dryRunGeneration(
 ): Promise<DryRunResult> {
   const genType = input.generation_type || "normal";
 
-  if (!input.preset_id) {
+  // No-preset temp chats bypass preset resolution/assertion (same as
+  // startGeneration); assembly falls back to raw message mapping.
+  const dryRunChat = chatsSvc.getChat(input.userId, input.chat_id);
+  const isNoPresetChat = isNoPresetChatMetadata(dryRunChat?.metadata);
+  if (isNoPresetChat) {
+    input.preset_id = undefined;
+    input.force_preset_id = false;
+  } else if (!input.preset_id) {
     input.preset_id = resolveActivePresetId(input.userId);
   }
 
@@ -2681,11 +2696,13 @@ export async function dryRunGeneration(
   }
 
   const connection = resolveConnection(input.userId, input.connection_id);
-  presetsSvc.assertUsablePreset(
-    input.userId,
-    input.preset_id,
-    connection.preset_id,
-  );
+  if (!isNoPresetChat) {
+    presetsSvc.assertUsablePreset(
+      input.userId,
+      input.preset_id,
+      connection.preset_id,
+    );
+  }
   const { provider } = await resolveProviderAndKey(input.userId, connection.id);
 
   const pipeline = await runPromptPipeline({

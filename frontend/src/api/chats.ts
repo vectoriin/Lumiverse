@@ -45,9 +45,11 @@ export const chatsApi = {
   /**
    * Disposable character-less, persona-less chat for trying out the current
    * connection profile. Swept by deleteTemporary() when the user returns home.
+   * Pass noPreset to test the model raw — generation skips preset blocks,
+   * preset parameters, and the active/connection preset fallbacks.
    */
-  createTemporary() {
-    return post<Chat>('/chats/temporary', {})
+  createTemporary(opts?: { noPreset?: boolean }) {
+    return post<Chat>('/chats/temporary', opts?.noPreset ? { no_preset: true } : {})
   },
 
   deleteTemporary() {

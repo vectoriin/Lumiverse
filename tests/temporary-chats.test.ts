@@ -11,6 +11,7 @@ import { closeDatabase, getDb, initDatabase } from "../src/db/connection";
 import * as charactersSvc from "../src/services/characters.service";
 import * as chatsSvc from "../src/services/chats.service";
 import * as personasSvc from "../src/services/personas.service";
+import * as presetsSvc from "../src/services/presets.service";
 import { assemblePrompt } from "../src/services/prompt-assembly.service";
 import { prefetchAssemblyData } from "../src/services/prompt-assembly-prefetch";
 
@@ -123,6 +124,103 @@ describe("temporary character-less chats", () => {
       expect(serialized).toContain("Hello there");
       // The default persona must not leak into the prompt.
       expect(serialized).not.toContain("Dax");
+    }
+  });
+
+  test("preset blocks still apply to temporary chats", async () => {
+    const chat = createTempChat();
+    chatsSvc.createMessage(chat.id, { is_user: true, name: "User", content: "Hello there" }, USER_ID);
+
+    const block = (overrides: Record<string, any>) => ({
+      id: crypto.randomUUID(),
+      name: "block",
+      content: "",
+      role: "system",
+      enabled: true,
+      position: "pre_history",
+      depth: 0,
+      marker: null,
+      isLocked: false,
+      color: null,
+      injectionTrigger: [],
+      group: null,
+      ...overrides,
+    });
+    const preset = presetsSvc.createPreset(USER_ID, {
+      name: "Temp Test Preset",
+      provider: "openai",
+      engine: "chat",
+      parameters: {},
+      prompts: {},
+      metadata: {},
+      prompt_order: [
+        block({ name: "Main", content: "PRESET_SYSTEM_MARKER: be concise." }),
+        block({ name: "Chat History", marker: "chat_history" }),
+      ],
+    } as any);
+
+    const result = await assemblePrompt({
+      userId: USER_ID,
+      chatId: chat.id,
+      generationType: "normal",
+      presetId: preset.id,
+    } as any);
+
+    const serialized = JSON.stringify(result.messages);
+    expect(serialized).toContain("PRESET_SYSTEM_MARKER");
+    expect(serialized).toContain("Hello there");
+  });
+
+  test("no_preset temp chats ignore presets even when one is requested", async () => {
+    const chat = chatsSvc.createChat(USER_ID, {
+      character_id: null,
+      name: "Temporary Chat",
+      metadata: { temporary: true, no_preset: true },
+    });
+    chatsSvc.createMessage(chat.id, { is_user: true, name: "User", content: "Hello there" }, USER_ID);
+
+    const preset = presetsSvc.createPreset(USER_ID, {
+      name: "Should Not Apply",
+      provider: "openai",
+      engine: "chat",
+      parameters: { temperature: 0.123 },
+      prompts: {},
+      metadata: {},
+      prompt_order: [
+        {
+          id: crypto.randomUUID(),
+          name: "Main",
+          content: "PRESET_SYSTEM_MARKER: be concise.",
+          role: "system",
+          enabled: true,
+          position: "pre_history",
+          depth: 0,
+          marker: null,
+          isLocked: false,
+          color: null,
+          injectionTrigger: [],
+          group: null,
+        },
+      ],
+    } as any);
+
+    // Simulate the frontend still sending its active preset — both the direct
+    // and prefetched assembly paths must drop it for a no_preset chat.
+    const ctx = {
+      userId: USER_ID,
+      chatId: chat.id,
+      generationType: "normal" as const,
+      presetId: preset.id,
+    };
+    const direct = await assemblePrompt(ctx as any);
+    const prefetched = await assemblePrompt({ ...ctx, prefetched: await prefetchAssemblyData(ctx as any) } as any);
+
+    for (const result of [direct, prefetched]) {
+      const serialized = JSON.stringify(result.messages);
+      expect(serialized).not.toContain("PRESET_SYSTEM_MARKER");
+      expect(serialized).toContain("Hello there");
+      // Preset sampler parameters must not leak into the request either.
+      expect(result.parameters.temperature).toBeUndefined();
     }
   });
 

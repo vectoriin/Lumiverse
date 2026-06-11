@@ -180,7 +180,10 @@ app.post("/temporary", async (c) => {
   const chat = svc.createChat(userId, {
     character_id: null,
     name: typeof body?.name === "string" && body.name.trim() ? body.name : "Temporary Chat",
-    metadata: { temporary: true },
+    // no_preset opts the chat out of presets entirely (raw model test):
+    // generation skips preset blocks/parameters and the active/connection
+    // preset fallbacks.
+    metadata: { temporary: true, ...(body?.no_preset === true ? { no_preset: true } : {}) },
   });
   return c.json(chat, 201);
 });

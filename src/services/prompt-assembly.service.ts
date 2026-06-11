@@ -29,7 +29,7 @@ import type { Character } from "../types/character";
 import { getEffectiveCharacterName, makeAssistantCharacter } from "../types/character";
 import type { Persona } from "../types/persona";
 import type { Chat } from "../types/chat";
-import { isTemporaryChatMetadata } from "../types/chat";
+import { isNoPresetChatMetadata, isTemporaryChatMetadata } from "../types/chat";
 import type { Message, MessageAttachment } from "../types/message";
 import type { Preset } from "../types/preset";
 import type { ConnectionProfile } from "../types/connection-profile";
@@ -1062,22 +1062,27 @@ export async function assemblePrompt(
 
   // Resolve preset: request presetId takes priority, then connection's
   // preset_id, then any more-specific preset-profile binding can override that
-  // preset selection for the active chat/character context.
-  const requestedPresetId = ctx.presetId || connection?.preset_id || null;
+  // preset selection for the active chat/character context. No-preset temp
+  // chats opt out entirely — no preset blocks or parameters, no bindings, no
+  // fallback — so assembly drops to the raw legacy message mapping below.
+  const noPreset = isNoPresetChatMetadata(chat.metadata);
+  const requestedPresetId = noPreset ? null : ctx.presetId || connection?.preset_id || null;
   const resolvedProfile =
-    ctx.forcePresetId && ctx.presetId
-      ? { preset_id: ctx.presetId, binding: null, source: "none" as const }
-      : presetProfilesSvc.resolveProfile(
-          ctx.userId,
-          requestedPresetId,
-          chat.id,
-          characterId,
-          { isGroup: chat.metadata?.group === true, connectionId: connection?.id ?? null },
-        );
+    noPreset
+      ? { preset_id: null, binding: null, source: "none" as const }
+      : ctx.forcePresetId && ctx.presetId
+        ? { preset_id: ctx.presetId, binding: null, source: "none" as const }
+        : presetProfilesSvc.resolveProfile(
+            ctx.userId,
+            requestedPresetId,
+            chat.id,
+            characterId,
+            { isGroup: chat.metadata?.group === true, connectionId: connection?.id ?? null },
+          );
   const resolvedPresetId = resolvedProfile.preset_id;
 
   let preset: Preset | null = null;
-  const prefetchedPreset = pf?.preset !== undefined ? pf.preset : null;
+  const prefetchedPreset = noPreset ? null : pf?.preset !== undefined ? pf.preset : null;
   if (resolvedPresetId) {
     preset =
       prefetchedPreset?.id === resolvedPresetId

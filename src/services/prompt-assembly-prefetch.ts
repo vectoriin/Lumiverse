@@ -9,7 +9,7 @@
 
 import type { AssemblyContext, PrefetchedData } from "../llm/types";
 import { makeAssistantCharacter } from "../types/character";
-import { isTemporaryChatMetadata } from "../types/chat";
+import { isNoPresetChatMetadata, isTemporaryChatMetadata } from "../types/chat";
 import * as chatsSvc from "./chats.service";
 import * as charactersSvc from "./characters.service";
 import * as personasSvc from "./personas.service";
@@ -132,7 +132,11 @@ export async function prefetchAssemblyData(ctx: AssemblyContext): Promise<Prefet
       : connectionsSvc.getDefaultConnection(ctx.userId)
   );
 
-  const resolvedPresetId = ctx.presetId || connection?.preset_id;
+  // No-preset temp chats skip preset loading entirely (assembly re-checks the
+  // same flag and falls back to the raw legacy message mapping).
+  const resolvedPresetId = isNoPresetChatMetadata(chat.metadata)
+    ? null
+    : ctx.presetId || connection?.preset_id;
   const preset = profiler.measureSync("preset", () =>
     resolvedPresetId ? presetsSvc.getPreset(ctx.userId, resolvedPresetId) : null
   );

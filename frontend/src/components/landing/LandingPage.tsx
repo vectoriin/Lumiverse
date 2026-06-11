@@ -385,13 +385,31 @@ export default function LandingPage() {
   const [error, setError] = useState<string | null>(null)
   const [total, setTotal] = useState(0)
   const [creatingTempChat, setCreatingTempChat] = useState(false)
+  const [tempChatMenuOpen, setTempChatMenuOpen] = useState(false)
+  const tempChatMenuRef = useRef<HTMLDivElement>(null)
+  const tempChatMenuOpenedAt = useRef(0)
 
   const profiles = useStore((s) => s.profiles)
   const activeProfileId = useStore((s) => s.activeProfileId)
+  const activeLoomPresetId = useStore((s) => s.activeLoomPresetId)
+  const loomRegistry = useStore((s) => s.loomRegistry)
   const activeProfile = useMemo(
     () => profiles.find((p) => p.id === activeProfileId) ?? profiles.find((p) => p.is_default) ?? null,
     [profiles, activeProfileId]
   )
+  const activePresetName = activeLoomPresetId ? loomRegistry[activeLoomPresetId]?.name ?? null : null
+
+  // pointerdown + openedAt guard per the project's Android outside-click rule
+  useEffect(() => {
+    if (!tempChatMenuOpen) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (Date.now() - tempChatMenuOpenedAt.current < 100) return
+      if (tempChatMenuRef.current?.contains(e.target as Node)) return
+      setTempChatMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [tempChatMenuOpen])
 
   // Temporary chats are disposable by contract: landing on the home page
   // sweeps any the user left behind (closed tab, back navigation, etc.).
@@ -581,17 +599,25 @@ export default function LandingPage() {
     navigate('/characters')
   }, [navigate])
 
-  const handleTempChat = useCallback(async () => {
+  const handleTempChat = useCallback(async (noPreset: boolean) => {
     if (creatingTempChat) return
     setCreatingTempChat(true)
+    setTempChatMenuOpen(false)
     try {
-      const chat = await chatsApi.createTemporary()
+      const chat = await chatsApi.createTemporary({ noPreset })
       navigate(`/chat/${chat.id}`)
     } catch (err: any) {
       console.error('[Lumiverse] Error creating temporary chat:', err)
       setCreatingTempChat(false)
     }
   }, [creatingTempChat, navigate])
+
+  const toggleTempChatMenu = useCallback(() => {
+    setTempChatMenuOpen((open) => {
+      if (!open) tempChatMenuOpenedAt.current = Date.now()
+      return !open
+    })
+  }, [])
 
   const handleLogout = useCallback(() => {
     openModal('confirm', {
@@ -664,24 +690,40 @@ export default function LandingPage() {
             </div>
           </div>
           <div className={styles.headerActions}>
-            <button
-              type="button"
-              className={styles.accountBtn}
-              onClick={handleTempChat}
-              disabled={creatingTempChat}
-              title={
-                activeProfile
-                  ? t('tempChatTitleWithProfile', { name: activeProfile.name })
-                  : t('tempChatTitle')
-              }
-            >
-              <span className={styles.accountName}>
-                {activeProfile
-                  ? t('tempChatWithProfile', { name: activeProfile.name })
-                  : t('tempChat')}
-              </span>
-              <FlaskConical size={13} strokeWidth={1.5} />
-            </button>
+            <div className={styles.tempChatWrap} ref={tempChatMenuRef}>
+              <button
+                type="button"
+                className={styles.accountBtn}
+                onClick={toggleTempChatMenu}
+                disabled={creatingTempChat}
+                title={
+                  activeProfile
+                    ? t('tempChatTitleWithProfile', { name: activeProfile.name })
+                    : t('tempChatTitle')
+                }
+              >
+                <span className={styles.accountName}>
+                  {activeProfile
+                    ? t('tempChatWithProfile', { name: activeProfile.name })
+                    : t('tempChat')}
+                </span>
+                <FlaskConical size={13} strokeWidth={1.5} />
+              </button>
+              {tempChatMenuOpen && (
+                <div className={styles.tempChatMenu}>
+                  <button type="button" className={styles.tempChatMenuItem} onClick={() => handleTempChat(false)}>
+                    <span className={styles.tempChatMenuLabel}>{t('tempChatMenu.withPreset')}</span>
+                    <span className={styles.tempChatMenuHint}>
+                      {activePresetName || t('tempChatMenu.withPresetHint')}
+                    </span>
+                  </button>
+                  <button type="button" className={styles.tempChatMenuItem} onClick={() => handleTempChat(true)}>
+                    <span className={styles.tempChatMenuLabel}>{t('tempChatMenu.noPreset')}</span>
+                    <span className={styles.tempChatMenuHint}>{t('tempChatMenu.noPresetHint')}</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               className={styles.accountBtn}

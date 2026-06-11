@@ -25,6 +25,15 @@ export function isTemporaryChatMetadata(metadata: Record<string, any> | null | u
   return metadata?.temporary === true;
 }
 
+/**
+ * Temporary chats may explicitly opt out of presets (metadata.no_preset) to
+ * test a model raw: no preset blocks, no preset sampler parameters, and no
+ * fallback to the active or connection-bound preset.
+ */
+export function isNoPresetChatMetadata(metadata: Record<string, any> | null | undefined): boolean {
+  return isTemporaryChatMetadata(metadata) && metadata?.no_preset === true;
+}
+
 export interface CreateGroupChatInput {
   character_ids: string[];
   name?: string;
