@@ -42,6 +42,18 @@ export const chatsApi = {
     return post<Chat>('/chats', input)
   },
 
+  /**
+   * Disposable character-less, persona-less chat for trying out the current
+   * connection profile. Swept by deleteTemporary() when the user returns home.
+   */
+  createTemporary() {
+    return post<Chat>('/chats/temporary', {})
+  },
+
+  deleteTemporary() {
+    return del<{ success: boolean; deleted: number }>('/chats/temporary')
+  },
+
   update(id: string, input: Partial<{ name: string; metadata: Record<string, any> }>) {
     return put<Chat>(`/chats/${id}`, input)
   },

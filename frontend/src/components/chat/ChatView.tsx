@@ -504,7 +504,8 @@ export default function ChatView() {
         // Character bindings are temporary chat-context overrides. When a chat
         // has no binding, fall back to the user's default persona instead of
         // leaking the previous chat's bound persona into the new chat.
-        {
+        // Temporary chats are persona-less — leave the global persona alone.
+        if (chat.metadata?.temporary !== true) {
           const {
             characterPersonaBindings,
             personaTagBindings,

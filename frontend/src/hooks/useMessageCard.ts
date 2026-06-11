@@ -124,9 +124,13 @@ export function useMessageCard(message: Message, chatId: string) {
 
   const isGroupChat = useStore((s) => s.isGroupChat)
 
+  // Temporary chats are persona-less: never attribute the user's messages to
+  // the globally active persona (name or avatar).
+  const isTemporaryChat = useStore((s) => s.activeChatMetadata?.temporary === true)
+
   const userPersonaId = typeof message.extra?.persona_id === 'string' ? message.extra.persona_id : null
   const messagePersona = userPersonaId ? personas.find((p) => p.id === userPersonaId) : null
-  const activePersona = activePersonaId ? personas.find((p) => p.id === activePersonaId) ?? null : null
+  const activePersona = activePersonaId && !isTemporaryChat ? personas.find((p) => p.id === activePersonaId) ?? null : null
   const activeCharacter = activeCharacterId ? characters.find((c) => c.id === activeCharacterId) : null
 
   // In group chats, assistant messages carry character_id in message.extra
@@ -142,7 +146,7 @@ export function useMessageCard(message: Message, chatId: string) {
   const isGenericUserName = normalizedMessageName.length === 0 || /^user$/i.test(normalizedMessageName)
 
   const displayName = isUser
-    ? (messagePersona?.name || (isGenericUserName ? (personas.find((p) => p.id === activePersonaId)?.name || 'User') : normalizedMessageName))
+    ? (messagePersona?.name || (isGenericUserName ? (activePersona?.name || 'User') : normalizedMessageName))
     : ((isGenericAssistantName ? effectiveCharacter?.name : normalizedMessageName) || effectiveCharacter?.name || 'Assistant')
 
   const effectiveCharId = messageCharacterId || activeCharacterId

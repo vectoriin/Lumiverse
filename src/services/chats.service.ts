@@ -3,8 +3,9 @@ import { healCorruptDatabase } from "../db/maintenance";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import { getCharacter } from "./characters.service";
-import { getEffectiveCharacterName } from "../types/character";
+import { getEffectiveCharacterName, makeAssistantCharacter } from "../types/character";
 import type { Chat, CreateChatInput, CreateGroupChatInput, UpdateChatInput, RecentChat, GroupedRecentChat, ChatSummary } from "../types/chat";
+import { isTemporaryChatMetadata } from "../types/chat";
 import type { Message, CreateMessageInput, UpdateMessageInput } from "../types/message";
 import type { BulkMessageInput } from "../types/migrate";
 import type { PaginationParams, PaginatedResult } from "../types/pagination";
@@ -578,9 +579,9 @@ export function listRecentChats(userId: string, pagination: PaginationParams): P
       `SELECT c.id, c.character_id, c.name, c.metadata, c.created_at, c.updated_at,
          ch.name AS character_name, ch.avatar_path AS character_avatar_path, ch.image_id AS character_image_id
        FROM chats c LEFT JOIN characters ch ON ch.id = c.character_id
-       WHERE c.user_id = ?
+       WHERE c.user_id = ? AND c.character_id IS NOT NULL
        ORDER BY c.updated_at DESC`,
-      "SELECT COUNT(*) as count FROM chats WHERE user_id = ?",
+      "SELECT COUNT(*) as count FROM chats WHERE user_id = ? AND character_id IS NOT NULL",
       [userId],
       pagination,
       rowToRecentChat
@@ -619,7 +620,7 @@ export function listRecentChatsGrouped(
         ch.image_id AS character_image_id
       FROM chats c
       LEFT JOIN characters ch ON ch.id = c.character_id
-      WHERE c.user_id = ?
+      WHERE c.user_id = ? AND c.character_id IS NOT NULL
       ORDER BY c.updated_at DESC
     `).all(userId) as any[]
   );
@@ -854,17 +855,17 @@ export function createChat(userId: string, input: CreateChatInput): Chat {
 
   // Auto-name with character name
   let chatName = input.name || "";
-  if (!chatName) {
+  if (!chatName && input.character_id) {
     const character = getCharacter(userId, input.character_id);
     if (character) chatName = getEffectiveCharacterName(character);
   }
 
   getDb()
     .query("INSERT INTO chats (id, user_id, character_id, name, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(id, userId, input.character_id, chatName, JSON.stringify(input.metadata || {}), now, now);
+    .run(id, userId, input.character_id ?? null, chatName, JSON.stringify(input.metadata || {}), now, now);
 
   // Insert the character's greeting as the opening message
-  const character = getCharacter(userId, input.character_id);
+  const character = input.character_id ? getCharacter(userId, input.character_id) : null;
   if (character) {
     let greeting = character.first_mes;
     if (input.greeting_index && input.greeting_index >= 1 && character.alternate_greetings?.length) {
@@ -908,6 +909,7 @@ export function convertSoloChatToGroup(userId: string, chatId: string): Chat | n
   const source = getChat(userId, chatId);
   if (!source) return null;
   if (source.metadata?.group) throw new Error("Chat is already a group chat");
+  if (!source.character_id) throw new Error("Temporary chats cannot be converted to group chats");
 
   const converted = createChatRaw(userId, {
     character_id: source.character_id,
@@ -981,6 +983,25 @@ export function deleteChat(userId: string, id: string): boolean {
     eventBus.emit(EventType.CHAT_DELETED, { id }, userId);
   }
   return result.changes > 0;
+}
+
+/**
+ * Delete every temporary (character-less, metadata.temporary) chat the user
+ * owns. Called when the user returns to the landing page — temp chats are
+ * disposable by contract. Goes through deleteChat so audio/embedding/cortex
+ * cleanup runs for each.
+ */
+export function deleteTemporaryChats(userId: string): number {
+  const rows = getDb()
+    .query("SELECT id, metadata FROM chats WHERE user_id = ? AND character_id IS NULL")
+    .all(userId) as Array<{ id: string; metadata: string }>;
+
+  let deleted = 0;
+  for (const row of rows) {
+    if (!isTemporaryChatMetadata(parseMetadataObject(row.metadata))) continue;
+    if (deleteChat(userId, row.id)) deleted++;
+  }
+  return deleted;
 }
 
 function diffChatChangedFields(prev: Chat, next: Chat): string[] {
@@ -2142,7 +2163,7 @@ export function branchChat(userId: string, chatId: string, atMessageId: string):
   const now = Math.floor(Date.now() / 1000);
 
   // Branch names: "{baseName} — Branch at #{msgIndex}"
-  const character = getCharacter(userId, chat.character_id);
+  const character = chat.character_id ? getCharacter(userId, chat.character_id) : null;
   const baseName = (chat.name || character?.name || "Chat").replace(/\s+—\s+Branch.*$/i, "").replace(/\s+\(branch\s*\d*\)$/i, "");
   const branchLabel = `${baseName} — Branch at #${msg.index_in_chat}`;
 
@@ -2540,13 +2561,17 @@ export function buildMacroEnvForChat(userId: string, chatId: string): MacroEnv |
   try {
     const chat = getChat(userId, chatId);
     if (!chat) return null;
-    const character = getCharacter(userId, chat.character_id);
+    const character = chat.character_id
+      ? getCharacter(userId, chat.character_id)
+      : makeAssistantCharacter();
     if (!character) return null;
-    const persona = resolvePersonaForChatMacros(
-      userId,
-      resolvePersonaOrDefault(userId),
-      chat.metadata,
-    );
+    const persona = isTemporaryChatMetadata(chat.metadata)
+      ? null
+      : resolvePersonaForChatMacros(
+          userId,
+          resolvePersonaOrDefault(userId),
+          chat.metadata,
+        );
     return buildEnv({
       character,
       persona,
@@ -2753,7 +2778,7 @@ async function updateChatChunks(userId: string, chatId: string, newMessage: Mess
       const characterNames: string[] = [];
       const aliasMaps: Map<string, string>[] = [];
       if (chat) {
-        const character = getCharacter(userId, chat.character_id);
+        const character = chat.character_id ? getCharacter(userId, chat.character_id) : null;
         if (character) {
           // Normalize sloppy bot-card names to extract the real character name
           const normalized = memoryCortex.normalizeCharacterName(character.name);

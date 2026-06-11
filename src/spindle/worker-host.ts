@@ -10397,9 +10397,15 @@ export class WorkerHost {
         const chat = chatsSvc.getChat(resolvedUserId, chatId);
         if (chat) {
           const charId = characterId || chat.character_id;
-          const character = charactersSvc.getCharacter(resolvedUserId, charId);
+          const { makeAssistantCharacter } = await import("../types/character");
+          const { isTemporaryChatMetadata } = await import("../types/chat");
+          const character = charId
+            ? charactersSvc.getCharacter(resolvedUserId, charId)
+            : makeAssistantCharacter();
           if (character) {
-            const persona = personaAddonStatesSvc.resolvePersonaForChatMacros(resolvedUserId, personasSvc.resolvePersonaOrDefault(resolvedUserId), chat.metadata);
+            const persona = isTemporaryChatMetadata(chat.metadata)
+              ? null
+              : personaAddonStatesSvc.resolvePersonaForChatMacros(resolvedUserId, personasSvc.resolvePersonaOrDefault(resolvedUserId), chat.metadata);
             const messages = chatsSvc.getMessages(resolvedUserId, chatId);
             const connection = connectionsSvc.getDefaultConnection(resolvedUserId);
 

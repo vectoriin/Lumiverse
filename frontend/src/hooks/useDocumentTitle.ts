@@ -37,7 +37,9 @@ export function useDocumentTitle() {
     if (routeChatId) {
       // Store state can still belong to the previous chat while this one loads
       if (activeChatId === routeChatId) {
-        context = isGroupChat ? activeChatName || t('landing:groupChat') : characterName
+        // Character-less (temporary) chats have no character name — fall back
+        // to the chat's own name.
+        context = isGroupChat ? activeChatName || t('landing:groupChat') : characterName || activeChatName
       }
     } else if (pathname === '/') {
       context = t('common:home')

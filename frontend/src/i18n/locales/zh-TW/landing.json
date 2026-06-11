@@ -13,6 +13,10 @@
     "description": "與角色開始對話後，會顯示在這裡"
   },
   "tagline": "繼續你的故事",
+  "tempChat": "臨時聊天",
+  "tempChatWithProfile": "臨時聊天 · {{name}}",
+  "tempChatTitle": "開始一次性聊天 — 返回主頁時將被刪除",
+  "tempChatTitleWithProfile": "在一次性聊天中試用 {{name}} — 返回主頁時將被刪除",
   "logOutTitle": "在此設備上退出登錄",
   "loadFailed": "加載聊天失敗",
   "tryAgain": "重試",

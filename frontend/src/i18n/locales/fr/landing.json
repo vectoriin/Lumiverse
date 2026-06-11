@@ -13,6 +13,10 @@
     "description": "Démarrer une conversation avec un personnage pour start"
   },
   "tagline": "Continuez votre histoire",
+  "tempChat": "Chat temporaire",
+  "tempChatWithProfile": "Chat temporaire · {{name}}",
+  "tempChatTitle": "Démarrer une discussion jetable — supprimée à votre retour à l'accueil",
+  "tempChatTitleWithProfile": "Essayez {{name}} dans une discussion jetable — supprimée à votre retour à l'accueil",
   "logOutTitle": "Déconnectez-vous de cet appareil",
   "loadFailed": "Échec du chargement des discussions",
   "tryAgain": "Réessayez",

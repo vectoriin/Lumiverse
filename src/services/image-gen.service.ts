@@ -1208,7 +1208,7 @@ function buildContextMessages(userId: string, chatId: string, includeCharacters 
   const msgs: LlmMessage[] = [];
   const chat = chatsSvc.getChat(userId, chatId);
   if (chat) {
-    const char = charactersSvc.getCharacter(userId, chat.character_id);
+    const char = chat.character_id ? charactersSvc.getCharacter(userId, chat.character_id) : null;
     if (char) {
       const charInfo = [
         char.name && `Name: ${char.name}`,
@@ -1421,7 +1421,7 @@ async function loadConfiguredAvatarImages(
 
   if (params.includeCharacterAvatar) {
     const chat = chatsSvc.getChat(userId, chatId);
-    const character = chat ? charactersSvc.getCharacter(userId, chat.character_id) : null;
+    const character = chat?.character_id ? charactersSvc.getCharacter(userId, chat.character_id) : null;
     if (character?.image_id) await loadById(character.image_id);
   }
 

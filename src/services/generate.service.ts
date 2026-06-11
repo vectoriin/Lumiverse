@@ -19,6 +19,7 @@ import {
 } from "./prompt-assembly.service";
 import * as charactersSvc from "./characters.service";
 import { getEffectiveCharacterName } from "../types/character";
+import { isTemporaryChatMetadata } from "../types/chat";
 import {
   getTextContent,
   type LlmMessage,
@@ -1224,7 +1225,7 @@ async function runPromptPipeline(opts: {
   // pass's skip in prompt-assembly.service.ts (applyPromptRegexScriptsBeforeClipping).
   if (opts.inputMessages && !isPromptRegexChatOwned(opts.chatId, isExtensionRunning)) {
     const chatForRegex = chatsSvc.getChat(opts.userId, opts.chatId);
-    const characterId = opts.targetCharacterId || chatForRegex?.character_id;
+    const characterId = opts.targetCharacterId || chatForRegex?.character_id || undefined;
     const promptScripts = regexScriptsSvc.getActiveScripts(opts.userId, {
       characterId,
       chatId: opts.chatId,
@@ -1607,16 +1608,20 @@ export async function startGeneration(
     const resolvedTargetCharId = targetExistingAssistant
       ? inferredGroupTargetCharId || requestedTargetCharId
       : requestedTargetCharId || inferredGroupTargetCharId;
-    const targetCharId = resolvedTargetCharId || chat?.character_id;
+    const targetCharId = resolvedTargetCharId || chat?.character_id || undefined;
     const pipelineTargetCharId = resolvedTargetCharId;
     if (targetCharId) {
       const character = charactersSvc.getCharacter(input.userId, targetCharId);
       if (character) characterName = getEffectiveCharacterName(character);
     }
 
+    // Temporary chats are persona-less by contract — never fall back to the
+    // active/default persona for them.
+    const isTemporaryChat = isTemporaryChatMetadata(chat?.metadata);
+
     // Resolve persona_id from settings if not provided by the frontend, so the
     // persona's attached world book is always included regardless of UI state.
-    if (!input.persona_id) {
+    if (!input.persona_id && !isTemporaryChat) {
       const activePersonaSetting = settingsSvc.getSetting(
         input.userId,
         "activePersonaId",
@@ -1631,10 +1636,9 @@ export async function startGeneration(
 
     // Resolve target message EARLY (before council) so we can visually clear the
     // message on the frontend before council tools start executing.
-    let resolvedPersona = personasSvc.resolvePersonaOrDefault(
-      input.userId,
-      input.persona_id,
-    );
+    let resolvedPersona = isTemporaryChat
+      ? null
+      : personasSvc.resolvePersonaOrDefault(input.userId, input.persona_id);
     if (!input.persona_addon_states) {
       input.persona_addon_states = getChatPersonaAddonStates(
         chat?.metadata,
@@ -1896,11 +1900,9 @@ export async function startGeneration(
             // we miss. The hash of these messages is mixed into the cache
             // fingerprint so editing or deleting any in-window message
             // invalidates a stale cached deliberation block.
-            const fullCharacter = chat
-              ? charactersSvc.getCharacter(
-                  input.userId,
-                  targetCharId || chat.character_id,
-                )
+            const fullCharacterId = targetCharId || chat?.character_id;
+            const fullCharacter = chat && fullCharacterId
+              ? charactersSvc.getCharacter(input.userId, fullCharacterId)
               : null;
             const councilMessages = chatsSvc
               .getMessages(input.userId, input.chat_id)

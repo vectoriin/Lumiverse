@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef, type MouseEvent as ReactMouseEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { motion, AnimatePresence } from 'motion/react'
-import { MessageSquarePlus, MessageSquare, Trash2, Users, LogOut } from 'lucide-react'
+import { MessageSquarePlus, MessageSquare, Trash2, Users, LogOut, FlaskConical } from 'lucide-react'
 import { Spinner } from '@/components/shared/Spinner'
 import { chatsApi } from '@/api/chats'
 import { wsClient } from '@/ws/client'
@@ -384,6 +384,20 @@ export default function LandingPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [total, setTotal] = useState(0)
+  const [creatingTempChat, setCreatingTempChat] = useState(false)
+
+  const profiles = useStore((s) => s.profiles)
+  const activeProfileId = useStore((s) => s.activeProfileId)
+  const activeProfile = useMemo(
+    () => profiles.find((p) => p.id === activeProfileId) ?? profiles.find((p) => p.is_default) ?? null,
+    [profiles, activeProfileId]
+  )
+
+  // Temporary chats are disposable by contract: landing on the home page
+  // sweeps any the user left behind (closed tab, back navigation, etc.).
+  useEffect(() => {
+    chatsApi.deleteTemporary().catch(() => {})
+  }, [])
 
   // Skeleton shape/count for the pre-settings window and the fetch window.
   // Before settings arrive the store only has defaults, so fall back to the
@@ -567,6 +581,18 @@ export default function LandingPage() {
     navigate('/characters')
   }, [navigate])
 
+  const handleTempChat = useCallback(async () => {
+    if (creatingTempChat) return
+    setCreatingTempChat(true)
+    try {
+      const chat = await chatsApi.createTemporary()
+      navigate(`/chat/${chat.id}`)
+    } catch (err: any) {
+      console.error('[Lumiverse] Error creating temporary chat:', err)
+      setCreatingTempChat(false)
+    }
+  }, [creatingTempChat, navigate])
+
   const handleLogout = useCallback(() => {
     openModal('confirm', {
       title: t('logOut.title'),
@@ -637,15 +663,35 @@ export default function LandingPage() {
               </button>
             </div>
           </div>
-          <button
-            type="button"
-            className={styles.accountBtn}
-            onClick={handleLogout}
-            title={t('logOutTitle')}
-          >
-            <span className={styles.accountName}>{accountLabel}</span>
-            <LogOut size={13} strokeWidth={1.5} />
-          </button>
+          <div className={styles.headerActions}>
+            <button
+              type="button"
+              className={styles.accountBtn}
+              onClick={handleTempChat}
+              disabled={creatingTempChat}
+              title={
+                activeProfile
+                  ? t('tempChatTitleWithProfile', { name: activeProfile.name })
+                  : t('tempChatTitle')
+              }
+            >
+              <span className={styles.accountName}>
+                {activeProfile
+                  ? t('tempChatWithProfile', { name: activeProfile.name })
+                  : t('tempChat')}
+              </span>
+              <FlaskConical size={13} strokeWidth={1.5} />
+            </button>
+            <button
+              type="button"
+              className={styles.accountBtn}
+              onClick={handleLogout}
+              title={t('logOutTitle')}
+            >
+              <span className={styles.accountName}>{accountLabel}</span>
+              <LogOut size={13} strokeWidth={1.5} />
+            </button>
+          </div>
         </motion.header>
 
         <main className={styles.main}>

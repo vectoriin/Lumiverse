@@ -170,6 +170,27 @@ app.post("/", async (c) => {
   return c.json(chat, 201);
 });
 
+// Temporary character-less, persona-less chat for trying out a connection
+// profile. No greeting, hidden from recent lists, swept when the user
+// returns to the landing page (DELETE below). Registered before the /:id
+// routes so "temporary" never matches as a chat id.
+app.post("/temporary", async (c) => {
+  const userId = c.get("userId");
+  const body = await c.req.json().catch(() => ({}));
+  const chat = svc.createChat(userId, {
+    character_id: null,
+    name: typeof body?.name === "string" && body.name.trim() ? body.name : "Temporary Chat",
+    metadata: { temporary: true },
+  });
+  return c.json(chat, 201);
+});
+
+app.delete("/temporary", (c) => {
+  const userId = c.get("userId");
+  const deleted = svc.deleteTemporaryChats(userId);
+  return c.json({ success: true, deleted });
+});
+
 app.post("/group", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json();
@@ -667,7 +688,7 @@ app.put("/:chatId/messages/:id", async (c) => {
     const chat = svc.getChat(userId, chatId);
     if (chat) {
       const editScripts = regexScriptsSvc.getRunOnEditScripts(userId, {
-        characterId: chat.character_id,
+        characterId: chat.character_id ?? undefined,
         chatId,
       });
       if (editScripts.length > 0) {
@@ -766,7 +787,7 @@ app.put("/:chatId/messages/:id/swipe/:idx", async (c) => {
   const chat = svc.getChat(userId, chatId);
   if (chat) {
     const editScripts = regexScriptsSvc.getRunOnEditScripts(userId, {
-      characterId: chat.character_id,
+      characterId: chat.character_id ?? undefined,
       chatId,
     });
     if (editScripts.length > 0) {

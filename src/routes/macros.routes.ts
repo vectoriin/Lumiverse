@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { evaluate, buildEnv, resolveGroupCharacterNames, resolvePersonaPronouns, registry, initMacros } from "../macros";
-import { getEffectiveCharacterName } from "../types/character";
+import { getEffectiveCharacterName, makeAssistantCharacter } from "../types/character";
+import { isTemporaryChatMetadata } from "../types/chat";
 import type { Chat } from "../types/chat";
 import type { MacroEnv } from "../macros";
 import * as chatsSvc from "../services/chats.service";
@@ -142,13 +143,17 @@ function buildEnvFromIds(userId: string, body: {
     const chat = chatsSvc.getChat(userId, body.chat_id);
     if (chat) {
       const messages = chatsSvc.getMessages(userId, body.chat_id);
-      const character = charactersSvc.getCharacter(userId, chat.character_id);
+      const character = chat.character_id
+        ? charactersSvc.getCharacter(userId, chat.character_id)
+        : makeAssistantCharacter();
       if (character) {
-        const persona = resolvePersonaForChatMacros(
-          userId,
-          personasSvc.resolvePersonaOrDefault(userId, body.persona_id),
-          chat.metadata,
-        );
+        const persona = isTemporaryChatMetadata(chat.metadata)
+          ? null
+          : resolvePersonaForChatMacros(
+              userId,
+              personasSvc.resolvePersonaOrDefault(userId, body.persona_id),
+              chat.metadata,
+            );
 
         const connection = body.connection_id
           ? connectionsSvc.getConnection(userId, body.connection_id)

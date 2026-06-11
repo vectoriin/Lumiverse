@@ -1,8 +1,9 @@
 import { buildEnv, initMacros, mergeDynamicMacros, resolveGroupCharacterNames, resolvePersonaPronouns } from "../macros";
 import type { MacroEnv } from "../macros";
 import { messageContentProcessorChain } from "../spindle/message-content-processor";
-import { getEffectiveCharacterName } from "../types/character";
+import { getEffectiveCharacterName, makeAssistantCharacter } from "../types/character";
 import type { Chat } from "../types/chat";
+import { isTemporaryChatMetadata } from "../types/chat";
 import type { RegexPlacement, RegexScript } from "../types/regex-script";
 import * as charactersSvc from "./characters.service";
 import * as chatsSvc from "./chats.service";
@@ -43,13 +44,17 @@ function buildEnvFromContext(userId: string, ctx: DisplayRegexContext): MacroEnv
     const chat = chatsSvc.getChat(userId, ctx.chat_id);
     if (chat) {
       const messages = chatsSvc.getMessages(userId, ctx.chat_id);
-      const character = charactersSvc.getCharacter(userId, chat.character_id);
+      const character = chat.character_id
+        ? charactersSvc.getCharacter(userId, chat.character_id)
+        : makeAssistantCharacter();
       if (character) {
-        const persona = resolvePersonaForChatMacros(
-          userId,
-          personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id),
-          chat.metadata,
-        );
+        const persona = isTemporaryChatMetadata(chat.metadata)
+          ? null
+          : resolvePersonaForChatMacros(
+              userId,
+              personasSvc.resolvePersonaOrDefault(userId, ctx.persona_id),
+              chat.metadata,
+            );
         const connection = connectionsSvc.getDefaultConnection(userId);
         const groupCharacterNames = resolveGroupCharacterNames(chat, (cid) => {
           const c = charactersSvc.getCharacter(userId, cid);

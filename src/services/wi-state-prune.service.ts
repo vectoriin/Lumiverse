@@ -22,7 +22,7 @@ export function pruneOrphanedWiState(userId: string, chat: Chat): Chat {
   const wiState = chat.metadata?.wi_state as Record<string, any> | undefined;
   if (!wiState || Object.keys(wiState).length === 0) return chat;
 
-  const character = charactersSvc.getCharacter(userId, chat.character_id);
+  const character = chat.character_id ? charactersSvc.getCharacter(userId, chat.character_id) : null;
   const charBookIds = character ? getCharacterWorldBookIds(character.extensions) : [];
   const persona = personasSvc.resolvePersonaOrDefault(userId);
   const chatBookIds = (chat.metadata?.chat_world_book_ids as string[] | undefined) ?? [];

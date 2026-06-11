@@ -1,6 +1,7 @@
 export interface Chat {
   id: string;
-  character_id: string;
+  /** Null for temporary character-less chats (see metadata.temporary). */
+  character_id: string | null;
   name: string;
   metadata: Record<string, any>;
   created_at: number;
@@ -8,10 +9,20 @@ export interface Chat {
 }
 
 export interface CreateChatInput {
-  character_id: string;
+  /** Omit/null only for temporary character-less chats. */
+  character_id?: string | null;
   name?: string;
   metadata?: Record<string, any>;
   greeting_index?: number;
+}
+
+/**
+ * Temporary chats are disposable, character-less, persona-less chats used to
+ * try out a connection profile. They are excluded from recent-chat lists and
+ * swept (deleted) when the user returns to the landing page.
+ */
+export function isTemporaryChatMetadata(metadata: Record<string, any> | null | undefined): boolean {
+  return metadata?.temporary === true;
 }
 
 export interface CreateGroupChatInput {

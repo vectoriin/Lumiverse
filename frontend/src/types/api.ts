@@ -59,7 +59,8 @@ export interface TagCount {
 // ---- Chat ----
 export interface Chat {
   id: string;
-  character_id: string;
+  /** Null for temporary character-less chats (metadata.temporary). */
+  character_id: string | null;
   name: string;
   metadata: Record<string, any>;
   created_at: number;
