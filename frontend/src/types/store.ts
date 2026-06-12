@@ -708,6 +708,8 @@ export interface ImageGenSettings {
   promptGenerationTimeoutSeconds?: number
   /** Maximum seconds for the image provider generation phase. 0 disables the timeout. */
   generationTimeoutSeconds?: number
+  /** Maximum recent chat messages sent to the prompt parser for scene analysis and parsed custom prompts. */
+  promptContextMessageLimit?: number
   sceneChangeThreshold: number
   autoGenerate: boolean
   forceGeneration: boolean
