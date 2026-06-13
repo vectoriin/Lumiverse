@@ -236,6 +236,9 @@ export default function InputArea({ chatId }: InputAreaProps) {
   const setActiveProfile = useStore((s) => s.setActiveProfile)
   const activeProfile = profiles.find((p) => p.id === activeProfileId) || null
   const voiceSettings = useStore((s) => s.voiceSettings)
+  // Temporary chats are persona-less: messages send as plain "User" and no
+  // persona_id is attached to message extras or generation requests.
+  const isTemporaryChat = useStore((s) => s.activeChatMetadata?.temporary === true)
   const activePersonaId = useStore((s) => s.activePersonaId)
   const getActivePresetForGeneration = useStore((s) => s.getActivePresetForGeneration)
   const regenFeedback = useStore((s) => s.regenFeedback)
@@ -972,7 +975,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
       if (e.key === 'Escape' && isStreaming) {
         e.preventDefault()
         e.stopPropagation()
-        generateApi.stop(activeGenerationId || undefined).catch(console.error)
+        generateApi.stop(activeGenerationId || undefined, chatId).catch(console.error)
         // If in optimistic phase, revert locally
         if (!activeGenerationId) {
           stopStreaming()
@@ -981,7 +984,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     }
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
-  }, [isStreaming, activeGenerationId, stopStreaming])
+  }, [isStreaming, activeGenerationId, chatId, stopStreaming])
 
   useEffect(() => {
     if (openPopover !== 'persona') return
@@ -1155,7 +1158,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     })
 
     try {
-      const effectivePersonaId = sendPersonaId || activePersonaId
+      const effectivePersonaId = isTemporaryChat ? null : (sendPersonaId || activePersonaId)
       const effectivePersonaName = personas.find((p) => p.id === effectivePersonaId)?.name || t('userFallback')
       const extra: Record<string, any> = {}
       if (effectivePersonaId) extra.persona_id = effectivePersonaId
@@ -1176,7 +1179,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     } finally {
       sendingRef.current = false
     }
-  }, [text, chatId, isStreaming, activePersonaId, personas, sendPersonaId, pendingAttachments, addMessage, saveDraftInput, resizeTextarea])
+  }, [text, chatId, isStreaming, isTemporaryChat, activePersonaId, personas, sendPersonaId, pendingAttachments, addMessage, saveDraftInput, resizeTextarea])
 
   const handleSend = useCallback(async () => {
     if (sendingRef.current || isStreaming) return
@@ -1203,7 +1206,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     })
 
     try {
-      const effectivePersonaId = sendPersonaId || activePersonaId
+      const effectivePersonaId = isTemporaryChat ? null : (sendPersonaId || activePersonaId)
       const effectivePersonaName = personas.find((p) => p.id === effectivePersonaId)?.name || t('userFallback')
       const presetId = getActivePresetForGeneration() || undefined
       const genOpts: import('@/api/generate').GenerateRequest = {
@@ -1311,7 +1314,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     } finally {
       sendingRef.current = false
     }
-  }, [text, chatId, isStreaming, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, personas, sendPersonaId, pendingAttachments, addMessage, startStreaming, setStreamingError, consumeOneshotGuides, saveDraftInput, hasQueuedMessages, isGroupChat, groupCharacterIds, mutedCharacterIds, characters, setMentionQueue, resizeTextarea])
+  }, [text, chatId, isStreaming, isTemporaryChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, personas, sendPersonaId, pendingAttachments, addMessage, startStreaming, setStreamingError, consumeOneshotGuides, saveDraftInput, hasQueuedMessages, isGroupChat, groupCharacterIds, mutedCharacterIds, characters, setMentionQueue, resizeTextarea])
 
   const finalizeSTTTranscript = useCallback(() => {
     const transcript = sttNormalizedFinalSegmentsRef.current.join(' ').trim()
@@ -1515,9 +1518,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
   const handleStop = useCallback(async () => {
     if (!isStreaming) return
     try {
-      // If we have a generation ID, stop that specific generation.
-      // Otherwise (optimistic phase), stop all user generations.
-      await generateApi.stop(activeGenerationId || undefined)
+      // Stop the specific generation when we know its ID; the chat id lets the
+      // backend fall back to the chat's active generation if the ID is stale
+      // (or, in the optimistic phase, not yet known).
+      await generateApi.stop(activeGenerationId || undefined, chatId)
     } catch (err) {
       console.error('[InputArea] Failed to stop:', err)
     }
@@ -1525,7 +1529,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     if (!activeGenerationId) {
       stopStreaming()
     }
-  }, [isStreaming, activeGenerationId, stopStreaming])
+  }, [isStreaming, activeGenerationId, chatId, stopStreaming])
 
   const handleNewChat = useCallback(async () => {
     // For group chats, open group creator pre-populated with current members

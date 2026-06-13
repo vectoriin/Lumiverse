@@ -1,3 +1,4 @@
+import * as chatsSvc from "./chats.service";
 import * as connectionsSvc from "./connections.service";
 import * as sttConnectionsSvc from "./stt-connections.service";
 import * as ttsConnectionsSvc from "./tts-connections.service";
@@ -18,6 +19,7 @@ import type { ConnectionProfile } from "../types/connection-profile";
 import type { SttConnectionProfile } from "../types/stt-connection";
 import type { TtsConnectionProfile } from "../types/tts-connection";
 import type { ImageGenConnectionProfile } from "../types/image-gen-connection";
+import type { GroupedRecentChat } from "../types/chat";
 import type { Pack } from "../types/pack";
 import type { Persona } from "../types/persona";
 import type { RegexScript } from "../types/regex-script";
@@ -66,6 +68,13 @@ export interface BootstrapPayload {
     isPrivileged: boolean;
     tools: ToolRegistration[];
   };
+  /**
+   * First page of the landing page's grouped recent chats, sized by the
+   * user's landingPageChatsDisplayed setting. Lets the landing page render
+   * real content straight from bootstrap instead of a third serial round
+   * trip (auth → bootstrap → recent-grouped).
+   */
+  recentChats: PaginatedResult<GroupedRecentChat>;
 }
 
 interface ProviderListEntry {
@@ -89,11 +98,26 @@ interface StartupSettings {
   viewMode?: "grid" | "single" | "list";
   charactersPerPage?: number;
   theme?: unknown;
+  landingPageChatsDisplayed?: number;
+  landingPageLayoutMode?: "cards" | "compact";
 }
 
 const LIST_LIMIT_CONNECTIONS = 100;
 const LIST_LIMIT_PACKS_PERSONAS = 200;
 const LIST_LIMIT_REGEX = 1000;
+const LANDING_CHATS_DEFAULT_LIMIT = 12;
+const LANDING_CHATS_MAX_LIMIT = 100;
+const STARTUP_SETTINGS_KEYS = [
+  "favorites",
+  "filterTab",
+  "sortField",
+  "sortDirection",
+  "viewMode",
+  "charactersPerPage",
+  "theme",
+  "landingPageChatsDisplayed",
+  "landingPageLayoutMode",
+] as const;
 
 /**
  * Page connection lists to exhaustion: the client treats bootstrap's lists as
@@ -127,15 +151,6 @@ async function collectAll<T>(
   }
   return { data, total: data.length, limit: data.length, offset: 0 };
 }
-const STARTUP_SETTINGS_KEYS = [
-  "favorites",
-  "filterTab",
-  "sortField",
-  "sortDirection",
-  "viewMode",
-  "charactersPerPage",
-  "theme",
-] as const;
 
 function getStartupSettings(userId: string): StartupSettings {
   const rows = settingsSvc.getSettingsByKeys(userId, [...STARTUP_SETTINGS_KEYS]);
@@ -175,7 +190,29 @@ function getStartupSettings(userId: string): StartupSettings {
     startupSettings.theme = rows.get("theme");
   }
 
+  const landingPageChatsDisplayed = rows.get("landingPageChatsDisplayed");
+  if (typeof landingPageChatsDisplayed === "number" && Number.isFinite(landingPageChatsDisplayed)) {
+    startupSettings.landingPageChatsDisplayed = landingPageChatsDisplayed;
+  }
+
+  const landingPageLayoutMode = rows.get("landingPageLayoutMode");
+  if (landingPageLayoutMode === "cards" || landingPageLayoutMode === "compact") {
+    startupSettings.landingPageLayoutMode = landingPageLayoutMode;
+  }
+
   return startupSettings;
+}
+
+/** First recent-chats page for the landing view, sized by the user's setting. */
+function getLandingRecentChats(userId: string): PaginatedResult<GroupedRecentChat> {
+  const stored = settingsSvc
+    .getSettingsByKeys(userId, ["landingPageChatsDisplayed"])
+    .get("landingPageChatsDisplayed");
+  const limit =
+    typeof stored === "number" && Number.isFinite(stored)
+      ? Math.min(Math.max(Math.floor(stored), 1), LANDING_CHATS_MAX_LIMIT)
+      : LANDING_CHATS_DEFAULT_LIMIT;
+  return chatsSvc.listRecentChatsGrouped(userId, { limit, offset: 0 });
 }
 
 function listLlmProviders(): ProviderListEntry[] {
@@ -267,6 +304,7 @@ export async function buildBootstrapPayload(
     packs, personas, regexScripts,
     councilSettings, councilTools,
     spindle,
+    recentChats,
   ] = await Promise.all([
     safe("startupSettings", () => getStartupSettings(userId), {} as StartupSettings),
     safe("llm.connections", () => collectAll((p) => connectionsSvc.listConnections(userId, p)), emptyPage<ConnectionProfile>(LIST_LIMIT_CONNECTIONS)),
@@ -283,6 +321,7 @@ export async function buildBootstrapPayload(
     safe("council.settings", () => councilSvc.getCouncilSettings(userId), {} as CouncilSettings),
     safe("council.tools", () => councilSvc.getAvailableTools(userId), [] as RuntimeCouncilToolDefinition[]),
     safe("spindle", () => listSpindle(userId, role), { extensions: [], isPrivileged: false, tools: [] }),
+    safe("recentChats", () => getLandingRecentChats(userId), emptyPage<GroupedRecentChat>(LANDING_CHATS_DEFAULT_LIMIT)),
   ]);
 
   const payload: BootstrapPayload = {
@@ -296,6 +335,7 @@ export async function buildBootstrapPayload(
     regexScripts,
     council: { settings: councilSettings, tools: councilTools },
     spindle,
+    recentChats,
   };
 
   return { payload, errors };

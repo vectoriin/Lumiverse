@@ -59,11 +59,13 @@ export interface TagCount {
 // ---- Chat ----
 export interface Chat {
   id: string;
-  character_id: string;
+  /** Null for temporary character-less chats (metadata.temporary). */
+  character_id: string | null;
   name: string;
   metadata: Record<string, any>;
   created_at: number;
   updated_at: number;
+  character_display_owner?: string | null;
 }
 
 export interface CreateChatInput {
@@ -195,7 +197,13 @@ export interface Message {
   content: string;
   send_date: number;
   swipe_id: number;
-  swipes: string[];
+  /**
+   * List endpoints deliver a light projection: only the active swipe's text
+   * is populated, non-active slots are null (length is preserved for the n/m
+   * indicator and at-first/at-last checks). Swipe actions and single-message
+   * fetches return fully populated arrays.
+   */
+  swipes: (string | null)[];
   swipe_dates: number[];
   extra: MessageExtra;
   parent_message_id: string | null;

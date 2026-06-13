@@ -344,7 +344,9 @@
   },
   "swipe": {
     "previous": "Previous swipe",
-    "next": "Next swipe"
+    "next": "Next swipe",
+    "live": "Generating swipe (still streaming)",
+    "ready": "New swipe ready"
   },
   "portrait": {
     "setChatBackground": "Set as Chat Background"

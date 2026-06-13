@@ -1150,7 +1150,7 @@ function buildContextMessages(input: ExecuteInput, settings: CouncilSettings): L
 
   // Character info
   if (ts.includeCharacterInfo && chat) {
-    if (!character) character = charactersSvc.getCharacter(input.userId, chat.character_id);
+    if (!character && chat.character_id) character = charactersSvc.getCharacter(input.userId, chat.character_id);
     if (character) {
       const charInfo = [
         character.name && `Name: ${character.name}`,
@@ -1186,7 +1186,7 @@ function buildContextMessages(input: ExecuteInput, settings: CouncilSettings): L
       console.debug("[council] Using %d pre-activated world info entries from enrichment", activatedEntries.length);
     } else {
       // Fallback: independently activate WI (for callers without enrichment)
-      if (!character) character = charactersSvc.getCharacter(input.userId, chat.character_id);
+      if (!character && chat.character_id) character = charactersSvc.getCharacter(input.userId, chat.character_id);
       const { entries: wiEntries } = collectWorldInfoForCouncil(input.userId, character, persona, input.chatId);
       if (wiEntries.length > 0) {
         const allMsgs = chatsSvc.getMessages(input.userId, input.chatId);

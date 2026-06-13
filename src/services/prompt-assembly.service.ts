@@ -26,9 +26,10 @@ import type {
 } from "../types/preset";
 import type { WorldInfoCache } from "../types/world-book";
 import type { Character } from "../types/character";
-import { getEffectiveCharacterName } from "../types/character";
+import { getEffectiveCharacterName, makeAssistantCharacter } from "../types/character";
 import type { Persona } from "../types/persona";
 import type { Chat } from "../types/chat";
+import { isNoPresetChatMetadata, isTemporaryChatMetadata } from "../types/chat";
 import type { Message, MessageAttachment } from "../types/message";
 import type { Preset } from "../types/preset";
 import type { ConnectionProfile } from "../types/connection-profile";
@@ -300,13 +301,13 @@ function rtrimLastHistoryAssistant(result: LlmMessage[]): void {
 async function applyPromptRegexScriptsBeforeClipping(
   result: LlmMessage[],
   ctx: AssemblyContext,
-  characterId: string,
+  characterId: string | null,
   macroEnv: MacroEnv,
 ): Promise<void> {
   if (ctx.skipPromptRegex) return;
 
   const scripts = regexScriptsSvc.getActiveScripts(ctx.userId, {
-    characterId,
+    characterId: characterId ?? undefined,
     chatId: ctx.chatId,
     target: "prompt",
   });
@@ -1029,12 +1030,19 @@ export async function assemblePrompt(
     : allMessages;
   // For group chats, resolve the target character; fall back to the chat's primary character
   const characterId = ctx.targetCharacterId || chat.character_id;
+  // Temporary chats have no character: a synthetic "Assistant" stands in so
+  // assembly/macros run unchanged, and the persona is skipped entirely
+  // (temp chats are persona-less by contract).
   const character =
-    pf?.character ?? charactersSvc.getCharacter(ctx.userId, characterId);
+    pf?.character ??
+    (characterId
+      ? charactersSvc.getCharacter(ctx.userId, characterId)
+      : makeAssistantCharacter());
   if (!character) throw new Error("Character not found");
 
-  let persona =
-    pf?.persona !== undefined
+  let persona = isTemporaryChatMetadata(chat.metadata)
+    ? null
+    : pf?.persona !== undefined
       ? pf.persona
       : personasSvc.resolvePersonaOrDefault(ctx.userId, ctx.personaId);
   if (!pf) {
@@ -1054,22 +1062,27 @@ export async function assemblePrompt(
 
   // Resolve preset: request presetId takes priority, then connection's
   // preset_id, then any more-specific preset-profile binding can override that
-  // preset selection for the active chat/character context.
-  const requestedPresetId = ctx.presetId || connection?.preset_id || null;
+  // preset selection for the active chat/character context. No-preset temp
+  // chats opt out entirely — no preset blocks or parameters, no bindings, no
+  // fallback — so assembly drops to the raw legacy message mapping below.
+  const noPreset = isNoPresetChatMetadata(chat.metadata);
+  const requestedPresetId = noPreset ? null : ctx.presetId || connection?.preset_id || null;
   const resolvedProfile =
-    ctx.forcePresetId && ctx.presetId
-      ? { preset_id: ctx.presetId, binding: null, source: "none" as const }
-      : presetProfilesSvc.resolveProfile(
-          ctx.userId,
-          requestedPresetId,
-          chat.id,
-          characterId,
-          { isGroup: chat.metadata?.group === true, connectionId: connection?.id ?? null },
-        );
+    noPreset
+      ? { preset_id: null, binding: null, source: "none" as const }
+      : ctx.forcePresetId && ctx.presetId
+        ? { preset_id: ctx.presetId, binding: null, source: "none" as const }
+        : presetProfilesSvc.resolveProfile(
+            ctx.userId,
+            requestedPresetId,
+            chat.id,
+            characterId,
+            { isGroup: chat.metadata?.group === true, connectionId: connection?.id ?? null },
+          );
   const resolvedPresetId = resolvedProfile.preset_id;
 
   let preset: Preset | null = null;
-  const prefetchedPreset = pf?.preset !== undefined ? pf.preset : null;
+  const prefetchedPreset = noPreset ? null : pf?.preset !== undefined ? pf.preset : null;
   if (resolvedPresetId) {
     preset =
       prefetchedPreset?.id === resolvedPresetId
@@ -1357,7 +1370,8 @@ export async function assemblePrompt(
       chatTurn: messages.length,
       chatMetadata: chat.metadata ?? {},
     },
-    ctx.userId
+    ctx.userId,
+    wiSources.bookSourceMap
   );
   const wiResult = activateWorldInfo({
     entries: intercepted,
@@ -4140,10 +4154,14 @@ export async function getActivatedWorldInfoForChat(
   if (!chat) throw new Error("Chat not found");
 
   const messages = chatsSvc.getMessages(userId, chatId);
-  const character = charactersSvc.getCharacter(userId, chat.character_id);
+  const character = chat.character_id
+    ? charactersSvc.getCharacter(userId, chat.character_id)
+    : makeAssistantCharacter();
   if (!character) throw new Error("Character not found");
 
-  const persona = personasSvc.resolvePersonaOrDefault(userId);
+  const persona = isTemporaryChatMetadata(chat.metadata)
+    ? null
+    : personasSvc.resolvePersonaOrDefault(userId);
 
   const globalWorldBookIds =
     (settingsSvc.getSetting(userId, "globalWorldBooks")?.value as
