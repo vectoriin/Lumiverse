@@ -21,10 +21,10 @@ import { uuidv7 } from '@/lib/uuid'
 import { toast } from '@/lib/toast'
 import ImageGenExportModal from './ImageGenExportModal'
 import ImageLightbox from '@/components/shared/ImageLightbox'
+import { ComfyWorkflowEditor } from './image-gen-connections/ComfyWorkflowEditor'
+import { buildMappedFieldControls, type ComfyMappedFieldControl } from '@/lib/comfyui-mapped-fields'
+import type { ComfyUIFieldMapping, ComfyUIWorkflowConfig } from '@/api/image-gen-connections'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
-import { WorkflowEditorModal } from '@/components/dream-weaver/visual-studio/comfyui/WorkflowEditorModal'
-import { buildMappedFieldControls, type ComfyMappedFieldControl } from '@/components/dream-weaver/visual-studio/comfyui/mapped-fields'
-import type { ComfyUIFieldMapping, ComfyUIWorkflowConfig } from '@/api/dream-weaver'
 import type { ConnectionProfile, ImageGenProviderInfo, ImageGenParameterSchema } from '@/types/api'
 import type { ImageGenPromptPreset } from '@/types/store'
 import styles from './ImageGenPanel.module.css'
@@ -1747,9 +1747,8 @@ export default function ImageGenPanel() {
         />
       )}
       {workflowEditorOpen && (
-        <WorkflowEditorModal
+        <ComfyWorkflowEditor
           config={workflowConfig}
-          capabilities={workflowCapabilities}
           error={workflowError}
           onImportWorkflow={importComfyWorkflow}
           onUpdateMappings={updateComfyMappings}
