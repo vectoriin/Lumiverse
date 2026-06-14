@@ -313,7 +313,11 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current)
     previewTimerRef.current = setTimeout(() => {
       setPreviewLoading(true)
-      resolveMacrosApi({ template: content, ...(activeChatId ? { chat_id: activeChatId } : {}) })
+      // Trim the preview to match the dry run: the assembly strips
+      // leading/trailing whitespace from each resolved block, except append
+      // roles, where it preserves whitespace for inter-append spacing.
+      const isAppend = role === 'user_append' || role === 'assistant_append'
+      resolveMacrosApi({ template: content, trim: !isAppend, ...(activeChatId ? { chat_id: activeChatId } : {}) })
         .then((res) => {
           setPreviewText(res.text)
           setPreviewDiagnostics(res.diagnostics)
@@ -325,7 +329,7 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
         .finally(() => setPreviewLoading(false))
     }, 500)
     return () => { if (previewTimerRef.current) clearTimeout(previewTimerRef.current) }
-  }, [content, showPreview, activeChatId])
+  }, [content, showPreview, activeChatId, role])
 
   const handlePositionChange = (newPosition: string) => {
     const pos = newPosition as PromptBlock['position']

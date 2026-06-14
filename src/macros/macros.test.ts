@@ -170,6 +170,36 @@ describe("Core primitives", () => {
     expect(await ev("{{#trim}}  hello  {{/trim}}")).toBe("  hello  ");
   });
 
+  test("block-style trim matches assembly per-block trim", async () => {
+    // A var built inside a {{trim}} block but emitted afterwards. The structural
+    // whitespace the author typed around the nested macros no longer leaks into
+    // the value (stripArgFraming), so only the lone newline between {{/trim}}
+    // and the emit remains. The block-editor preview (resolve with trim) and the
+    // dry run (assembly .trim() per block) must agree — both strip that.
+    const template = `{{trim}}
+{{setvar::cotexpansion::}}
+{{setvar::cotexpansion::
+  {{join::{{newline}}::
+    {{getvar::cotexpansion}}::
+    first string
+  }}
+}}
+{{setvar::cotexpansion::
+  {{join::{{newline}}::
+    {{getvar::cotexpansion}}::
+    second string
+  }}
+}}
+{{/trim}}
+{{.cotexpansion}}`;
+    const raw = await ev(template);
+    // Raw resolution (free-form callers, e.g. chat input) keeps the newline the
+    // author put between the {{/trim}} and the {{.cotexpansion}} emit.
+    expect(raw).toBe("\nfirst string\nsecond string");
+    // Block-style normalization (preview `trim: true` / dry run) cleans it.
+    expect(raw.trim()).toBe("first string\nsecond string");
+  });
+
   test("reverse", async () => {
     expect(await ev("{{reverse::hello}}")).toBe("olleh");
   });
@@ -695,6 +725,30 @@ describe("String macros", () => {
 {{.cotexpansion}}
 {{/trim}}`;
     expect(await ev(template)).toBe("first string\nsecond string");
+  });
+
+  test("nested macro on its own line stores same value as inline (regression)", async () => {
+    // The structural whitespace between `setvar::key::` and a nested macro laid
+    // out on the next line must NOT leak into the stored value — building the
+    // var with the {{join}} on its own indented line ("A") must match building
+    // it inline after the `::` ("B"). The {{newline}} separator is preserved.
+    const buildAndGet = async (open: string) => {
+      const env = makeEnv();
+      await ev(
+        `${open}::{{newline}}::
+    {{getvar::acc}}::
+Test String
+  }}
+}}`,
+        env,
+      );
+      return env.variables.local.get('acc')
+    };
+    const a = await buildAndGet('{{setvar::acc::\n  {{join'); // join on next line
+    const b = await buildAndGet('{{setvar::acc::{{join');      // join inline
+    expect(a).toBe('Test String');
+    expect(b).toBe('Test String');
+    expect(a).toBe(b);
   });
 
   test("repeat", async () => {

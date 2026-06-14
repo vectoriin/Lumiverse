@@ -29,6 +29,13 @@ app.post("/resolve", async (c) => {
     persona_id?: string;
     connection_id?: string;
     dynamic_macros?: Record<string, string>;
+    // When true, leading/trailing whitespace is stripped from the resolved
+    // text. This mirrors the per-block trim the assembly applies to a prompt
+    // block (see prompt-assembly.service.ts), so a block-editor preview
+    // matches what a dry run produces. Off by default — callers that resolve
+    // free-form text (e.g. the chat input "resolve macros" action) must keep
+    // the user's exact whitespace.
+    trim?: boolean;
   }>();
 
   if (!body.template) {
@@ -40,7 +47,7 @@ app.post("/resolve", async (c) => {
 
   const result = await evaluate(body.template, env, registry);
   return c.json({
-    text: result.text,
+    text: body.trim ? result.text.trim() : result.text,
     diagnostics: result.diagnostics,
     touched_vars: Array.from(result.touchedVars),
     cacheable: result.cacheable,

@@ -5230,6 +5230,10 @@ export async function clipToContextBudget(
   }
 
   if (remainingHistoryBudget <= 0) {
+    // Measure history before compaction — the in-place drop below truncates
+    // `result`, after which `historyIndices` no longer addresses valid entries.
+    const allHistory = approxHistoryTokens(0, historyIndices.length);
+
     let write = 0;
     for (let read = 0; read < n; read++) {
       const msg = result[read];
@@ -5239,7 +5243,6 @@ export async function clipToContextBudget(
     }
     result.length = write;
 
-    const allHistory = approxHistoryTokens(0, historyIndices.length);
     return makeStats({
       chatHistoryTokensBefore: allHistory,
       chatHistoryTokensAfter: 0,
