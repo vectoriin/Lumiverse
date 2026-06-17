@@ -22,6 +22,15 @@ export enum EventType {
   GENERATION_ACKNOWLEDGED = "GENERATION_ACKNOWLEDGED",
   GENERATION_IN_PROGRESS = "GENERATION_IN_PROGRESS",
   GENERATION_PHASE_CHANGED = "GENERATION_PHASE_CHANGED",
+  // Deferred post-generation bookkeeping (tokenCount / TTFT / TPS) finished and
+  // was persisted. Emitted after GENERATION_ENDED so the detail pill + hover
+  // tooltip can fill in without a reload — the terminal event stays cheap.
+  GENERATION_METRICS_READY = "GENERATION_METRICS_READY",
+  // Deferred prompt-breakdown tokenization finished. Emitted after
+  // GENERATION_ENDED (and separately from METRICS_READY so the pill isn't held
+  // behind the heavier breakdown count) so an opened Prompt Breakdown modal can
+  // render from cache instead of re-fetching.
+  GENERATION_BREAKDOWN_READY = "GENERATION_BREAKDOWN_READY",
   STREAM_TOKEN_RECEIVED = "STREAM_TOKEN_RECEIVED",
 
   // Entities

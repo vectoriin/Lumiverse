@@ -14,6 +14,8 @@ export enum EventType {
   GENERATION_STARTED = 'GENERATION_STARTED',
   GENERATION_IN_PROGRESS = 'GENERATION_IN_PROGRESS',
   GENERATION_PHASE_CHANGED = 'GENERATION_PHASE_CHANGED',
+  GENERATION_METRICS_READY = 'GENERATION_METRICS_READY',
+  GENERATION_BREAKDOWN_READY = 'GENERATION_BREAKDOWN_READY',
   STREAM_TOKEN_RECEIVED = 'STREAM_TOKEN_RECEIVED',
   GENERATION_ENDED = 'GENERATION_ENDED',
   GENERATION_STOPPED = 'GENERATION_STOPPED',
@@ -310,6 +312,33 @@ export interface GenerationEndedPayload {
   error?: string
   tokenCount?: number
   generationMetrics?: GenerationMetrics
+}
+
+/**
+ * Follow-up to GENERATION_ENDED carrying the deferred metrics (token count,
+ * TTFT/TPS, model/provider) once they've been computed and persisted. `swipeId`
+ * is the swipe these metrics belong to, so the client can avoid patching them
+ * onto a different swipe the user navigated to mid-stream.
+ */
+export interface GenerationMetricsReadyPayload {
+  generationId: string
+  chatId: string
+  messageId: string
+  swipeId?: number
+  tokenCount?: number
+  generationMetrics?: GenerationMetrics
+}
+
+/**
+ * Follow-up to GENERATION_ENDED carrying the prompt breakdown once its deferred
+ * tokenization finishes, so an opened Prompt Breakdown modal renders from cache.
+ * `messages` is intentionally omitted server-side (derived/fetched on demand).
+ */
+export interface GenerationBreakdownReadyPayload {
+  generationId: string
+  chatId: string
+  messageId: string
+  breakdown: Omit<import('@/types/store').BreakdownCacheEntry, 'chatId'>
 }
 
 export interface GenerationAcknowledgedPayload {

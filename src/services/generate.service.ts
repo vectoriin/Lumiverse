@@ -3657,6 +3657,24 @@ async function runGeneration(
             lifecycle.streamingSwipeId,
             metricsExtra,
           );
+          // GENERATION_ENDED already fired (and no longer carries these — they're
+          // computed here, after the terminal event, so the stop button clears
+          // immediately). Push a follow-up so the live detail pill / hover tooltip
+          // fill in without waiting for a reload. swipeId lets the client gate the
+          // patch to the swipe these belong to, in case the user navigated away
+          // mid-stream.
+          eventBus.emit(
+            EventType.GENERATION_METRICS_READY,
+            {
+              generationId,
+              chatId,
+              messageId,
+              swipeId: lifecycle.streamingSwipeId,
+              ...(resolvedTokenCount ? { tokenCount: resolvedTokenCount } : {}),
+              ...(generationMetrics ? { generationMetrics } : {}),
+            },
+            userId,
+          );
         }
 
         if (
@@ -3699,6 +3717,19 @@ async function runGeneration(
                 messageId,
                 chatId,
                 breakdownPayload,
+              );
+              // Push the breakdown so an opened Prompt Breakdown modal renders
+              // from cache instead of re-fetching. GENERATION_ENDED stopped
+              // carrying it (deferred, after the terminal event). Drop `messages`
+              // — the modal derives chat-history messages from the store or
+              // fetches raw on demand, so there's no need to send the largest
+              // (duplicated) field over the socket.
+              const { messages: _omitMessages, ...breakdownForClient } =
+                breakdownPayload;
+              eventBus.emit(
+                EventType.GENERATION_BREAKDOWN_READY,
+                { generationId, chatId, messageId, breakdown: breakdownForClient },
+                userId,
               );
             }
           } catch {

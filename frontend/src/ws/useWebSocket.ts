@@ -26,6 +26,8 @@ import type {
   GenerationInProgressPayload,
   GenerationPhaseChangedPayload,
   GenerationEndedPayload,
+  GenerationMetricsReadyPayload,
+  GenerationBreakdownReadyPayload,
   GenerationAcknowledgedPayload,
   MessageSentPayload,
   MessageEditedPayload,
@@ -112,6 +114,35 @@ function summarizeVarChanges(changedFields: readonly string[]): VarChangeSummary
 function fetchLatestMessages(chatId: string) {
   const pageSize = useStore.getState().messagesPerPage || 50
   return messagesApi.list(chatId, { limit: pageSize, tail: true })
+}
+
+// Deferred generation metrics (tokenCount / TTFT / TPS / model / provider) are
+// persisted *after* GENERATION_ENDED and pushed via GENERATION_METRICS_READY,
+// which races that event's reconciliation re-fetch (the fetch can read the row
+// before the metrics land). Buffer the last few keyed by message id so the
+// reconciliation can re-apply them if its setMessages won the race and wiped the
+// live patch. Bounded FIFO — only the most recent generations matter.
+const PENDING_METRICS_MAX = 20
+const pendingGenerationMetrics = new Map<string, GenerationMetricsReadyPayload>()
+
+/** Patch buffered/live metrics onto the in-store message (no-op if absent). */
+function applyGenerationMetrics(payload: GenerationMetricsReadyPayload): void {
+  const state = useStore.getState()
+  if (payload.chatId !== state.activeChatId || !payload.messageId) return
+  if (payload.tokenCount == null && !payload.generationMetrics) return
+  const msg = state.messages.find((m) => m.id === payload.messageId)
+  if (!msg) return
+  // Metrics are anchored to the generated swipe; top-level extra is the active
+  // swipe's projection. Skip when the user is viewing a different swipe — the
+  // persisted value surfaces when they navigate to it.
+  if (payload.swipeId != null && msg.swipe_id !== payload.swipeId) return
+  state.updateMessage(payload.messageId, {
+    extra: {
+      ...msg.extra,
+      ...(payload.tokenCount != null ? { tokenCount: payload.tokenCount } : {}),
+      ...(payload.generationMetrics ? { generationMetrics: payload.generationMetrics } : {}),
+    },
+  })
 }
 
 /**
@@ -532,37 +563,10 @@ export function useWebSocket() {
               }).catch(() => { /* ignore */ })
             }
           } else {
-            // Cache breakdown data from WS event if present
-            if (payload.messageId && (payload as any).breakdown) {
-              const bd = (payload as any).breakdown
-              state.cacheBreakdown(payload.messageId, {
-                entries: bd.entries || [],
-                totalTokens: bd.totalTokens || 0,
-                maxContext: bd.maxContext || 0,
-                model: bd.model || '',
-                provider: bd.provider || '',
-                parameters: bd.parameters,
-                usage: bd.usage,
-                presetName: bd.presetName,
-                tokenizer_name: bd.tokenizer_name || null,
-                chatId: payload.chatId,
-              })
-            }
-
-            // Patch generation metrics onto the in-store message immediately so the
-            // detail pill can display tokenCount/TTFT/TPS before reconciliation completes.
-            if (payload.messageId && (payload.tokenCount != null || payload.generationMetrics)) {
-              const msg = state.messages.find((m) => m.id === payload.messageId)
-              if (msg) {
-                state.updateMessage(payload.messageId, {
-                  extra: {
-                    ...msg.extra,
-                    ...(payload.tokenCount != null ? { tokenCount: payload.tokenCount } : {}),
-                    ...(payload.generationMetrics ? { generationMetrics: payload.generationMetrics } : {}),
-                  },
-                })
-              }
-            }
+            // Token count / TTFT / TPS and the prompt breakdown are computed
+            // after this event (deferred so the stop button clears fast) and
+            // delivered separately via GENERATION_METRICS_READY /
+            // GENERATION_BREAKDOWN_READY — see those handlers below.
 
             // In group chats, mark the character as spoken and clear responding state
             if (state.isGroupChat && state.activeGroupCharacterId) {
@@ -625,6 +629,16 @@ export function useWebSocket() {
               const s = store.getState()
               if (s.activeChatId === payload.chatId) {
                 s.setMessages(res.data, res.total)
+                // Deferred metrics may have arrived (and been wiped by the
+                // setMessages above) before this re-fetch could read them —
+                // re-apply from the buffer so the pill/hover survive the race.
+                if (completedMessageId) {
+                  const buffered = pendingGenerationMetrics.get(completedMessageId)
+                  if (buffered) {
+                    applyGenerationMetrics(buffered)
+                    pendingGenerationMetrics.delete(completedMessageId)
+                  }
+                }
                 if (completedSwipeId != null && completedMessageId) {
                   const msg = res.data.find((m) => m.id === completedMessageId)
                   // Only badge when there's actually another swipe to navigate to
@@ -756,6 +770,32 @@ export function useWebSocket() {
             }
           }
         }
+      }),
+
+      // Deferred metrics (tokenCount / TTFT / TPS / model / provider) arrive after
+      // GENERATION_ENDED — and may land before or after its reconciliation
+      // re-fetch. Apply live, and buffer so the reconciliation can re-apply if its
+      // setMessages won the race and wiped this patch (see GENERATION_ENDED).
+      wsClient.on(EventType.GENERATION_METRICS_READY, (payload: GenerationMetricsReadyPayload) => {
+        if (!payload.messageId) return
+        pendingGenerationMetrics.set(payload.messageId, payload)
+        if (pendingGenerationMetrics.size > PENDING_METRICS_MAX) {
+          const oldest = pendingGenerationMetrics.keys().next().value
+          if (oldest !== undefined) pendingGenerationMetrics.delete(oldest)
+        }
+        applyGenerationMetrics(payload)
+      }),
+
+      // Deferred prompt breakdown arrives after GENERATION_ENDED. Cache it (keyed
+      // by message id, regardless of active chat) so opening the Prompt Breakdown
+      // modal renders instantly instead of re-fetching. No reconciliation race:
+      // it lives in its own cache, not the message's extra.
+      wsClient.on(EventType.GENERATION_BREAKDOWN_READY, (payload: GenerationBreakdownReadyPayload) => {
+        if (!payload.messageId || !payload.breakdown) return
+        store.getState().cacheBreakdown(payload.messageId, {
+          ...payload.breakdown,
+          chatId: payload.chatId,
+        })
       }),
 
       wsClient.on(EventType.GENERATION_STOPPED, (payload: { generationId?: string; chatId?: string }) => {
