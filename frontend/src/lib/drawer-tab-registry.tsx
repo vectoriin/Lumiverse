@@ -14,6 +14,7 @@ import type { Command, CommandScope } from '@/lib/commands'
 import type { DrawerTabState, ExtensionCommandState } from '@/store/slices/spindle-placement'
 import { CORE_DRAWER_TAB_IDS } from './core-drawer-tab-ids'
 import ErrorBoundary from '@/components/shared/ErrorBoundary'
+import { RouterContextBridge } from './router-bridge'
 import CharacterProfile from '@/components/panels/CharacterProfile'
 import CharacterBrowser from '@/components/panels/CharacterBrowser'
 import PersonaManager from '@/components/panels/PersonaManager'
@@ -102,7 +103,14 @@ export function applyDrawerTabOrder<T extends { id: string }>(items: T[], order:
 
 function mountReactComponent(root: HTMLElement, element: ReactNode, tabId?: string): () => void {
   const reactRoot = createRoot(root)
-  reactRoot.render(<ErrorBoundary label={tabId}>{element}</ErrorBoundary>)
+  // This is a detached React root, so it does not inherit the app's
+  // <RouterProvider> context. RouterContextBridge re-provides it so panels that
+  // call useNavigate()/useParams() (e.g. the character gallery) don't crash.
+  reactRoot.render(
+    <RouterContextBridge>
+      <ErrorBoundary label={tabId}>{element}</ErrorBoundary>
+    </RouterContextBridge>,
+  )
   return () => { reactRoot.unmount() }
 }
 

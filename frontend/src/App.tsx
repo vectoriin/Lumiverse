@@ -22,6 +22,7 @@ import { useTTSAutoPlay } from '@/hooks/useTTSAutoPlay'
 import { useAutoSummarization } from '@/hooks/useAutoSummarization'
 import { usePresetRegexActivation } from '@/hooks/usePresetRegexActivation'
 import { useBoundPresetSelection } from '@/hooks/useBoundPresetSelection'
+import { RouterContextExporter } from '@/lib/router-bridge'
 import { resolveDockPanelEdge } from '@/lib/spindle/dock-placement'
 import { installNotificationAudioPrimer } from '@/lib/notificationAudio'
 import styles from './App.module.css'
@@ -163,6 +164,8 @@ export default function App() {
             } as React.CSSProperties}
           >
             <ErrorBoundary label="App">
+              {/* Mirrors react-router context out to detached drawer-tab roots */}
+              <RouterContextExporter />
               <main className={styles.main}>
                 <Outlet />
               </main>
