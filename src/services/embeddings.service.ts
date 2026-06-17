@@ -594,19 +594,42 @@ async function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Read tracking — lets compaction wait for in-flight native reads to finish.
-// LanceDB memory-maps its data/manifest files; optimize() with cleanupOlderThan
-// DELETES superseded version files. If a native read still holds an mmap over a
-// file being deleted, the fault is uncatchable (SIGBUS/SIGSEGV) — the same class
-// as the SQLite mmap crash. CLEANUP_GRACE_PERIOD_MS already shields freshly-
-// superseded versions for new reads; this drain closes the remaining window by
-// making optimize wait until no tracked read is in flight before it deletes.
-// All cancellable native reads flow through raceWithSignal(), which is where the
-// begin/end bookkeeping is attached — route any new native read through it too.
+// Read / maintenance mutual exclusion.
+//
+// LanceDB maintenance ops unlink files out from under readers: optimize() with
+// cleanupOlderThan DELETES superseded version files, and createIndex(replace)
+// rewrites index files. A native read scanning those files when they vanish
+// faults — uncatchably (SIGBUS/SIGSEGV) when mmap is on, or as a catchable
+// "failed to get next batch from stream: Lance error: not found" when it's off
+// (the default). Either way the read is lost.
+//
+// CLEANUP_GRACE_PERIOD_MS shields freshly-superseded versions. On top of that,
+// reads and file-mutating maintenance are made mutually exclusive:
+//   - reads gate through beginRead() before opening a scan,
+//   - maintenance gates through withMaintenanceExclusive(), which blocks NEW
+//     reads from starting and then waits for in-flight reads to drain before it
+//     touches files.
+// A bare drain (wait-then-mutate) is not enough on its own: it is a one-shot
+// barrier, but reads never take the write lock, so a read could still START
+// during the mutation. The gate closes that window from both sides. All
+// cancellable native reads flow through raceWithSignal() — route any new native
+// read through it too.
 // ---------------------------------------------------------------------------
 let _activeReadCount = 0;
+// Non-null while a file-mutating maintenance op holds exclusivity; resolves when
+// it finishes. New reads await it before opening a scan. Maintenance ops always
+// run under withWriteLock(), so only one is ever active and the gate has a
+// single owner at a time.
+let _maintenanceGate: Promise<void> | null = null;
 
-function beginRead(): () => void {
+async function beginRead(signal?: AbortSignal): Promise<() => void> {
+  // Wait out any in-progress maintenance so the scan we are about to open never
+  // references data/index files an optimize or index rebuild is unlinking. Wake
+  // early if the caller aborts so a cancelled retrieval never blocks on a rebuild.
+  while (_maintenanceGate) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    await raceMaintenanceGate(_maintenanceGate, signal);
+  }
   _activeReadCount++;
   let ended = false;
   return () => {
@@ -614,6 +637,15 @@ function beginRead(): () => void {
     ended = true;
     _activeReadCount = Math.max(0, _activeReadCount - 1);
   };
+}
+
+function raceMaintenanceGate(gate: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return gate;
+  return new Promise<void>((resolve) => {
+    const onAbort = () => { signal.removeEventListener("abort", onAbort); resolve(); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    gate.then(() => { signal.removeEventListener("abort", onAbort); resolve(); });
+  });
 }
 
 async function waitForReadsToDrain(timeoutMs = 30_000): Promise<void> {
@@ -627,6 +659,67 @@ async function waitForReadsToDrain(timeoutMs = 30_000): Promise<void> {
       return;
     }
     await sleep(25);
+  }
+}
+
+/**
+ * Run a file-mutating maintenance op (optimize cleanup, index replace) with
+ * exclusivity against reads: block new reads from opening a scan, wait for
+ * in-flight reads to finish streaming, then mutate. MUST be called inside
+ * withWriteLock(), which serializes maintenance ops against each other so the
+ * gate never has competing owners.
+ */
+async function withMaintenanceExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  _maintenanceGate = new Promise<void>((resolve) => { release = resolve; });
+  try {
+    await waitForReadsToDrain();
+    return await fn();
+  } finally {
+    _maintenanceGate = null;
+    release();
+  }
+}
+
+/**
+ * True when an error looks like the read/maintenance file-deletion race — a
+ * scan whose underlying data/index file was unlinked mid-stream. Used to drive a
+ * one-shot retry against a freshly reopened handle.
+ */
+function isLanceReadRaceError(err: unknown): boolean {
+  const text = collectErrorMessages(err).join(" | ").toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes("failed to get next batch from stream") ||
+    (text.includes("not found") && (text.includes("lance") || text.includes("object") || text.includes("stream")))
+  );
+}
+
+/**
+ * Run a native read; on the file-deletion race, drop the cached table handle and
+ * retry once against the reopened (post-maintenance) version. Falls back to a
+ * caller-supplied empty result if the retry still races, so retrieval degrades
+ * gracefully instead of surfacing an alarming warning upstream.
+ */
+async function withReadRetry<T>(
+  label: string,
+  signal: AbortSignal | undefined,
+  run: () => Promise<T>,
+  fallback: T,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    if (!isLanceReadRaceError(err)) throw err;
+    invalidateTableHandle();
+    try {
+      return await run();
+    } catch (err2) {
+      if (signal?.aborted) throw err2;
+      console.warn(`[embeddings] ${label} degraded after read race:`, err2);
+      return fallback;
+    }
   }
 }
 
@@ -1584,10 +1677,14 @@ async function checkAndRebuildIndexes(tableName: string, table: Table): Promise<
           state.lastIndexRebuildAt = Date.now();
           return;
         }
-        await t.createIndex("vector", {
-          config: indexConfig,
-          replace: true,
-        } as any);
+        // createIndex(replace) rewrites index files out from under any reader —
+        // the periodic rebuild fires mid-chat, exactly when retrieval is busy.
+        await withMaintenanceExclusive(async () => {
+          await t.createIndex("vector", {
+            config: indexConfig,
+            replace: true,
+          } as any);
+        });
         state.lastIndexRebuildAt = Date.now();
         state.unindexedRowEstimate = 0;
         console.info(`[embeddings] Vector index rebuilt (${rowCount} rows)`);
@@ -1638,34 +1735,41 @@ export async function runStartupVectorMaintenance(): Promise<void> {
 
       try {
         console.info(`[embeddings] Running startup compaction for ${tableName}...`);
-        await waitForReadsToDrain();
-        await table.optimize({ cleanupOlderThan: new Date(Date.now() - CLEANUP_GRACE_PERIOD_MS) });
-      } catch (err) {
-        console.warn(`[embeddings] Startup compaction failed for ${tableName}:`, err);
-      }
-
-      if (needsMigration) {
-        const rowCount = await table.countRows();
-        const indexConfig = getVectorIndexConfig(rowCount);
-        if (indexConfig !== null) {
-          console.info(`[embeddings] Migrating vector index for ${tableName} from HNSW_PQ → IVF (${rowCount} rows)...`);
+        // optimize() unlinks superseded version files and the index rebuilds
+        // below rewrite index files; hold reads off for the whole sequence.
+        await withMaintenanceExclusive(async () => {
           try {
-            await table.createIndex("vector", {
-              config: indexConfig,
-              replace: true,
-            } as any);
-            state.vectorIndexReady = true;
-            state.lastIndexRebuildAt = Date.now();
-            console.info(`[embeddings] Vector index migrated successfully for ${tableName}`);
+            await table.optimize({ cleanupOlderThan: new Date(Date.now() - CLEANUP_GRACE_PERIOD_MS) });
           } catch (err) {
-            console.warn(`[embeddings] Vector index migration failed for ${tableName} (will retry on next query):`, err);
+            console.warn(`[embeddings] Startup compaction failed for ${tableName}:`, err);
           }
-        }
-      }
 
-      await ensureScalarIndexes(tableName, table, true);
-      await ensureFtsIndex(tableName, table, true);
-      await ensureVectorIndex(tableName, table);
+          if (needsMigration) {
+            const rowCount = await table.countRows();
+            const indexConfig = getVectorIndexConfig(rowCount);
+            if (indexConfig !== null) {
+              console.info(`[embeddings] Migrating vector index for ${tableName} from HNSW_PQ → IVF (${rowCount} rows)...`);
+              try {
+                await table.createIndex("vector", {
+                  config: indexConfig,
+                  replace: true,
+                } as any);
+                state.vectorIndexReady = true;
+                state.lastIndexRebuildAt = Date.now();
+                console.info(`[embeddings] Vector index migrated successfully for ${tableName}`);
+              } catch (err) {
+                console.warn(`[embeddings] Vector index migration failed for ${tableName} (will retry on next query):`, err);
+              }
+            }
+          }
+
+          await ensureScalarIndexes(tableName, table, true);
+          await ensureFtsIndex(tableName, table, true);
+          await ensureVectorIndex(tableName, table);
+        });
+      } catch (err) {
+        console.warn(`[embeddings] Startup maintenance failed for ${tableName}:`, err);
+      }
     }
   });
 
@@ -1682,15 +1786,16 @@ export async function optimizeTable(tableNames?: string[]): Promise<void> {
         const table = await getTableIfExists(tableName, true);
         if (!table) continue;
 
-        // Wait for in-flight native reads to drain so compaction doesn't unlink
-        // version files a live read has memory-mapped (uncatchable SIGBUS).
-        await waitForReadsToDrain();
-        await table.optimize({
-          cleanupOlderThan: new Date(Date.now() - CLEANUP_GRACE_PERIOD_MS),
+        // Block new reads and drain in-flight ones, then compact: optimize()
+        // unlinks superseded version files and the forced index rebuilds rewrite
+        // index files — either is fatal to a read scanning them concurrently.
+        await withMaintenanceExclusive(async () => {
+          await table.optimize({
+            cleanupOlderThan: new Date(Date.now() - CLEANUP_GRACE_PERIOD_MS),
+          });
+          await ensureScalarIndexes(tableName, table, true);
+          await ensureFtsIndex(tableName, table, true);
         });
-
-        await ensureScalarIndexes(tableName, table, true);
-        await ensureFtsIndex(tableName, table, true);
       } catch (err) {
         console.warn(`[embeddings] Optimize failed for ${tableName}:`, err);
       }
@@ -2779,17 +2884,29 @@ function attachJoiner(
   });
 }
 
-/** Race a shared promise against an abort signal so the caller's await can
- *  reject on cancel without killing the shared upstream request.
+/** Open a native read behind the maintenance gate and race it against an abort
+ *  signal so the caller's await can reject on cancel without killing the shared
+ *  upstream request.
+ *
+ *  Takes a THUNK, not a promise: the scan must not start until beginRead() has
+ *  cleared the maintenance gate, otherwise a read could open against files an
+ *  in-progress optimize/index-rebuild is about to unlink.
  *
  *  Also the single chokepoint for read tracking (see beginRead/waitForReadsToDrain):
  *  the end-read is tied to the UNDERLYING native promise, never to this race
  *  wrapper. On abort the wrapper rejects early, but the native toArray() keeps
- *  running — and keeps its mmap over the version files — until it actually
- *  settles. Decrementing the read count before then would reopen the very
- *  unlink-during-mmap window the drain exists to close. */
-function raceWithSignal<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  const endRead = beginRead();
+ *  running — and keeps its file handles over the version files — until it
+ *  actually settles. Decrementing the read count before then would reopen the
+ *  very unlink-during-read window the gate exists to close. */
+async function raceWithSignal<T>(makePromise: () => Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  const endRead = await beginRead(signal);
+  let promise: Promise<T>;
+  try {
+    promise = makePromise();
+  } catch (err) {
+    endRead();
+    throw err;
+  }
   promise.then(endRead, endRead);
 
   if (!signal) return promise;
@@ -3290,26 +3407,28 @@ export async function searchWorldBookEntriesHybridWithVector(
 ): Promise<WorldBookSearchCandidate[]> {
   await ensureWorldBookVectorVersion(userId);
   if (signal?.aborted) return [];
-  const table = await getWorldBookTableForRead();
-  if (!table) {
-    console.log("[embeddings] WI vector search: no LanceDB table exists yet (entries may not be indexed)");
-    return [];
-  }
 
   const trimmedQuery = queryText.trim();
   const filter = `user_id = ${sqlValue(userId)} AND source_type = 'world_book_entry' AND owner_id = ${sqlValue(worldBookId)}`;
   const effectiveLimit = Math.max(1, Math.min(limit, 100));
   const rawLimit = Math.min(200, Math.max(effectiveLimit * 3, effectiveLimit));
 
-  const query = table
-    .query()
-    .nearestTo(vector)
-    .where(filter)
-    .select(["source_id", "content", "_distance", "metadata_json"])
-    .limit(rawLimit) as any;
-  // Refine with full vectors after PQ approximate search for better accuracy
-  if (getTableState(WORLD_BOOK_EMBEDDINGS_TABLE).vectorIndexReady) query.refineFactor(5);
-  const vectorRows = await raceWithSignal(query.toArray() as Promise<any[]>, signal);
+  const vectorRows = await withReadRetry<any[]>("WI vector search", signal, async () => {
+    const table = await getWorldBookTableForRead();
+    if (!table) {
+      console.log("[embeddings] WI vector search: no LanceDB table exists yet (entries may not be indexed)");
+      return [];
+    }
+    const query = table
+      .query()
+      .nearestTo(vector)
+      .where(filter)
+      .select(["source_id", "content", "_distance", "metadata_json"])
+      .limit(rawLimit) as any;
+    // Refine with full vectors after PQ approximate search for better accuracy
+    if (getTableState(WORLD_BOOK_EMBEDDINGS_TABLE).vectorIndexReady) query.refineFactor(5);
+    return await raceWithSignal(() => query.toArray() as Promise<any[]>, signal);
+  }, []);
 
   if (vectorRows.length === 0) {
     console.log("[embeddings] WI vector search: 0 rows from LanceDB for book=%s (limit=%d)", worldBookId.slice(0, 8), effectiveLimit);
@@ -3336,16 +3455,21 @@ export async function searchWorldBookEntriesHybridWithVector(
 
   if (trimmedQuery && hybridWeightMode !== "vector_first" && !signal?.aborted) {
     try {
-      const lexicalRows = await raceWithSignal(
-        table
-          .query()
-          .fullTextSearch(trimmedQuery)
-          .where(filter)
-          .select(["source_id", "content", "_score", "metadata_json"])
-          .limit(rawLimit)
-          .toArray() as Promise<any[]>,
-        signal,
-      );
+      const lexicalRows = await withReadRetry<any[]>("WI FTS search", signal, async () => {
+        const table = await getWorldBookTableForRead();
+        if (!table) return [];
+        return await raceWithSignal(
+          () =>
+            table
+              .query()
+              .fullTextSearch(trimmedQuery)
+              .where(filter)
+              .select(["source_id", "content", "_score", "metadata_json"])
+              .limit(rawLimit)
+              .toArray() as Promise<any[]>,
+          signal,
+        );
+      }, []);
 
       for (const row of lexicalRows) {
         const entryId = String(row.source_id);
@@ -3754,8 +3878,6 @@ export async function searchChatChunks(
   options?: { skipVectorFetch?: boolean },
 ): Promise<Array<{ chunk_id: string; score: number | null; content: string; metadata: any }>> {
   if (signal?.aborted) return [];
-  const table = await getTableIfExists(EMBEDDINGS_TABLE);
-  if (!table) return [];
 
   const skipVectorFetch = options?.skipVectorFetch === true;
 
@@ -3805,54 +3927,65 @@ export async function searchChatChunks(
   // isolates failures (FTS index missing, tokenizer pathologies) from the
   // vector leg and avoids the per-call Lance reranker allocation that was
   // implicated in Bun 1.3.12+ crash reports.
-  let rows: any[];
   const useHybrid = !!queryText?.trim() && hybridWeightMode !== "vector_first";
 
-  if (useHybrid) {
-    const ftsQueryText = queryText!.trim().slice(0, FTS_QUERY_MAX_CHARS);
+  // The handle fetch + scan live inside the runnable so a one-shot retry on the
+  // read/maintenance file-deletion race reopens against the post-maintenance
+  // version. Read-race errors are re-thrown out of the legs so withReadRetry can
+  // see them; other per-leg failures (missing FTS index, tokenizer rejects) still
+  // degrade to [] so one leg never sinks the whole search.
+  const rows = await withReadRetry<any[]>("chat chunk search", signal, async () => {
+    const table = await getTableIfExists(EMBEDDINGS_TABLE);
+    if (!table) return [];
 
-    const vectorQ = applyRefineFactor(
-      table
+    if (useHybrid) {
+      const ftsQueryText = queryText!.trim().slice(0, FTS_QUERY_MAX_CHARS);
+
+      const vectorQ = applyRefineFactor(
+        table
+          .query()
+          .nearestTo(vector)
+          .where(filter)
+          .select(vectorOnlyColumns)
+          .limit(fetchLimit),
+      );
+      const ftsQ = table
         .query()
-        .nearestTo(vector)
+        .fullTextSearch(ftsQueryText)
         .where(filter)
+        // FTS leg uses the same projection — _relevance_score is implicit in
+        // the array ordering returned by LanceDB, which is all RRF needs.
         .select(vectorOnlyColumns)
-        .limit(fetchLimit),
-    );
-    const ftsQ = table
-      .query()
-      .fullTextSearch(ftsQueryText)
-      .where(filter)
-      // FTS leg uses the same projection — _relevance_score is implicit in
-      // the array ordering returned by LanceDB, which is all RRF needs.
-      .select(vectorOnlyColumns)
-      .limit(fetchLimit);
+        .limit(fetchLimit);
 
-    const vectorPromise = raceWithSignal(vectorQ.toArray() as Promise<any[]>, signal).catch((err) => {
-      if (signal?.aborted) throw err;
-      console.warn("[embeddings] Vector search leg failed:", err);
-      return [] as any[];
-    });
-    const ftsPromise = raceWithSignal(ftsQ.toArray() as Promise<any[]>, signal).catch((err) => {
-      if (signal?.aborted) throw err;
-      // FTS index may not exist yet, or tokenizer rejected the query — vector
-      // leg still returns useful results so this is a silent fallback.
-      return [] as any[];
-    });
+      const vectorPromise = raceWithSignal(() => vectorQ.toArray() as Promise<any[]>, signal).catch((err) => {
+        if (signal?.aborted || isLanceReadRaceError(err)) throw err;
+        console.warn("[embeddings] Vector search leg failed:", err);
+        return [] as any[];
+      });
+      const ftsPromise = raceWithSignal(() => ftsQ.toArray() as Promise<any[]>, signal).catch((err) => {
+        if (signal?.aborted || isLanceReadRaceError(err)) throw err;
+        // FTS index may not exist yet, or tokenizer rejected the query — vector
+        // leg still returns useful results so this is a silent fallback.
+        return [] as any[];
+      });
 
-    const [vectorRows, ftsRows] = await Promise.all([vectorPromise, ftsPromise]);
-    if (signal?.aborted) return [];
+      const [vectorRows, ftsRows] = await Promise.all([vectorPromise, ftsPromise]);
+      if (signal?.aborted) return [];
 
-    rows = reciprocalRankFusion(vectorRows, ftsRows);
-  } else {
+      return reciprocalRankFusion(vectorRows, ftsRows);
+    }
+
     const q = table
       .query()
       .nearestTo(vector)
       .where(filter)
       .select(vectorOnlyColumns)
       .limit(fetchLimit);
-    rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
-  }
+    return await raceWithSignal(() => applyRefineFactor(q).toArray() as Promise<any[]>, signal);
+  }, []);
+
+  if (signal?.aborted) return [];
 
   // Parse rows and collect metadata
   type ParsedRow = { chunkId: string; score: number | null; content: string; metadata: any; rowVector: number[] | null };
@@ -4307,8 +4440,6 @@ export async function searchVaultChunks(
   signal?: AbortSignal,
 ): Promise<Array<{ chunk_id: string; score: number; content: string; metadata: any }>> {
   if (signal?.aborted) return [];
-  const table = await getTableIfExists(EMBEDDINGS_TABLE);
-  if (!table) return [];
 
   const baseFilter = `user_id = ${sqlValue(userId)} AND source_type = 'vault_chunk' AND owner_id = ${sqlValue(vaultId)}`;
   const sourceFilter = buildAllowedChunkFilter(allowedChunkIds);
@@ -4318,14 +4449,20 @@ export async function searchVaultChunks(
     if (getTableState(EMBEDDINGS_TABLE).vectorIndexReady) q.refineFactor(5);
     return q;
   };
-  const q = table
-    .query()
-    .nearestTo(vector)
-    .where(filter)
-    .select(["source_id", "content", "_distance", "metadata_json"])
-    .limit(Math.max(1, Math.min(limit * 3, 200)));
 
-  const rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
+  const rows = await withReadRetry<any[]>("vault chunk search", signal, async () => {
+    const table = await getTableIfExists(EMBEDDINGS_TABLE);
+    if (!table) return [];
+    const q = table
+      .query()
+      .nearestTo(vector)
+      .where(filter)
+      .select(["source_id", "content", "_distance", "metadata_json"])
+      .limit(Math.max(1, Math.min(limit * 3, 200)));
+    return await raceWithSignal(() => applyRefineFactor(q).toArray() as Promise<any[]>, signal);
+  }, []);
+
+  if (signal?.aborted) return [];
 
   return (rows as any[]).map((row) => {
     let meta: any = {};
@@ -4513,55 +4650,60 @@ export async function searchDatabankChunks(
   if (databankIds.length === 0) return [];
   if (signal?.aborted) return [];
 
-  const table = await getTableIfExists(EMBEDDINGS_TABLE);
-  if (!table) return [];
-
   const ownerFilter = `owner_id IN (${databankIds.map((id) => sqlValue(id)).join(", ")})`;
   const filter = `user_id = ${sqlValue(userId)} AND source_type = 'databank' AND (${ownerFilter})`;
   const fetchLimit = Math.max(1, Math.min(limit + 20, 100));
 
-  let rows: any[];
   const applyRefineFactor = (q: any) => {
     if (getTableState(EMBEDDINGS_TABLE).vectorIndexReady) q.refineFactor(5);
     return q;
   };
   const projection = ["source_id", "content", "_distance", "metadata_json"];
 
-  if (queryText?.trim()) {
-    // Same split-then-RRF strategy as searchChatChunks — isolates the FTS
-    // leg's native code path from the vector leg.
-    const ftsQueryText = queryText.trim().slice(0, FTS_QUERY_MAX_CHARS);
+  const rows = await withReadRetry<any[]>("databank chunk search", signal, async () => {
+    const table = await getTableIfExists(EMBEDDINGS_TABLE);
+    if (!table) return [];
 
-    const vectorPromise = raceWithSignal(
-      applyRefineFactor(
-        table.query().nearestTo(vector).where(filter).select(projection).limit(fetchLimit),
-      ).toArray() as Promise<any[]>,
-      signal,
-    ).catch((err) => {
-      if (signal?.aborted) throw err;
-      console.warn("[embeddings] Databank vector search leg failed:", err);
-      return [] as any[];
-    });
-    const ftsPromise = raceWithSignal(
-      table.query().fullTextSearch(ftsQueryText).where(filter).select(projection).limit(fetchLimit).toArray() as Promise<any[]>,
-      signal,
-    ).catch((err) => {
-      if (signal?.aborted) throw err;
-      return [] as any[];
-    });
+    if (queryText?.trim()) {
+      // Same split-then-RRF strategy as searchChatChunks — isolates the FTS
+      // leg's native code path from the vector leg.
+      const ftsQueryText = queryText.trim().slice(0, FTS_QUERY_MAX_CHARS);
 
-    const [vectorRows, ftsRows] = await Promise.all([vectorPromise, ftsPromise]);
-    if (signal?.aborted) return [];
-    rows = reciprocalRankFusion(vectorRows, ftsRows);
-  } else {
+      const vectorPromise = raceWithSignal(
+        () =>
+          applyRefineFactor(
+            table.query().nearestTo(vector).where(filter).select(projection).limit(fetchLimit),
+          ).toArray() as Promise<any[]>,
+        signal,
+      ).catch((err) => {
+        if (signal?.aborted || isLanceReadRaceError(err)) throw err;
+        console.warn("[embeddings] Databank vector search leg failed:", err);
+        return [] as any[];
+      });
+      const ftsPromise = raceWithSignal(
+        () =>
+          table.query().fullTextSearch(ftsQueryText).where(filter).select(projection).limit(fetchLimit).toArray() as Promise<any[]>,
+        signal,
+      ).catch((err) => {
+        if (signal?.aborted || isLanceReadRaceError(err)) throw err;
+        return [] as any[];
+      });
+
+      const [vectorRows, ftsRows] = await Promise.all([vectorPromise, ftsPromise]);
+      if (signal?.aborted) return [];
+      return reciprocalRankFusion(vectorRows, ftsRows);
+    }
+
     const q = table
       .query()
       .nearestTo(vector)
       .where(filter)
       .select(projection)
       .limit(fetchLimit);
-    rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
-  }
+    return await raceWithSignal(() => applyRefineFactor(q).toArray() as Promise<any[]>, signal);
+  }, []);
+
+  if (signal?.aborted) return [];
 
   const results: Array<{ chunk_id: string; score: number; content: string; metadata: any }> = [];
 

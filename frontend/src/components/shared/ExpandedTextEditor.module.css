@@ -160,21 +160,26 @@
   color: var(--lumiverse-text-dim);
 }
 
-/* ── Syntax-highlighted textarea overlay ── */
+/* ── Syntax-highlighted textarea overlay ──
+   Single-scroller model: the container is the ONLY scroll box, so its
+   scrollbar lives outside both the <pre> and the <textarea>. The inner
+   wrapper is the positioning context and is sized in-flow by the <pre>;
+   the transparent <textarea> is absolutely stretched to fill it. Because
+   both layers share an identical content width (no per-element scrollbar
+   gutter) and identical font metrics, wrapping and caret position stay in
+   lockstep — including under CSS `zoom` UI scaling and on touch devices.
+   No JS scroll-syncing required. */
 
 .highlightContainer {
-  position: relative;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.highlightBackdrop {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 1;
+.highlightInner {
+  position: relative;
+  min-height: 100%;
 }
 
 .highlightPre {
@@ -184,8 +189,11 @@
   font-size: calc(13px * var(--lumiverse-font-scale, 1));
   line-height: 1.6;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 2;
   color: var(--lumiverse-text);
+  pointer-events: none;
   box-sizing: border-box;
 }
 
@@ -199,6 +207,7 @@
   border: none;
   outline: none;
   resize: none;
+  overflow: hidden;
   background: transparent;
   color: transparent;
   caret-color: var(--lumiverse-text);
@@ -206,9 +215,9 @@
   font-size: calc(13px * var(--lumiverse-font-scale, 1));
   line-height: 1.6;
   white-space: pre-wrap;
-  word-break: break-word;
-  overflow-y: auto;
-  z-index: 2;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 2;
   -webkit-text-fill-color: transparent;
   box-sizing: border-box;
 }
@@ -430,32 +439,13 @@
   }
 }
 
-/* Touch-only devices: disable highlight overlay (fixes cursor tracking),
-   always show expand button since there's no hover.
+/* Touch-only devices have no hover, so reveal the expand button permanently.
    Uses `any-hover: none` so it only matches when NO input device supports hover
    (true phones/tablets). `hover: none` incorrectly matches on Windows touchscreen
-   laptops in Firefox/Edge, disabling syntax highlighting even though a mouse is present. */
+   laptops in Firefox/Edge. The single-scroller overlay above tracks the caret
+   correctly on touch, so syntax highlighting stays enabled here. */
 @media (any-hover: none) {
   .expandBtn {
     opacity: 0.7;
-  }
-
-  .highlightBackdrop {
-    display: none;
-  }
-
-  /* With the backdrop hidden, the absolute overlay positioning is unnecessary and
-     causes cursor coordinate mismatches on Android. Switch to normal flow layout
-     so the textarea fills its container without position:absolute. */
-  .textareaHighlighted {
-    position: static;
-    -webkit-text-fill-color: unset;
-    color: var(--lumiverse-text);
-  }
-
-  .highlightContainer {
-    display: flex;
-    flex-direction: column;
-    overflow: auto;
   }
 }
