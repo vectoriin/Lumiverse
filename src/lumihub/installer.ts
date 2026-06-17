@@ -14,6 +14,7 @@ import { EventType } from "../ws/events";
 import { getFirstUserId } from "../auth/seed";
 import * as wbSvc from "../services/world-books.service";
 import * as presetsSvc from "../services/presets.service";
+import * as regexSvc from "../services/regex-scripts.service";
 import * as settingsSvc from "../services/settings.service";
 import * as themeAssetsSvc from "../services/theme-assets.service";
 import { getCharacterWorldBookIds, setCharacterWorldBookIds } from "../utils/character-world-books";
@@ -208,6 +209,10 @@ async function installFromCardData(
   const cardInput = cardSvc.parseCardJson(payload.cardData!);
   const character = svc.createCharacter(userId, cardInput);
 
+  // Bind any card-embedded regex scripts (Lumiverse bundle or SillyTavern) to
+  // the new character. The CHARX/url path handles its own bundle separately.
+  importCharacterRegexBestEffort(userId, character.id, cardInput.extensions);
+
   // Handle avatar if provided
   if (payload.avatarBase64) {
     try {
@@ -307,6 +312,8 @@ async function installFromUrl(
     const cardInput = await cardSvc.extractCardFromPng(file);
     const character = svc.createCharacter(userId, cardInput);
 
+    importCharacterRegexBestEffort(userId, character.id, cardInput.extensions);
+
     const image = await images.uploadImage(userId, file);
     svc.setCharacterImage(userId, character.id, image.id);
     svc.setCharacterAvatar(userId, character.id, image.filename);
@@ -342,6 +349,8 @@ async function installFromUrl(
   const cardInput = cardSvc.parseCardJson(json);
   const character = svc.createCharacter(userId, cardInput);
 
+  importCharacterRegexBestEffort(userId, character.id, cardInput.extensions);
+
   maybeExtractWorldbook(userId, character.id, payload.characterName, payload);
 
   const final = svc.getCharacter(userId, character.id);
@@ -359,6 +368,16 @@ async function installFromUrl(
     characterId: character.id,
     characterName: final?.name || payload.characterName,
   };
+}
+
+/** Import card-embedded regex scripts onto a freshly-installed character without
+ * letting a regex failure abort the install (the character is already created). */
+function importCharacterRegexBestEffort(userId: string, characterId: string, extensions: unknown): void {
+  try {
+    regexSvc.importCharacterBoundRegexScripts(userId, characterId, extensions);
+  } catch (err) {
+    console.warn("[LumiHub Installer] Character regex import failed:", err);
+  }
 }
 
 /** Install from a Chub URL (reuses existing Chub fetch logic). */
@@ -430,6 +449,8 @@ async function installFromChub(
 
   const cardInput = cardSvc.parseCardJson(card);
   const character = svc.createCharacter(userId, cardInput);
+
+  importCharacterRegexBestEffort(userId, character.id, cardInput.extensions);
 
   // Fetch avatar
   const avatarUrl = node.max_res_url || node.avatar_url;
@@ -675,6 +696,22 @@ export async function installPreset(
       eventBus.emit(EventType.PRESET_CHANGED, { id: saved.id, preset: saved }, userId);
     }
 
+    // Preset-bound regex scripts ride at the top level of the export (sibling to
+    // `preset`); import them so remote installs keep parity with local preset
+    // imports. On update, clear the previous install's scripts first so successive
+    // versions don't accumulate duplicates. Best-effort — the preset is already saved.
+    try {
+      if (existing) {
+        regexSvc.deleteRegexScriptsByPresetId(userId, saved.id);
+      }
+      const regexScripts = extractPresetRegexScripts(exported);
+      if (regexScripts.length > 0) {
+        regexSvc.importPresetBoundRegexScripts(userId, saved.id, saved.name, regexScripts);
+      }
+    } catch (err) {
+      console.warn("[LumiHub Installer] Preset regex import failed:", err);
+    }
+
     eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
       characterId: saved.id,
       characterName: saved.name,
@@ -696,6 +733,24 @@ export async function installPreset(
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Pull bound regex scripts out of a preset export, tolerating every location
+ * LumiHub/Lumiverse have stored them in: top-level (the canonical export shape,
+ * a sibling of `preset`), nested under `preset`, or under `extensions`.
+ */
+function extractPresetRegexScripts(exported: Record<string, any>): any[] {
+  const candidates = [
+    exported?.regex_scripts,
+    exported?.preset?.regex_scripts,
+    exported?.extensions?.regex_scripts,
+    exported?.extensions?.lumiverse_modules?.regex_scripts,
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+  }
+  return [];
 }
 
 function normalizeThemeConfig(value: unknown): Record<string, any> {

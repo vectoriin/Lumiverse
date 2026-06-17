@@ -7,6 +7,7 @@ import * as characterLoraSvc from "../services/character-lora.service";
 import * as exportSvc from "../services/character-export.service";
 import * as tagLibrarySvc from "../services/tag-library-import.service";
 import * as wbSvc from "../services/world-books.service";
+import * as regexSvc from "../services/regex-scripts.service";
 import { parsePagination } from "../services/pagination";
 import { safeFetch, SSRFError, validateHost } from "../utils/safe-fetch";
 import { rewriteBotBooruUrl } from "../utils/botbooru";
@@ -27,6 +28,18 @@ function respondImportError(c: any, err: any, fallbackMessage: string) {
     return c.json({ error: err.message, code: err.code }, err.status);
   }
   return c.json({ error: err?.message || fallbackMessage }, 400);
+}
+
+// Bind any card-embedded regex scripts (Lumiverse bundle or SillyTavern) to a
+// freshly-imported character. Best-effort: the character already exists, so a
+// regex failure must not fail the import. CHARX imports bind their own bundle
+// via applyCharxModulesAndAssets, so this is only used on the non-CHARX paths.
+function importCardRegexBestEffort(userId: string, characterId: string, extensions: unknown): void {
+  try {
+    regexSvc.importCharacterBoundRegexScripts(userId, characterId, extensions);
+  } catch (err) {
+    console.error("[character import] regex import failed:", err);
+  }
 }
 
 // ─── Portable LoRA surfacing ──────────────────────────────────────────────
@@ -650,6 +663,7 @@ app.post("/import-bulk", async (c) => {
             svc.setCharacterImage(userId, character.id, image.id);
             svc.setCharacterAvatar(userId, character.id, image.filename);
           }
+          importCardRegexBestEffort(userId, character.id, cardInput.extensions);
           autoImportEmbeddedWorldbook(userId, character.id);
         }
 
@@ -722,6 +736,7 @@ app.post("/import", async (c) => {
         const image = await images.uploadImage(userId, file);
         svc.setCharacterImage(userId, character.id, image.id);
         svc.setCharacterAvatar(userId, character.id, image.filename);
+        importCardRegexBestEffort(userId, character.id, cardInput.extensions);
         autoImportEmbeddedWorldbook(userId, character.id);
         const imported = svc.getCharacter(userId, character.id)!;
         return c.json({ character: imported, ...loraSurface(imported) }, 201);
@@ -755,6 +770,7 @@ app.post("/import", async (c) => {
         }
         const cardInput = cardSvc.parseCardJson(json);
         const character = svc.createCharacter(userId, cardInput);
+        importCardRegexBestEffort(userId, character.id, cardInput.extensions);
         autoImportEmbeddedWorldbook(userId, character.id);
         const imported = svc.getCharacter(userId, character.id)!;
         return c.json({ character: imported, ...loraSurface(imported) }, 201);
@@ -765,6 +781,7 @@ app.post("/import", async (c) => {
       const input = (body.spec && body.data) ? cardSvc.parseCardJson(body) : body;
       if (!input.name) return c.json({ error: "name is required" }, 400);
       const character = svc.createCharacter(userId, input);
+      importCardRegexBestEffort(userId, character.id, input.extensions);
       autoImportEmbeddedWorldbook(userId, character.id);
       const imported = svc.getCharacter(userId, character.id)!;
       return c.json({ character: imported, ...loraSurface(imported) }, 201);

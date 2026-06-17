@@ -1526,3 +1526,119 @@ export function importRegexScripts(
 
   return { imported, skipped, errors };
 }
+
+/**
+ * Import a character card's bound regex scripts into live, character-scoped rows
+ * so they apply for that character immediately. Covers both shapes carried by
+ * cards: Lumiverse-native bundles (`extensions.lumiverse_modules.regex_scripts`,
+ * already internal-shaped) and SillyTavern cards (`extensions.regex_scripts`,
+ * converted on the fly). Each script is rebound to the new character — `scope`
+ * + `scope_id` so it applies at runtime, `character_id` so it cascade-deletes
+ * when the character is removed.
+ *
+ * The CHARX import path imports its bundle separately (applyCharxModulesAndAssets);
+ * this helper covers the non-CHARX card paths (inline card data, PNG, JSON), which
+ * previously dropped bound regexes — leaving them as inert JSON in `extensions`.
+ * Returns the number of scripts imported.
+ */
+export function importCharacterBoundRegexScripts(
+  userId: string,
+  characterId: string,
+  extensions: unknown,
+): number {
+  if (!extensions || typeof extensions !== "object") return 0;
+  const ext = extensions as Record<string, any>;
+  let imported = 0;
+
+  // Lumiverse-native bundle: already internal-shaped, rebind directly (mirrors
+  // the CHARX bundle import in charx-import.service).
+  const bundle = ext.lumiverse_modules?.regex_scripts;
+  if (Array.isArray(bundle)) {
+    for (const script of bundle) {
+      if (!script || typeof script !== "object") continue;
+      const result = createRegexScript(userId, {
+        ...(script as CreateRegexScriptInput),
+        scope: "character",
+        scope_id: characterId,
+        character_id: characterId,
+        metadata: { ...(script.metadata ?? {}), source: "card_bundle" },
+      });
+      if (typeof result !== "string") imported++;
+    }
+    return imported;
+  }
+
+  // SillyTavern cards store regex at `extensions.regex_scripts`. Only consulted
+  // when there is no Lumiverse bundle, so a card carrying both isn't double-imported.
+  const stScripts = ext.regex_scripts;
+  if (Array.isArray(stScripts) && stScripts.length > 0) {
+    const result = importRegexScripts(userId, {
+      scripts: stScripts.map((s) =>
+        s && typeof s === "object" ? { ...s, scope: "character", scope_id: characterId } : s,
+      ),
+      character_id: characterId,
+    });
+    imported += result.imported;
+  }
+
+  return imported;
+}
+
+/**
+ * Import preset-bound regex scripts for a preset that is NOT the currently-active
+ * one (a LumiHub remote install, or any background preset import). The local
+ * Loom-builder import can rely on the freshly-imported preset already being
+ * active; this path cannot. importRegexScripts force-disables preset-bound scripts
+ * whose preset is inactive, so each script is created dormant and the preset's
+ * restore-list (`presetRegexEnabled:<id>`) is seeded from the author's intended
+ * on/off state — so the scripts light up correctly the moment the user switches
+ * to the preset.
+ *
+ * Caller is responsible for clearing a prior install's scripts
+ * (deleteRegexScriptsByPresetId) before re-importing on an update. Returns counts.
+ */
+export function importPresetBoundRegexScripts(
+  userId: string,
+  presetId: string,
+  presetName: string,
+  scripts: any[],
+): { imported: number; skipped: number } {
+  if (!Array.isArray(scripts) || scripts.length === 0) {
+    return { imported: 0, skipped: 0 };
+  }
+
+  let imported = 0;
+  let skipped = 0;
+  const enabledIds: string[] = [];
+
+  // Import one at a time so each new row can be paired with the author's intended
+  // enabled state; importRegexScripts still handles SillyTavern/internal normalization.
+  for (const script of scripts) {
+    if (!script || typeof script !== "object") {
+      skipped++;
+      continue;
+    }
+    const before = new Set(getRegexScriptsByPresetId(userId, presetId).map((s) => s.id));
+    const result = importRegexScripts(userId, {
+      scripts: [script],
+      folder: presetName,
+      preset_id: presetId,
+    });
+    imported += result.imported;
+    skipped += result.skipped;
+    if (result.imported > 0 && !script.disabled) {
+      for (const created of getRegexScriptsByPresetId(userId, presetId)) {
+        if (!before.has(created.id)) enabledIds.push(created.id);
+      }
+    }
+  }
+
+  // Seed the restore-list so author-enabled scripts activate on the next switch
+  // to this preset. If every script shipped disabled we leave no record — the
+  // activation default (enable currently-undisabled rows) then correctly enables none.
+  if (enabledIds.length > 0) {
+    updateStoredPresetRegexIds(userId, presetId, () => enabledIds);
+  }
+
+  return { imported, skipped };
+}
