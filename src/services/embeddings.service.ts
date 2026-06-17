@@ -622,14 +622,30 @@ let _activeReadCount = 0;
 // single owner at a time.
 let _maintenanceGate: Promise<void> | null = null;
 
-async function beginRead(signal?: AbortSignal): Promise<() => void> {
-  // Wait out any in-progress maintenance so the scan we are about to open never
-  // references data/index files an optimize or index rebuild is unlinking. Wake
-  // early if the caller aborts so a cancelled retrieval never blocks on a rebuild.
+/**
+ * Block until any in-progress file-mutating maintenance op finishes, WITHOUT
+ * registering as an active read. This is the handle-resolution guard: openTable()
+ * / tableNames() / lazy index-metadata loads read the version manifest and
+ * `_indices/` files that optimize()'s cleanup deletes and createIndex(replace)
+ * rewrites. Running those native calls concurrently with maintenance faults the
+ * engine uncatchably (SIGSEGV/SIGBUS) — the read gate previously only covered the
+ * scan (toArray), leaving the handle-open step racing compaction. Wakes early on
+ * abort so a cancelled retrieval never blocks on a rebuild.
+ *
+ * Callers that go on to open a scan MUST still pass through beginRead()/
+ * raceWithSignal() so the scan is also counted toward waitForReadsToDrain().
+ */
+async function awaitMaintenanceGate(signal?: AbortSignal): Promise<void> {
   while (_maintenanceGate) {
     if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
     await raceMaintenanceGate(_maintenanceGate, signal);
   }
+}
+
+async function beginRead(signal?: AbortSignal): Promise<() => void> {
+  // Wait out any in-progress maintenance so the scan we are about to open never
+  // references data/index files an optimize or index rebuild is unlinking.
+  await awaitMaintenanceGate(signal);
   _activeReadCount++;
   let ended = false;
   return () => {
@@ -1247,6 +1263,12 @@ async function tableExists(conn: Connection, name: string): Promise<boolean> {
 async function getTableIfExists(tableName = EMBEDDINGS_TABLE, lockHeld = false): Promise<Table | null> {
   const state = getTableState(tableName);
   if (state.tableHandle) return state.tableHandle;
+  // Reads, the health probe, and the index-health monitor resolve handles
+  // outside the read gate. Wait out any in-progress compaction first so
+  // openTable()/tableNames() can't run while optimize()/createIndex() rewrites
+  // the manifest and index files. Maintenance ops hold the gate themselves
+  // (lockHeld=true) and must NOT wait on it here — that would self-deadlock.
+  if (!lockHeld) await awaitMaintenanceGate();
   const conn = await getConnection();
   const exists = await tableExists(conn, tableName);
   if (!exists) return null;
@@ -1264,6 +1286,10 @@ async function getTableIfExists(tableName = EMBEDDINGS_TABLE, lockHeld = false):
 async function getOrCreateTable(tableName = EMBEDDINGS_TABLE, seedRows?: EmbeddingRow[], lockHeld = false): Promise<Table> {
   const state = getTableState(tableName);
   if (state.tableHandle) return state.tableHandle;
+  // See getTableIfExists: gate handle resolution against in-progress compaction
+  // for non-maintenance callers (lockHeld=false) to keep openTable()/createTable()
+  // from racing optimize()/createIndex(). Maintenance holds the gate, so skip.
+  if (!lockHeld) await awaitMaintenanceGate();
   let conn = await getConnection();
   const exists = await tableExists(conn, tableName);
   if (exists) {
