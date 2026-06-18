@@ -236,6 +236,29 @@
   -webkit-text-fill-color: var(--lumiverse-text-dim);
 }
 
+/* Lock per-character glyph advance across BOTH layers so the caret (which lives
+   in the <textarea>) and the visible glyphs (in the <pre>) never drift apart.
+   A <textarea> shapes text with kerning/ligatures effectively OFF (it treats
+   glyphs as fixed cells for caret math), while a <pre> applies the font's
+   kerning + contextual ligatures by default. That asymmetry shifts the
+   highlighted text away from the caret — worsening along each line and around
+   ligature-prone tokens this editor is full of ({{ }} :: -> ==), especially on
+   ligature mono fonts (Fira Code, JetBrains Mono). Forcing the same minimal
+   shaping on both keeps them in step. text-size-adjust pins mobile text
+   inflation, which hits the <pre> (content) but not the form control.
+   These two selectors MUST stay grouped — divergence here = caret drift. */
+.highlightPre,
+.textareaHighlighted {
+  letter-spacing: 0;
+  word-spacing: 0;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  text-rendering: optimizeSpeed;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 /* ── Syntax highlight tokens ── */
 
 .hlBracket {
