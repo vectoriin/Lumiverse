@@ -291,12 +291,13 @@ export interface NanoGptUsageWindow {
 
 export interface NanoGptSubscriptionUsage {
   active: boolean
+  enforceDailyLimit: boolean
   limits: {
-    weeklyInputTokens: number | null
-    dailyImages: number | null
+    daily: number | null
+    monthly: number | null
   }
-  weeklyInputTokens: NanoGptUsageWindow | null
-  dailyImages: NanoGptUsageWindow | null
+  daily: NanoGptUsageWindow | null
+  monthly: NanoGptUsageWindow | null
   period: {
     currentPeriodEnd: string | null
   }

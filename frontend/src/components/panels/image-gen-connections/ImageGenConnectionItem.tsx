@@ -13,6 +13,15 @@ import ProviderIcon from '@/components/shared/ProviderIcon'
 import styles from '../connection-manager/ConnectionItem.module.css'
 import clsx from 'clsx'
 
+const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat(undefined, {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+
+function formatCompactCount(value: number) {
+  return COMPACT_NUMBER_FORMATTER.format(value)
+}
+
 function formatTimeUntil(resetAt: number | null, unknownLabel: string) {
   if (!resetAt) return unknownLabel
 
@@ -199,26 +208,37 @@ export default function ImageGenConnectionItem({
           {testResult.message}
         </div>
       )}
-      {showNanoGptUsage && nanoGptUsage?.dailyImages && (
-        <div className={styles.creditsBar}>
-          <div className={styles.creditCell}>
-            <span className={styles.creditLabel}>{t('connectionItem.imagesLeft')}</span>
-            <span className={styles.creditValue}>
-              {nanoGptUsage.limits.dailyImages !== null
-                ? `${nanoGptUsage.dailyImages.remaining} / ${nanoGptUsage.limits.dailyImages}`
-                : String(nanoGptUsage.dailyImages.remaining)}
-            </span>
-          </div>
-          <div className={styles.creditCell}>
-            <span className={styles.creditLabel}>{t('connectionItem.resetsIn')}</span>
-            <span className={styles.creditValue}>
-              {formatTimeUntil(nanoGptUsage.dailyImages.resetAt, t('connectionItem.unknown'))}
-            </span>
-          </div>
-          <button type="button" className={styles.creditsRefresh} onClick={refreshNanoGptUsage} disabled={nanoGptUsageLoading}>
-            {nanoGptUsageLoading ? <Spinner size={10} /> : <RefreshCw size={10} />}
-          </button>
-        </div>
+      {showNanoGptUsage && nanoGptUsage && (nanoGptUsage.daily || nanoGptUsage.monthly) && (
+        [
+          { key: 'daily', label: t('connectionItem.daily'), window: nanoGptUsage.daily, limit: nanoGptUsage.limits.daily },
+          { key: 'monthly', label: t('connectionItem.monthly'), window: nanoGptUsage.monthly, limit: nanoGptUsage.limits.monthly },
+        ]
+          .filter((entry): entry is typeof entry & { window: NonNullable<typeof entry.window> } => entry.window != null)
+          .map(({ key, label, window: win, limit }, idx) => (
+            <div key={key} className={clsx(styles.creditsBar, styles.nanoGptUsageBar)}>
+              <div className={styles.creditCell}>
+                <span className={styles.creditLabel}>{label}</span>
+                <span className={styles.creditValue}>
+                  {limit !== null
+                    ? `${formatCompactCount(win.remaining)} / ${formatCompactCount(limit)}`
+                    : formatCompactCount(win.remaining)}
+                </span>
+              </div>
+              <div className={styles.creditCell}>
+                <span className={styles.creditLabel}>{t('connectionItem.used')}</span>
+                <span className={styles.creditValue}>{formatCompactCount(win.used)}</span>
+              </div>
+              <div className={styles.creditCell}>
+                <span className={styles.creditLabel}>{t('connectionItem.resetsIn')}</span>
+                <span className={styles.creditValue}>{formatTimeUntil(win.resetAt, t('connectionItem.unknown'))}</span>
+              </div>
+              {idx === 0 && (
+                <button type="button" className={styles.creditsRefresh} onClick={refreshNanoGptUsage} disabled={nanoGptUsageLoading}>
+                  {nanoGptUsageLoading ? <Spinner size={10} /> : <RefreshCw size={10} />}
+                </button>
+              )}
+            </div>
+          ))
       )}
       {workflowEditorOpen && (
         <ComfyWorkflowEditor

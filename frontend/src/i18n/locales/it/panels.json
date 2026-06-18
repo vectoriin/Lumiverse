@@ -348,6 +348,8 @@
     "resetsIn": "Reimposta tra",
     "unknown": "Sconosciuto",
     "imagesLeft": "Immagini rimanenti",
+    "daily": "Giornaliero",
+    "monthly": "Mensile",
     "comfyWorkflow": "Flusso di lavoro ComfyUI",
     "loadComfyWorkflowFailed": "Errore nel caricamento del flusso di lavoro ComfyUI"
   },

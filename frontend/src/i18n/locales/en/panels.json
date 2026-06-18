@@ -391,6 +391,8 @@
     "resetsIn": "Resets In",
     "unknown": "Unknown",
     "imagesLeft": "Images Left",
+    "daily": "Daily",
+    "monthly": "Monthly",
     "comfyWorkflow": "ComfyUI workflow",
     "loadComfyWorkflowFailed": "Failed to load ComfyUI workflow"
   },
