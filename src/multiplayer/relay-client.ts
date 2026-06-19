@@ -19,6 +19,18 @@ import * as mp from "../services/multiplayer.service";
 
 const INITIAL_RECONNECT_MS = 1_000;
 const MAX_RECONNECT_MS = 60_000;
+// App-level keepalive. Mobile/cellular NAT silently drops idle connections
+// (often within ~30s) and Termux/Doze can freeze the socket, leaving a HALF-OPEN
+// connection that never fires `onclose` — the host then keeps "sending" into the
+// void and every peer desyncs. A short ping keeps the NAT mapping warm; the
+// server's pong proves it's still reachable. If no frame arrives within the
+// liveness window we force a reconnect instead of silently desyncing.
+const HEARTBEAT_MS = 20_000;
+const LIVENESS_TIMEOUT_MS = 60_000;
+// Refresh the room's control-plane liveness (rooms.last_heartbeat) over HTTP,
+// independent of the relay WS — so the Identity Server's view of the room stays
+// current even across WS reconnects.
+const ROOM_HEARTBEAT_MS = 60_000;
 
 interface Bridge {
   roomId: string;
@@ -26,6 +38,10 @@ interface Bridge {
   ws: WebSocket | null;
   reconnectMs: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  heartbeatTimer: ReturnType<typeof setInterval> | null;
+  roomHeartbeatTimer: ReturnType<typeof setInterval> | null;
+  /** Epoch ms of the last frame received from the relay (any frame, incl. pong). */
+  lastFrameAt: number;
   stopped: boolean;
   memberToParticipant: Map<string, string>;
   unsubs: Array<() => void>;
@@ -49,6 +65,9 @@ export async function startRelayBridge(roomId: string): Promise<boolean> {
     ws: null,
     reconnectMs: INITIAL_RECONNECT_MS,
     reconnectTimer: null,
+    heartbeatTimer: null,
+    roomHeartbeatTimer: null,
+    lastFrameAt: 0,
     stopped: false,
     memberToParticipant: new Map(),
     unsubs: [],
@@ -63,6 +82,15 @@ export async function startRelayBridge(roomId: string): Promise<boolean> {
     }),
   );
 
+  // Keep the room's control-plane liveness fresh on the Identity Server.
+  const roomHb = setInterval(() => {
+    void identityClient.heartbeat(bridge.roomId);
+  }, ROOM_HEARTBEAT_MS);
+  if (typeof (roomHb as { unref?: () => void }).unref === "function") {
+    (roomHb as { unref: () => void }).unref();
+  }
+  bridge.roomHeartbeatTimer = roomHb;
+
   await connect(bridge);
   return true;
 }
@@ -72,6 +100,8 @@ export function stopRelayBridge(roomId: string): void {
   if (!bridge) return;
   bridge.stopped = true;
   if (bridge.reconnectTimer) clearTimeout(bridge.reconnectTimer);
+  if (bridge.roomHeartbeatTimer) clearInterval(bridge.roomHeartbeatTimer);
+  stopHeartbeat(bridge);
   for (const unsub of bridge.unsubs) unsub();
   try {
     bridge.ws?.close();
@@ -90,12 +120,24 @@ async function connect(bridge: Bridge): Promise<void> {
     const ws = new WebSocket(url);
     bridge.ws = ws;
     ws.onopen = () => {
+      if (bridge.ws !== ws) return; // superseded by a newer connection
       bridge.reconnectMs = INITIAL_RECONNECT_MS;
+      startHeartbeat(bridge);
+      // After a reconnect, peers may have missed events during the outage —
+      // resend each a fresh room snapshot so they re-sync (no-op on first
+      // connect: no peers materialized yet).
+      rehydratePeers(bridge);
       console.log(`[mp-remote] relay bridge connected for room ${bridge.roomId}`);
     };
-    ws.onmessage = (e) => handleRelayFrame(bridge, typeof e.data === "string" ? e.data : String(e.data));
+    ws.onmessage = (e) => {
+      if (bridge.ws !== ws) return;
+      bridge.lastFrameAt = Date.now(); // any frame (incl. pong) proves liveness
+      handleRelayFrame(bridge, typeof e.data === "string" ? e.data : String(e.data));
+    };
     ws.onclose = () => {
+      if (bridge.ws !== ws) return; // ignore a stale socket's late close
       bridge.ws = null;
+      stopHeartbeat(bridge);
       if (!bridge.stopped) scheduleReconnect(bridge);
     };
     ws.onerror = () => {
@@ -121,6 +163,66 @@ function scheduleReconnect(bridge: Bridge): void {
     (bridge.reconnectTimer as { unref: () => void }).unref();
   }
   bridge.reconnectMs = Math.min(bridge.reconnectMs * 2, MAX_RECONNECT_MS);
+}
+
+function startHeartbeat(bridge: Bridge): void {
+  stopHeartbeat(bridge);
+  bridge.lastFrameAt = Date.now();
+  const timer = setInterval(() => {
+    const ws = bridge.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // No frame (not even a pong) within the liveness window → the connection is
+    // dead (typically half-open on mobile/Termux). Tear it down + reconnect
+    // rather than keep streaming into a black hole.
+    if (Date.now() - bridge.lastFrameAt > LIVENESS_TIMEOUT_MS) {
+      console.warn(`[mp-remote] relay bridge stale for room ${bridge.roomId} — forcing reconnect`);
+      forceReconnect(bridge);
+      return;
+    }
+    sendFrame(bridge, { v: 1, t: "ctrl", d: { type: "ping" } });
+  }, HEARTBEAT_MS);
+  if (typeof (timer as { unref?: () => void }).unref === "function") {
+    (timer as { unref: () => void }).unref();
+  }
+  bridge.heartbeatTimer = timer;
+}
+
+function stopHeartbeat(bridge: Bridge): void {
+  if (bridge.heartbeatTimer) {
+    clearInterval(bridge.heartbeatTimer);
+    bridge.heartbeatTimer = null;
+  }
+}
+
+/** Re-send the room snapshot to every peer we've materialized, so they re-sync
+ *  after a bridge reconnect (each gets their own selfParticipantId; the relay
+ *  drops sends to members who have since left). */
+function rehydratePeers(bridge: Bridge): void {
+  if (bridge.memberToParticipant.size === 0) return;
+  const room = mp.getRoom(bridge.roomId);
+  if (!room) return;
+  for (const [memberId, participantId] of bridge.memberToParticipant) {
+    sendFrame(bridge, {
+      v: 1,
+      t: "msg",
+      to: memberId,
+      d: { event: "ROOM_STATUS", payload: mp.buildHydrationPayload(room, participantId) },
+    });
+  }
+}
+
+/** Tear down a (likely dead) socket and reconnect, without waiting on onclose —
+ *  a half-open socket may never fire it. */
+function forceReconnect(bridge: Bridge): void {
+  const ws = bridge.ws;
+  bridge.ws = null;
+  stopHeartbeat(bridge);
+  try {
+    ws?.close();
+  } catch {
+    /* already dead */
+  }
+  if (!bridge.stopped) scheduleReconnect(bridge);
 }
 
 function sendFrame(bridge: Bridge, frame: { v: 1; t: string; d: unknown; to?: string }): void {

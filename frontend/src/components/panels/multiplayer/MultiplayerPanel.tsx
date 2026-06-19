@@ -115,10 +115,12 @@ export default function MultiplayerPanel() {
   }, [mpChatId, navigate])
 
   const [strategy, setStrategy] = useState<TurnStrategy>('round_robin')
-  const [windowSec, setWindowSec] = useState(120)
+  // Kept as a string so the field can be cleared / freely edited; clamped to
+  // [10, 3600] only at send time (a raw number input snapped empty values back
+  // to 120, which made larger values awkward/impossible to enter).
+  const [windowSec, setWindowSec] = useState('120')
   const [joinId, setJoinId] = useState('')
   const [busy, setBusy] = useState(false)
-  const [invite, setInvite] = useState<{ token: string } | null>(null)
   // Lives in the store (not local state) so the ROOM_INVITE_CODE handler can
   // auto-roll it when a guest redeems the current code.
   const remoteCode = useStore((s) => s.mpRemoteCode)
@@ -145,11 +147,13 @@ export default function MultiplayerPanel() {
       // Compress the bot avatar so peers (who can't fetch the owner-scoped
       // character-avatar endpoint) can render it.
       const characterAvatar = await buildCharacterAvatarSnapshot(activeCharacterId)
+      // Clamp to the backend's accepted range [10, 3600] (empty → default 120).
+      const freeformWindowSec = Math.min(3600, Math.max(10, parseInt(windowSec, 10) || 120))
       // Backend forks the current chat and returns the room on the new fork.
       const view = await multiplayerApi.create({
         chat_id: activeChatId,
         turn_strategy: strategy,
-        settings: strategy === 'freeform' ? { freeformWindowSec: windowSec } : undefined,
+        settings: strategy === 'freeform' ? { freeformWindowSec } : undefined,
       })
       setRoomState(view, { isHost: true })
       // Switch to the forked multiplayer chat (the original is preserved).
@@ -244,18 +248,14 @@ export default function MultiplayerPanel() {
     }
   }, [roomId])
 
-  const copyInvite = useCallback(async () => {
-    if (!roomId) return
-    setBusy(true)
+  const copyText = useCallback(async (text: string, label: string) => {
     try {
-      const res = await multiplayerApi.invite(roomId)
-      setInvite({ token: res.token })
+      await navigator.clipboard.writeText(text)
+      toast.success(`${label} copied`)
     } catch {
-      toast.error('Could not create an invite')
-    } finally {
-      setBusy(false)
+      toast.error('Could not copy — select and copy manually')
     }
-  }, [roomId])
+  }, [])
 
   const leave = useCallback(() => {
     if (isHost && roomId) {
@@ -306,13 +306,13 @@ export default function MultiplayerPanel() {
               </div>
               {strategy === 'freeform' && (
                 <div style={{ marginBottom: 10 }}>
-                  <div style={label}>Window (seconds)</div>
+                  <div style={label}>Window (seconds, 10–3600)</div>
                   <input
                     type="number"
                     min={10}
                     max={3600}
                     value={windowSec}
-                    onChange={(e) => setWindowSec(Number(e.target.value) || 120)}
+                    onChange={(e) => setWindowSec(e.target.value)}
                     style={{ ...btn, width: 100, cursor: 'text' }}
                   />
                 </div>
@@ -382,35 +382,39 @@ export default function MultiplayerPanel() {
       {isHost && (
         <div style={card}>
           <h3 style={{ margin: '0 0 8px', fontSize: 14 }}>Invite</h3>
-          <div style={label}>Share the Room ID for friends on this server to join:</div>
+          <div style={label}>Friends on this server can join with the Room ID:</div>
           <code style={{ display: 'block', fontSize: 12, wordBreak: 'break-all', marginBottom: 8 }}>{roomId}</code>
-          <button style={btn} onClick={copyInvite} disabled={busy}>
+          <button style={btn} onClick={() => copyText(roomId!, 'Room ID')}>
             <Copy size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-            Generate invite token
+            Copy Room ID
           </button>
-          {invite && (
-            <code style={{ display: 'block', fontSize: 11, wordBreak: 'break-all', marginTop: 8, opacity: 0.8 }}>
-              {invite.token}
-            </code>
-          )}
 
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--lumiverse-border)' }}>
             {remoteCode ? (
               <>
-                <div style={label}>
-                  <Globe size={11} style={{ verticalAlign: -1, marginRight: 4 }} />
-                  Listening for friends — share this one-time code:
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, marginBottom: 2 }}>
+                  <Globe size={14} style={{ flexShrink: 0 }} />
+                  Listening for friends
                 </div>
-                <code style={{ display: 'block', fontSize: 16, fontWeight: 700, letterSpacing: 1, wordBreak: 'break-all', margin: '6px 0' }}>
+                <div style={{ ...label, marginBottom: 8, lineHeight: 1.4 }}>
+                  Share this one-time code with friends anywhere — it rolls to a new one each time someone joins:
+                </div>
+                <code style={{ display: 'block', fontSize: 16, fontWeight: 700, letterSpacing: 1, wordBreak: 'break-all', marginBottom: 8 }}>
                   {remoteCode}
                 </code>
-                <button style={btn} onClick={enableRemote} disabled={busy}>
-                  New code
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={btn} onClick={() => copyText(remoteCode, 'Invite code')}>
+                    <Copy size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                    Copy code
+                  </button>
+                  <button style={btn} onClick={enableRemote} disabled={busy}>
+                    New code
+                  </button>
+                </div>
               </>
             ) : (
               <>
-                <div style={label}>Play with friends over the internet (via the Identity Server):</div>
+                <div style={{ ...label, lineHeight: 1.4 }}>Play with friends over the internet (via the Identity Server):</div>
                 <button style={btn} onClick={enableRemote} disabled={busy}>
                   <Globe size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
                   Enable remote play

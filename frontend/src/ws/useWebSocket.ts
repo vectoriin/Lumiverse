@@ -1525,6 +1525,9 @@ export function useWebSocket() {
               .catch(() => {})
           }
         } else if (payload.status === 'closed' && payload.roomId === state.mpRoomId) {
+          // Stop any relay auto-reconnect before clearing — the room is gone, so
+          // we must not try to rejoin it.
+          relayClient.disconnect()
           state.clearRoom()
           toast.info(i18n.t('multiplayer.roomClosed', { defaultValue: 'The room was closed by the host' }))
         }

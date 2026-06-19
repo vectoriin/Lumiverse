@@ -207,6 +207,25 @@ describe("multiplayer turn engine", () => {
     expect(mp.submitPeerMessage(room.id, peerA, "x".repeat(20_000)).ok).toBe(false);
   });
 
+  test("freeform window honors a custom duration and clamps to [10, 3600]", () => {
+    const mk = (sec: number) => {
+      const ch = charactersSvc.createCharacter(HOST, { name: "Bot" });
+      const c = chatsSvc.createChat(HOST, { character_id: ch.id });
+      const r = mp.createRoom(HOST, c.id, { turnStrategy: "freeform", settings: { freeformWindowSec: sec } });
+      if ("error" in r) throw new Error(`createRoom failed: ${r.error}`);
+      return r;
+    };
+    // A large value is stored as-is — NOT capped at the 120 default.
+    expect(mk(600).settings.freeformWindowSec).toBe(600);
+    expect(mk(99999).settings.freeformWindowSec).toBe(3600); // clamp to max
+    expect(mk(2).settings.freeformWindowSec).toBe(10); // clamp to min
+
+    // The opened window honors the configured duration (~600s, not ~120).
+    const room = mk(600);
+    const opened = mp.openFreeformWindow(HOST, room.id)!;
+    expect(opened.freeform_deadline! - Math.floor(Date.now() / 1000)).toBeGreaterThan(550);
+  });
+
   test("freeform: submit only inside an open window", () => {
     const { room } = makeRoom("freeform");
     const peerA = joinPeer(room.id, "peerA", "Ada");

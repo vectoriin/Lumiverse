@@ -76,7 +76,17 @@ function parseJson<T>(raw: unknown, fallback: T): T {
 }
 
 function normalizeSettings(raw: unknown): RoomSettings {
-  const obj = parseJson<Partial<RoomSettings>>(raw, {});
+  // Accepts BOTH a JSON string (the persisted DB column, via rowToRoom) and an
+  // already-parsed object (createRoom / updateRoom). The object form previously
+  // fell through parseJson — which only handles strings — so every create/update
+  // silently dropped maxPeers + freeformWindowSec back to their defaults (the
+  // "freeform window can't exceed 120s" bug).
+  const obj: Partial<RoomSettings> =
+    typeof raw === "string"
+      ? parseJson<Partial<RoomSettings>>(raw, {})
+      : raw && typeof raw === "object"
+        ? (raw as Partial<RoomSettings>)
+        : {};
   const maxPeers = clampInt(obj.maxPeers ?? HARD_MAX_PEERS, 1, HARD_MAX_PEERS);
   const freeformWindowSec = clampInt(
     obj.freeformWindowSec ?? DEFAULT_FREEFORM_WINDOW_SEC,

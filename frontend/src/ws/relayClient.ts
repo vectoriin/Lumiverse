@@ -7,20 +7,199 @@
  * dispatched through the EXACT same handler registry as the live socket
  * (wsClient.dispatchExternal), so the whole multiplayer store/UI works
  * unchanged. Outbound room actions are wrapped as relay frames.
+ *
+ * Resilience (mobile/flaky networks): an app-level heartbeat keeps the NAT
+ * mapping warm and detects HALF-OPEN sockets (which never fire `onclose`); on a
+ * drop the client auto-reconnects with backoff, minting a FRESH grant via the
+ * durable reconnect token (so an expired peer token / membership re-check is
+ * handled). A kicked/banned/closed room ends reconnection cleanly.
  */
 
 import { wsClient } from './client'
 import { useStore } from '@/store'
+import { multiplayerApi } from '@/api/multiplayer'
+import { toast } from '@/lib/toast'
 import type { JoinGrant, PersonaSnapshot } from '@/types/multiplayer'
+
+const HEARTBEAT_MS = 20_000
+const LIVENESS_TIMEOUT_MS = 60_000
+const INITIAL_RECONNECT_MS = 1_000
+const MAX_RECONNECT_MS = 30_000
+const MAX_RECONNECT_ATTEMPTS = 8
 
 let ws: WebSocket | null = null
 let joinProfile: { displayName?: string; persona?: PersonaSnapshot | null } = {}
 // The durable reconnect token from the active grant, surfaced so the room
 // hydration handler can persist it on the shadow chat for later rejoin.
 let reconnectToken: string | null = null
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let reconnectMs = INITIAL_RECONNECT_MS
+let reconnectAttempts = 0
+let lastFrameAt = 0
+// Set when the user (or a closed room) intentionally tears down — suppresses
+// auto-reconnect so we don't fight a deliberate disconnect.
+let intentionalClose = false
 
 function isActive(): boolean {
   return !!ws && ws.readyState === WebSocket.OPEN
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+}
+
+function startHeartbeat(): void {
+  stopHeartbeat()
+  lastFrameAt = Date.now()
+  heartbeatTimer = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    // No frame (not even a pong) within the liveness window → the socket is dead
+    // (half-open, common on mobile). Drop it and reconnect.
+    if (Date.now() - lastFrameAt > LIVENESS_TIMEOUT_MS) {
+      dropAndReconnect()
+      return
+    }
+    try {
+      ws.send(JSON.stringify({ v: 1, t: 'ctrl', d: { type: 'ping' } }))
+    } catch {
+      /* socket closing */
+    }
+  }, HEARTBEAT_MS)
+}
+
+function sendAction(action: Record<string, any>): void {
+  if (!isActive()) return
+  try {
+    ws!.send(JSON.stringify({ v: 1, t: 'msg', d: action }))
+  } catch {
+    /* socket closing */
+  }
+}
+
+function openSocket(grant: JoinGrant): void {
+  if (ws) {
+    try {
+      ws.close()
+    } catch {
+      /* noop */
+    }
+  }
+  reconnectToken = grant.reconnectToken ?? reconnectToken
+  const url = `${grant.transport.relay.url}?token=${encodeURIComponent(grant.peerToken)}&role=peer`
+  const sock = new WebSocket(url)
+  ws = sock
+  useStore.getState().setRoomConnStatus('connecting')
+
+  sock.onopen = () => {
+    if (ws !== sock) return // superseded
+    reconnectMs = INITIAL_RECONNECT_MS
+    reconnectAttempts = 0
+    startHeartbeat()
+    useStore.getState().setRoomConnStatus('connected')
+    // Announce ourselves so the host (re-)materializes our participant + hydrates
+    // us. On a reconnect this re-attaches the SAME member → same turn slot.
+    sendAction({ type: 'room_join', displayName: joinProfile.displayName, persona: joinProfile.persona })
+  }
+
+  sock.onmessage = (e) => {
+    if (ws !== sock) return
+    lastFrameAt = Date.now() // any frame (incl. pong) proves liveness
+    let frame: any
+    try {
+      frame = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data))
+    } catch {
+      return
+    }
+    if (!frame || frame.v !== 1) return
+    const d = frame.d
+    if (d && typeof d.event === 'string') {
+      wsClient.dispatchExternal(d.event, d.payload)
+    }
+  }
+
+  sock.onclose = () => {
+    if (ws !== sock) return // stale socket's late close — ignore
+    ws = null
+    stopHeartbeat()
+    if (!intentionalClose) scheduleReconnect()
+  }
+  sock.onerror = () => {
+    try {
+      sock.close()
+    } catch {
+      /* noop */
+    }
+  }
+}
+
+/** Drop a (likely half-open) socket and reconnect without waiting on onclose. */
+function dropAndReconnect(): void {
+  const sock = ws
+  ws = null
+  stopHeartbeat()
+  try {
+    sock?.close()
+  } catch {
+    /* already dead */
+  }
+  scheduleReconnect()
+}
+
+function scheduleReconnect(): void {
+  if (reconnectTimer || intentionalClose) return
+  const s = useStore.getState()
+  if (!s.mpRoomId) return // no longer in a room
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    giveUp('Lost connection to the room — open it from your chats to rejoin.')
+    return
+  }
+  s.setRoomConnStatus('connecting')
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    void attemptReconnect()
+  }, reconnectMs)
+  reconnectMs = Math.min(reconnectMs * 2, MAX_RECONNECT_MS)
+}
+
+async function attemptReconnect(): Promise<void> {
+  if (intentionalClose) return
+  reconnectAttempts += 1
+  // The shadow chat id (= host chat id) keys the stored reconnect token.
+  const chatId = useStore.getState().mpChatId
+  if (!chatId) {
+    giveUp('Disconnected from the room.')
+    return
+  }
+  try {
+    const grant = await multiplayerApi.reconnect(chatId)
+    if (intentionalClose) return
+    openSocket(grant)
+  } catch (err: any) {
+    // Terminal: room closed / kicked / banned / no longer rejoinable → stop.
+    const status: number | undefined = err?.status
+    if (status === 403 || status === 409 || status === 410) {
+      giveUp('The room was closed, or you were removed.')
+    } else {
+      scheduleReconnect() // transient (network / 5xx) — keep trying with backoff
+    }
+  }
+}
+
+/** Stop reconnecting and clear the room so the chat's Rejoin affordance shows. */
+function giveUp(message: string): void {
+  intentionalClose = true
+  stopHeartbeat()
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  ws = null
+  useStore.getState().clearRoom()
+  toast.info(message)
 }
 
 export const relayClient = {
@@ -32,62 +211,26 @@ export const relayClient = {
   },
 
   connect(grant: JoinGrant, profile: { displayName?: string; persona?: PersonaSnapshot | null } = {}) {
-    this.disconnect()
+    this.disconnect() // clean slate (sets intentionalClose)
+    intentionalClose = false
     joinProfile = profile
-    reconnectToken = grant.reconnectToken ?? null
-    const url = `${grant.transport.relay.url}?token=${encodeURIComponent(grant.peerToken)}&role=peer`
-    const sock = new WebSocket(url)
-    ws = sock
-    useStore.getState().setRoomConnStatus('connecting')
-
-    sock.onopen = () => {
-      useStore.getState().setRoomConnStatus('connected')
-      // Announce ourselves so the host materializes a participant + hydrates us.
-      this.send({ type: 'room_join', displayName: joinProfile.displayName, persona: joinProfile.persona })
-    }
-
-    sock.onmessage = (e) => {
-      let frame: any
-      try {
-        frame = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data))
-      } catch {
-        return
-      }
-      if (!frame || frame.v !== 1) return
-      const d = frame.d
-      if (d && typeof d.event === 'string') {
-        wsClient.dispatchExternal(d.event, d.payload)
-      }
-    }
-
-    sock.onclose = () => {
-      if (ws === sock) {
-        ws = null
-        const s = useStore.getState()
-        // Only surface 'closed' if we still think we're in this room.
-        if (s.mpRoomId) s.setRoomConnStatus('closed')
-      }
-    }
-    sock.onerror = () => {
-      try {
-        sock.close()
-      } catch {
-        /* noop */
-      }
-    }
+    reconnectMs = INITIAL_RECONNECT_MS
+    reconnectAttempts = 0
+    openSocket(grant)
   },
 
   /** Send a room action wrapped as a relay frame. */
   send(action: Record<string, any>) {
-    if (!isActive()) return
-    try {
-      ws!.send(JSON.stringify({ v: 1, t: 'msg', d: action }))
-    } catch {
-      /* socket closing */
-    }
+    sendAction(action)
   },
 
   disconnect() {
+    intentionalClose = true
+    stopHeartbeat()
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     if (ws) {
       try {
         ws.close()
