@@ -2943,6 +2943,7 @@
       "create": "Créer",
       "renameAction": "Rebaptiser",
       "lumihubBadge": "Préréglage LumiHub",
+      "version": "v{{version}}",
       "blocks_one": "{{count}} bloc",
       "blocks_other": "Blocs {{count}}",
       "coverAria": "Image de couverture pour {{name}}",

@@ -2943,6 +2943,7 @@
       "create": "作成する",
       "renameAction": "名前変更",
       "lumihubBadge": "LumiHub プリセット",
+      "version": "v{{version}}",
       "blocks_one": "{{count}} ブロック",
       "blocks_other": "{{count}} ブロック",
       "coverAria": "{{name}} のカバー画像",

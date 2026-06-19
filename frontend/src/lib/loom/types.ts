@@ -156,6 +156,10 @@ export interface LoomPreset {
   name: string
   description: string
   coverUrl: string | null
+  /** Published version label of the source preset (LumiHub install / Loom JSON export). Null for local presets. */
+  presetVersion: string | null
+  /** LumiHub provenance metadata (install source, hub id, slug, creator) preserved verbatim across edits. Null when not LumiHub-sourced. */
+  lumihubMeta: Record<string, unknown> | null
   schemaVersion: number
   createdAt: number
   updatedAt: number

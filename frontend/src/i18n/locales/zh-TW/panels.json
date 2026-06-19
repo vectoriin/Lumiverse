@@ -2943,6 +2943,7 @@
       "create": "創建",
       "renameAction": "重命名",
       "lumihubBadge": "LumiHub 預設",
+      "version": "v{{version}}",
       "blocks_one": "{{count}} 個塊",
       "blocks_other": "{{count}} 個塊",
       "coverAria": "{{name}} 的封面圖",

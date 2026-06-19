@@ -672,6 +672,9 @@ function PresetCoverHeader({ preset }: { preset: LoomPreset }) {
       <div className={s.presetCoverContent}>
         <div className={s.presetCoverBadgeRow}>
           <span className={s.presetCoverBadge}>{t('preset.lumihubBadge')}</span>
+          {preset.presetVersion && (
+            <span className={s.presetCoverBadge}>{t('preset.version', { version: preset.presetVersion })}</span>
+          )}
           <span className={s.presetCoverBadge}>{t('preset.blocks', { count: preset.blocks.length })}</span>
         </div>
         <h2 className={s.presetCoverTitle}>{preset.name}</h2>

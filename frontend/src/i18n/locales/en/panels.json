@@ -3003,6 +3003,7 @@
       "create": "Create",
       "renameAction": "Rename",
       "lumihubBadge": "LumiHub preset",
+      "version": "v{{version}}",
       "blocks_one": "{{count}} block",
       "blocks_other": "{{count}} blocks",
       "coverAria": "Cover image for {{name}}",

@@ -2951,6 +2951,7 @@
       "create": "Crea",
       "renameAction": "Rinomina",
       "lumihubBadge": "Preset LumiHub",
+      "version": "v{{version}}",
       "blocks_one": "{{count}} blocco",
       "blocks_other": "{{count}} blocchi",
       "coverAria": "Immagine copertina per {{name}}",
