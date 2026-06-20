@@ -35,6 +35,7 @@ import { registerDatabankMacros } from "./definitions/databank";
 import { registerPromptVarMacros } from "./definitions/prompt-vars";
 import { registerMultiplayerMacros } from "./definitions/multiplayer";
 import { registerIterationMacros } from "./definitions/iteration";
+import { registerListMacros } from "./definitions/lists";
 
 let initialized = false;
 
@@ -68,4 +69,5 @@ export function initMacros(): void {
   registerPromptVarMacros();
   registerMultiplayerMacros();
   registerIterationMacros();
+  registerListMacros();
 }

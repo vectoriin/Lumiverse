@@ -215,6 +215,74 @@ Inside the body, these loop variables are available (replace `item` with your va
     - Loops can be nested — give the inner loop a different variable name.
     - Iteration is capped at 1000 items.
 
+### `{{range}}`
+
+Generate a numeric sequence as a comma-separated list — ideal for counted loops.
+
+```
+{{range::5}}              — "1, 2, 3, 4, 5"   (1..n inclusive)
+{{range::3::6}}           — "3, 4, 5, 6"      (start..end inclusive)
+{{range::1::10::2}}       — "1, 3, 5, 7, 9"   (with a step)
+{{range::5::1}}           — "5, 4, 3, 2, 1"   (counts down)
+```
+
+Feed it into `{{foreach}}` for indexed repetition:
+
+```
+{{foreach::{{range::1::{{playerCount}}}}::n}}Round {{.n}}…{{newline}}{{/foreach}}
+```
+
+### `{{filter}}`
+
+Keep only the list items whose body — an `{{if}}`-style condition — is truthy, returning a comma-separated list. The body sees the same loop variables as `{{foreach}}` (`{{.item}}`, `{{.item_index}}`, …).
+
+```
+{{filter::1,2,3,4::n}}{{gt::{{.n}}::2}}{{/filter}}                  — "3, 4"
+{{filter::{{players}}::p}}{{ne::{{.p}}::{{hostName}}}}{{/filter}}    — everyone but the host
+```
+
+### `{{some}}` / `{{every}}`
+
+Test whether **any** (`{{some}}`) or **all** (`{{every}}`) items satisfy a predicate. Both return `"true"` / `""`, are usable as conditions, and short-circuit. `{{every}}` is vacuously `"true"` for an empty list.
+
+```
+{{if::{{some::{{players}}::p}}{{eq::{{.p}}::Bob}}{{/some}}}}Bob is here.{{/if}}
+{{if::{{every::{{range::1::5}}::n}}{{gt::{{.n}}::0}}{{/every}}}}all positive{{/if}}
+```
+
+---
+
+## Lists
+
+Query and transform comma-separated lists. These compose with the iteration macros and with anything that returns a list (`{{players}}`, `{{group}}`, `{{range}}`). Input is split on commas (items trimmed, blanks dropped); list-returning macros emit a clean `, `-separated list, so the family round-trips.
+
+| Macro | Aliases | Returns |
+|-------|---------|---------|
+| `{{count::list}}` | `{{listLength}}` | Number of items |
+| `{{includes::list::item}}` | `{{contains}}`, `{{inList}}` | `"true"` / `""` — whole-item membership (condition-compatible) |
+| `{{nth::list::i}}` | `{{at}}` | Item at index `i` (0-based; negative counts from the end) |
+| `{{first::list}}` | — | First item |
+| `{{last::list}}` | — | Last item |
+| `{{slice::list::start::end}}` | — | Sublist (`end` exclusive and optional; negatives allowed). `{{slice::list::-3}}` → last 3 |
+| `{{take::list::n}}` | — | First `n` items (negative `n` → last `|n|`) |
+| `{{sort::list::dir}}` | — | Sorted; numeric when every item is a number, else alphabetical. `dir` = `asc` (default) or `desc` |
+| `{{unique::list}}` | `{{dedupe}}`, `{{distinct}}` | Duplicates removed (first occurrence kept) |
+| `{{reverseList::list}}` | — | Items in reverse order |
+| `{{shuffle::list}}` | — | Items in random order |
+
+**Examples:**
+
+```
+{{count::{{players}}}}                        — how many players
+{{if::{{includes::{{group}}::Bob}}}}…{{/if}}   — gate on membership
+{{first::{{sort::10,2,30}}}}                   — "2" (numeric sort → smallest)
+{{slice::{{players}}::-2}}                      — the last two players
+{{unique::{{sort::b,a,b,c}}}}                   — "a, b, c"
+```
+
+!!! note "Delimiters"
+    The Lists macros operate on **comma-separated** lists — the form every list-producing macro emits. To bring in data with another delimiter, parse it through `{{foreach}}`'s delimiter argument or normalise it first with `{{replace}}`.
+
 ---
 
 ## Identity & Names
@@ -898,6 +966,9 @@ These macros return `"yes"` / `"no"` or `"true"` / `"false"` and are designed fo
 | `{{or::a::b}}` | Any argument is truthy |
 | `{{not::value}}` | Value is falsy |
 | `{{eq::a::b}}` / `{{gt}}` / `{{lt}}` / etc. | Comparison is true |
+| `{{includes::list::item}}` | List contains the item |
+| `{{some::list::var}}…{{/some}}` | Any list item satisfies the predicate |
+| `{{every::list::var}}…{{/every}}` | All list items satisfy the predicate |
 
 **Usage:**
 
@@ -936,6 +1007,9 @@ The adventure is well underway.
 
 !!! tip "`{{foreach}}` over lists"
     Any macro that returns a comma-separated list — `{{players}}`, `{{group}}`, a `{{.var}}` you built up — can be fed straight into `{{foreach}}`: `{{foreach::{{players}}::p}}{{.p_number}}. {{.p}}{{newline}}{{/foreach}}`. Wrap multiplayer-only content in `{{if::{{isMultiplayer}}}}` so it stays out of solo chats.
+
+!!! tip "Shape lists before you loop"
+    The `{{sort}}`, `{{unique}}`, `{{filter}}`, `{{slice}}`, and `{{take}}` macros all return lists, so they chain: `{{foreach::{{unique::{{sort::{{group}}}}}}::name}}…{{/foreach}}` loops a sorted, de-duplicated roster. Use `{{count}}` / `{{includes}}` / `{{some}}` / `{{every}}` to gate on a list without looping at all.
 
 !!! tip "`{{wrap}}` for conditional formatting"
     `{{wrap}}` only outputs if the content is non-empty — `{{wrap::(**::**)::{{.note}}}}` produces nothing when the note is unset, avoiding stray delimiters.

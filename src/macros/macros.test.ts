@@ -2027,3 +2027,176 @@ describe("Multiplayer macros", () => {
     );
   });
 });
+
+// ===========================================================================
+// NEW MACROS — range (A)
+// ===========================================================================
+
+describe("range macro", () => {
+  test("single arg counts 1..n inclusive", async () => {
+    expect(await ev("{{range::5}}")).toBe("1, 2, 3, 4, 5");
+  });
+
+  test("start..end inclusive", async () => {
+    expect(await ev("{{range::3::6}}")).toBe("3, 4, 5, 6");
+  });
+
+  test("custom step", async () => {
+    expect(await ev("{{range::1::10::2}}")).toBe("1, 3, 5, 7, 9");
+  });
+
+  test("counts down when start > end", async () => {
+    expect(await ev("{{range::5::1}}")).toBe("5, 4, 3, 2, 1");
+    expect(await ev("{{range::10::0::-2}}")).toBe("10, 8, 6, 4, 2, 0");
+  });
+
+  test("step with the wrong sign yields an empty list (no infinite loop)", async () => {
+    expect(await ev("{{range::1::5::-1}}")).toBe("");
+  });
+
+  test("empty / non-numeric inputs yield nothing", async () => {
+    expect(await ev("{{range::0}}")).toBe("");
+    expect(await ev("{{range::abc}}")).toBe("");
+  });
+
+  test("feeds foreach for counted loops", async () => {
+    expect(await ev("{{foreach::{{range::1::3}}::n}}[{{.n}}]{{/foreach}}")).toBe("[1][2][3]");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — list algebra (B)
+// ===========================================================================
+
+describe("list macros", () => {
+  test("count", async () => {
+    expect(await ev("{{count::a,b,c}}")).toBe("3");
+    expect(await ev("{{count::}}")).toBe("0");
+    expect(await ev("{{count::a,,b}}")).toBe("2"); // blanks ignored
+  });
+
+  test("includes (membership, condition-compatible)", async () => {
+    expect(await ev("{{includes::a,b,c::b}}")).toBe("true");
+    expect(await ev("{{includes::a,b,c::z}}")).toBe("");
+    expect(await ev("{{includes::a, b, c:: b }}")).toBe("true"); // trims
+    expect(await ev("{{includes::a,b::A}}")).toBe(""); // case-sensitive
+    expect(await ev("{{if::{{includes::a,b,c::b}}}}yes{{else}}no{{/if}}")).toBe("yes");
+  });
+
+  test("nth / at / first / last", async () => {
+    expect(await ev("{{nth::a,b,c::1}}")).toBe("b");
+    expect(await ev("{{nth::a,b,c::-1}}")).toBe("c");
+    expect(await ev("{{nth::a,b,c::9}}")).toBe("");
+    expect(await ev("{{at::a,b,c::0}}")).toBe("a");
+    expect(await ev("{{first::a,b,c}}")).toBe("a");
+    expect(await ev("{{last::a,b,c}}")).toBe("c");
+    expect(await ev("{{first::}}")).toBe("");
+  });
+
+  test("slice", async () => {
+    expect(await ev("{{slice::a,b,c,d::1::3}}")).toBe("b, c");
+    expect(await ev("{{slice::a,b,c,d::1}}")).toBe("b, c, d");
+    expect(await ev("{{slice::a,b,c,d::-2}}")).toBe("c, d");
+  });
+
+  test("take", async () => {
+    expect(await ev("{{take::a,b,c,d::2}}")).toBe("a, b");
+    expect(await ev("{{take::a,b,c,d::-2}}")).toBe("c, d");
+  });
+
+  test("sort (lexical and numeric-aware)", async () => {
+    expect(await ev("{{sort::banana,apple,cherry}}")).toBe("apple, banana, cherry");
+    expect(await ev("{{sort::10,2,1}}")).toBe("1, 2, 10"); // numeric, not "1, 10, 2"
+    expect(await ev("{{sort::1,3,2::desc}}")).toBe("3, 2, 1");
+  });
+
+  test("unique / dedupe", async () => {
+    expect(await ev("{{unique::a,b,a,c,b}}")).toBe("a, b, c");
+    expect(await ev("{{dedupe::x,x,y}}")).toBe("x, y");
+  });
+
+  test("reverseList", async () => {
+    expect(await ev("{{reverseList::a,b,c}}")).toBe("c, b, a");
+  });
+
+  test("shuffle is a permutation of the input", async () => {
+    // Deterministic check: sorting the shuffled output restores the original.
+    expect(await ev("{{sort::{{shuffle::c,a,b}}}}")).toBe("a, b, c");
+    expect(await ev("{{count::{{shuffle::a,b,c,d}}}}")).toBe("4");
+  });
+
+  test("compose: sort a deduped range", async () => {
+    expect(await ev("{{unique::{{sort::3,1,2,1,3}}}}")).toBe("1, 2, 3");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — predicate family (C)
+// ===========================================================================
+
+describe("filter / some / every macros", () => {
+  const mpEnv = () =>
+    makeEnv({
+      multiplayer: {
+        playerCount: 3,
+        playerNames: ["Alice", "Bob", "Charlie"],
+        hostName: "Alice",
+        currentTurnName: "Bob",
+        turnStrategy: "round_robin",
+      },
+    });
+
+  test("filter keeps items whose predicate is truthy", async () => {
+    expect(await ev("{{filter::1,2,3,4::n}}{{gt::{{.n}}::2}}{{/filter}}")).toBe("3, 4");
+  });
+
+  test("filter predicate supports bare comparison operators (if-parity)", async () => {
+    expect(await ev("{{filter::1,2,3::n}}{{.n}} >= 2{{/filter}}")).toBe("2, 3");
+  });
+
+  test("filter can use loop index", async () => {
+    expect(await ev("{{filter::a,b,c,d::x}}{{lt::{{.x_index}}::2}}{{/filter}}")).toBe("a, b");
+  });
+
+  test("filter with no matches is empty", async () => {
+    expect(await ev("{{filter::1,2::n}}{{gt::{{.n}}::5}}{{/filter}}")).toBe("");
+  });
+
+  test("filter restores its loop variable (hygiene)", async () => {
+    const env = makeEnv({ localVars: { x: "ORIG" } });
+    expect(await ev("{{filter::a,b::x}}true{{/filter}}|{{.x}}", env)).toBe("a, b|ORIG");
+  });
+
+  test("some short-circuits to true / false", async () => {
+    expect(await ev("{{some::1,2,3::n}}{{gt::{{.n}}::2}}{{/some}}")).toBe("true");
+    expect(await ev("{{some::1,2::n}}{{gt::{{.n}}::5}}{{/some}}")).toBe("");
+    expect(await ev("{{some::}}{{gt::1::0}}{{/some}}")).toBe(""); // empty list → false
+  });
+
+  test("every (vacuously true for empty list)", async () => {
+    expect(await ev("{{every::1,2,3::n}}{{gt::{{.n}}::0}}{{/every}}")).toBe("true");
+    expect(await ev("{{every::1,2,3::n}}{{gt::{{.n}}::1}}{{/every}}")).toBe("");
+    expect(await ev("{{every::}}{{gt::1::0}}{{/every}}")).toBe("true");
+  });
+
+  test("aliases: where / any / all", async () => {
+    expect(await ev("{{where::1,2,3::n}}{{gt::{{.n}}::1}}{{/where}}")).toBe("2, 3");
+    expect(await ev("{{any::1,2::n}}{{gt::{{.n}}::1}}{{/any}}")).toBe("true");
+    expect(await ev("{{all::2,4::n}}{{gt::{{.n}}::1}}{{/all}}")).toBe("true");
+  });
+
+  test("compose with multiplayer: peers (everyone but the host)", async () => {
+    expect(
+      await ev("{{filter::{{players}}::p}}{{ne::{{.p}}::{{hostName}}}}{{/filter}}", mpEnv()),
+    ).toBe("Bob, Charlie");
+    expect(
+      await ev("{{count::{{filter::{{players}}::p}}{{ne::{{.p}}::{{hostName}}}}{{/filter}}}}", mpEnv()),
+    ).toBe("2");
+  });
+
+  test("compose: gate on whether the roster includes a name", async () => {
+    expect(
+      await ev("{{if::{{some::{{players}}::p}}{{eq::{{.p}}::Bob}}{{/some}}}}has-bob{{else}}no{{/if}}", mpEnv()),
+    ).toBe("has-bob");
+  });
+});

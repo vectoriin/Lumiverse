@@ -1,30 +1,109 @@
 import { registry } from "../MacroRegistry";
+import type { MacroExecContext } from "../types";
+import { parseDelimitedList, formatList, MAX_LIST_ITEMS } from "../list-utils";
+import { evaluateMacroCondition } from "../conditions";
 
 /**
- * Upper bound on iterations. Mirrors the {{repeat}} cap — a foreach body is
- * re-resolved once per item, so an unbounded list would let a single macro
- * blow up prompt assembly. Excess items are dropped with a warning.
+ * Scoped iteration macros that loop a list and resolve a body per item:
+ *   {{foreach}} — concatenate the body for every item
+ *   {{filter}}  — keep items whose body (a predicate) is truthy
+ *   {{some}} / {{every}} — quantifiers over a predicate
+ *
+ * They share the `::list::var::delimiter` signature, the loop-variable bindings,
+ * and the hygienic save/restore below. {{filter}}/{{some}}/{{every}} treat the
+ * body as an {{if}}-style condition (same operators, negation, and falsy set)
+ * via evaluateMacroCondition.
  */
-const MAX_FOREACH_ITEMS = 1000;
+
+// Loop variables bound for the body. `item` is the value; the suffixed forms
+// give position/size/edge info. See bindLoopVars.
+const LOOP_SUFFIXES = ["", "_index", "_number", "_count", "_first", "_last"] as const;
+
+function loopKeys(varName: string): string[] {
+  return LOOP_SUFFIXES.map((s) => `${varName}${s}`);
+}
+
+/** Snapshot the loop variables' current values so they can be restored. */
+function snapshotVars(
+  local: Map<string, string>,
+  keys: string[],
+): Map<string, string | undefined> {
+  const saved = new Map<string, string | undefined>();
+  for (const k of keys) saved.set(k, local.has(k) ? local.get(k) : undefined);
+  return saved;
+}
+
+/** Restore loop variables to their snapshot (deleting ones that didn't exist). */
+function restoreVars(local: Map<string, string>, saved: Map<string, string | undefined>): void {
+  for (const [k, prev] of saved) {
+    if (prev === undefined) local.delete(k);
+    else local.set(k, prev);
+  }
+}
+
+/** Bind the loop variables for iteration `i` of `count` items. */
+function bindLoopVars(
+  local: Map<string, string>,
+  varName: string,
+  item: string,
+  i: number,
+  count: number,
+): void {
+  local.set(varName, item);
+  local.set(`${varName}_index`, String(i));
+  local.set(`${varName}_number`, String(i + 1));
+  local.set(`${varName}_count`, String(count));
+  local.set(`${varName}_first`, i === 0 ? "true" : "");
+  local.set(`${varName}_last`, i === count - 1 ? "true" : "");
+}
+
+interface IterArgs {
+  items: string[];
+  varName: string;
+}
+
+/**
+ * Parse the shared `::list::var::delimiter` signature. Returns null (with a
+ * warning) when used without a body. Caps the item count like {{repeat}}.
+ */
+async function parseIterArgs(ctx: MacroExecContext): Promise<IterArgs | null> {
+  if (!ctx.isScoped) {
+    ctx.warn(`{{${ctx.name}}} needs a body: {{${ctx.name}::list}}...{{/${ctx.name}}}`);
+    return null;
+  }
+  const listStr = ctx.rawArgs[0] ? (await ctx.resolveNodes(ctx.rawArgs[0])).trim() : "";
+  const varName = (ctx.rawArgs[1] ? (await ctx.resolveNodes(ctx.rawArgs[1])).trim() : "") || "item";
+  const delimiter = ctx.rawArgs[2] ? await ctx.resolveNodes(ctx.rawArgs[2]) : ",";
+  let items = parseDelimitedList(listStr, delimiter);
+  if (items.length > MAX_LIST_ITEMS) {
+    ctx.warn(`{{${ctx.name}}} capped at ${MAX_LIST_ITEMS} items (got ${items.length})`);
+    items = items.slice(0, MAX_LIST_ITEMS);
+  }
+  return { items, varName };
+}
+
+/** Resolve the scoped body and evaluate it as an {{if}}-style condition. */
+async function bodyIsTruthy(ctx: MacroExecContext): Promise<boolean> {
+  let s = (await ctx.resolveNodes(ctx.bodyRaw)).trim();
+  // Safety re-resolve for the rare case where a value depends on state mutated
+  // later in the same template (mirrors {{if}}).
+  if (s.includes("{{")) {
+    const next = (await ctx.resolve(s)).trim();
+    if (next !== s) s = next;
+  }
+  return evaluateMacroCondition(s, ctx.env.variables);
+}
 
 export function registerIterationMacros(): void {
-  // ---- foreach (scoped, delayArgResolution) ----
+  // ---- foreach ----
   //
   // {{foreach::<list>}}body{{/foreach}}
   // {{foreach::<list>::<var>}}body{{/foreach}}
   // {{foreach::<list>::<var>::<delimiter>}}body{{/foreach}}
   //
-  // Resolves the body once per item, exposing loop variables to the body:
-  //   {{.item}}         current value           (name follows <var>, default "item")
-  //   {{.item_index}}   0-based index
-  //   {{.item_number}}  1-based index
-  //   {{.item_count}}   total number of items
-  //   {{.item_first}}   "true" on the first item, else ""
-  //   {{.item_last}}    "true" on the last item,  else ""
-  //
-  // The list is a single string split on <delimiter> (default ","); each item
-  // is trimmed and blanks are dropped, matching {{split}}/{{join}}. This pairs
-  // directly with list-producing macros, e.g. {{foreach::{{players}}}}.
+  // Body bindings (replace `item` with <var>): {{.item}}, {{.item_index}}
+  // (0-based), {{.item_number}} (1-based), {{.item_count}}, {{.item_first}},
+  // {{.item_last}} ("true"/"").
   registry.registerMacro({
     builtIn: true,
     name: "foreach",
@@ -37,65 +116,124 @@ export function registerIterationMacros(): void {
     delayArgResolution: true,
     aliases: ["each", "for_each"],
     handler: async (ctx) => {
-      if (!ctx.isScoped) {
-        ctx.warn("{{foreach}} needs a body: {{foreach::list}}...{{/foreach}}");
-        return "";
-      }
-
-      // delayArgResolution hands us raw AST per arg; resolve only what we need.
-      const listStr = ctx.rawArgs[0] ? (await ctx.resolveNodes(ctx.rawArgs[0])).trim() : "";
-      const varName =
-        (ctx.rawArgs[1] ? (await ctx.resolveNodes(ctx.rawArgs[1])).trim() : "") || "item";
-      const delimiter = ctx.rawArgs[2] ? await ctx.resolveNodes(ctx.rawArgs[2]) : ",";
-
-      if (listStr === "") return "";
-
-      // Empty delimiter = treat the whole string as one item (avoids splitting
-      // into individual characters, which String.split("") would do).
-      let items = (delimiter === "" ? [listStr] : listStr.split(delimiter))
-        .map((s) => s.trim())
-        .filter((s) => s !== "");
+      const parsed = await parseIterArgs(ctx);
+      if (!parsed) return "";
+      const { items, varName } = parsed;
       if (items.length === 0) return "";
-      if (items.length > MAX_FOREACH_ITEMS) {
-        ctx.warn(`{{foreach}} capped at ${MAX_FOREACH_ITEMS} items (got ${items.length})`);
-        items = items.slice(0, MAX_FOREACH_ITEMS);
-      }
 
-      // Loop variables are real local vars (so {{.item}} shorthand resolves
-      // them). Snapshot any pre-existing values and restore them afterwards so
-      // foreach never leaks its loop variables into the surrounding scope and
-      // nests cleanly (inner/outer loops with the same var name).
       const local = ctx.env.variables.local;
-      const keys = [
-        varName,
-        `${varName}_index`,
-        `${varName}_number`,
-        `${varName}_count`,
-        `${varName}_first`,
-        `${varName}_last`,
-      ];
-      const saved = new Map<string, string | undefined>();
-      for (const k of keys) saved.set(k, local.has(k) ? local.get(k) : undefined);
-
-      const count = items.length;
+      const saved = snapshotVars(local, loopKeys(varName));
       let out = "";
       try {
-        for (let i = 0; i < count; i++) {
-          local.set(varName, items[i]);
-          local.set(`${varName}_index`, String(i));
-          local.set(`${varName}_number`, String(i + 1));
-          local.set(`${varName}_count`, String(count));
-          local.set(`${varName}_first`, i === 0 ? "true" : "");
-          local.set(`${varName}_last`, i === count - 1 ? "true" : "");
+        for (let i = 0; i < items.length; i++) {
+          bindLoopVars(local, varName, items[i], i, items.length);
           out += await ctx.resolveNodes(ctx.bodyRaw);
         }
       } finally {
-        for (const [k, prev] of saved) {
-          if (prev === undefined) local.delete(k);
-          else local.set(k, prev);
-        }
+        restoreVars(local, saved);
       }
       return out;
+    },
+  });
+
+  // ---- filter: keep items whose predicate body is truthy ----
+  registry.registerMacro({
+    builtIn: true,
+    name: "filter",
+    category: "Iteration",
+    description:
+      "Keep list items whose body (an {{if}}-style condition) is truthy; returns a " +
+      "comma-separated list. Usage: {{filter::a,b,c::x}}{{gt::{{.x}}::1}}{{/filter}}.",
+    returnType: "string",
+    delayArgResolution: true,
+    aliases: ["where"],
+    handler: async (ctx) => {
+      const parsed = await parseIterArgs(ctx);
+      if (!parsed) return "";
+      const { items, varName } = parsed;
+      if (items.length === 0) return "";
+
+      const local = ctx.env.variables.local;
+      const saved = snapshotVars(local, loopKeys(varName));
+      const kept: string[] = [];
+      try {
+        for (let i = 0; i < items.length; i++) {
+          bindLoopVars(local, varName, items[i], i, items.length);
+          if (await bodyIsTruthy(ctx)) kept.push(items[i]);
+        }
+      } finally {
+        restoreVars(local, saved);
+      }
+      return formatList(kept);
+    },
+  });
+
+  // ---- some / every: predicate quantifiers (condition-compatible) ----
+  registry.registerMacro({
+    builtIn: true,
+    terminal: true,
+    name: "some",
+    category: "Iteration",
+    description:
+      "'true' if any list item's body (an {{if}}-style condition) is truthy, else ''. " +
+      "Short-circuits. Usage: {{some::{{players}}::p}}{{gt::{{@hp_{{.p}}}}::0}}{{/some}}.",
+    returnType: "boolean",
+    delayArgResolution: true,
+    aliases: ["any"],
+    handler: async (ctx) => {
+      const parsed = await parseIterArgs(ctx);
+      if (!parsed) return "";
+      const { items, varName } = parsed;
+
+      const local = ctx.env.variables.local;
+      const saved = snapshotVars(local, loopKeys(varName));
+      let result = false;
+      try {
+        for (let i = 0; i < items.length; i++) {
+          bindLoopVars(local, varName, items[i], i, items.length);
+          if (await bodyIsTruthy(ctx)) {
+            result = true;
+            break;
+          }
+        }
+      } finally {
+        restoreVars(local, saved);
+      }
+      return result ? "true" : "";
+    },
+  });
+
+  registry.registerMacro({
+    builtIn: true,
+    terminal: true,
+    name: "every",
+    category: "Iteration",
+    description:
+      "'true' if every list item's body (an {{if}}-style condition) is truthy, else ''. " +
+      "Vacuously 'true' for an empty list. Short-circuits.",
+    returnType: "boolean",
+    delayArgResolution: true,
+    aliases: ["all"],
+    handler: async (ctx) => {
+      const parsed = await parseIterArgs(ctx);
+      if (!parsed) return "";
+      const { items, varName } = parsed;
+
+      const local = ctx.env.variables.local;
+      const saved = snapshotVars(local, loopKeys(varName));
+      let result = true;
+      try {
+        for (let i = 0; i < items.length; i++) {
+          bindLoopVars(local, varName, items[i], i, items.length);
+          if (!(await bodyIsTruthy(ctx))) {
+            result = false;
+            break;
+          }
+        }
+      } finally {
+        restoreVars(local, saved);
+      }
+      return result ? "true" : "";
     },
   });
 }
