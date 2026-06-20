@@ -15,6 +15,7 @@ import WorldBookEntryEditor from '@/components/shared/WorldBookEntryEditor'
 import WorldBookEntriesSection from '@/components/shared/WorldBookEntriesSection'
 import FolderDropdown from '@/components/shared/FolderDropdown'
 import { useFolders } from '@/hooks/useFolders'
+import { useWorldBookListLiveSync } from '@/hooks/useWorldBookListLiveSync'
 import Pagination from '@/components/shared/Pagination'
 import type { WorldBook, WorldBookEntry, WorldBookVectorSummary } from '@/types/api'
 
@@ -90,6 +91,13 @@ export default function WorldBookEditorModal() {
   useEffect(() => {
     loadBooks()
   }, [loadBooks])
+
+  // Live-sync the book list with changes from other tabs/devices or Spindle.
+  const { markLocalBookEdit } = useWorldBookListLiveSync({
+    selectedBookId,
+    setBooks,
+    onSelectedBookDeleted: () => setSelectedBookId(null),
+  })
 
   const ENTRIES_PAGE_SIZE = 50
   const entryTotalPages = Math.max(1, Math.ceil(entryTotal / ENTRIES_PAGE_SIZE))
@@ -205,6 +213,7 @@ export default function WorldBookEditorModal() {
 
   const handleBookNameChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       setBookName(value)
       clearTimeout(bookNameTimer.current)
       bookNameTimer.current = setTimeout(() => {
@@ -216,11 +225,12 @@ export default function WorldBookEditorModal() {
         }
       }, 400)
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   const handleBookDescChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       setBookDescription(value)
       clearTimeout(bookDescTimer.current)
       bookDescTimer.current = setTimeout(() => {
@@ -229,11 +239,12 @@ export default function WorldBookEditorModal() {
         }
       }, 400)
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   const handleBookFolderChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       const trimmed = value.trim()
       setBookFolder(trimmed)
       if (selectedBookId) {
@@ -243,7 +254,7 @@ export default function WorldBookEditorModal() {
         )
       }
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   // Entry CRUD

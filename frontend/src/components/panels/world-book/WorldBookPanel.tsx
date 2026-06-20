@@ -19,6 +19,7 @@ import { Button } from '@/components/shared/FormComponents'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import FolderDropdown from '@/components/shared/FolderDropdown'
 import { useFolders } from '@/hooks/useFolders'
+import { useWorldBookListLiveSync } from '@/hooks/useWorldBookListLiveSync'
 import Pagination from '@/components/shared/Pagination'
 import type { WorldBook, WorldBookEntry, WorldBookVectorSummary, WorldInfoSettings } from '@/types/api'
 
@@ -118,6 +119,13 @@ export default function WorldBookPanel() {
   useEffect(() => {
     loadBooks()
   }, [loadBooks])
+
+  // Live-sync the book list with changes from other tabs/devices or Spindle.
+  const { markLocalBookEdit } = useWorldBookListLiveSync({
+    selectedBookId,
+    setBooks,
+    onSelectedBookDeleted: () => setSelectedBookId(null),
+  })
 
   const ENTRIES_PAGE_SIZE = 50
   const entryTotalPages = Math.max(1, Math.ceil(entryTotal / ENTRIES_PAGE_SIZE))
@@ -230,6 +238,7 @@ export default function WorldBookPanel() {
 
   const handleBookNameChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       setBookName(value)
       clearTimeout(bookNameTimer.current)
       bookNameTimer.current = setTimeout(() => {
@@ -241,11 +250,12 @@ export default function WorldBookPanel() {
         }
       }, 2000)
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   const handleBookDescChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       setBookDescription(value)
       clearTimeout(bookDescTimer.current)
       bookDescTimer.current = setTimeout(() => {
@@ -254,11 +264,12 @@ export default function WorldBookPanel() {
         }
       }, 2000)
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   const handleBookFolderChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       const trimmed = value.trim()
       setBookFolder(trimmed)
       if (selectedBookId) {
@@ -268,7 +279,7 @@ export default function WorldBookPanel() {
         )
       }
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   const refetchCurrentPage = useCallback(() => {

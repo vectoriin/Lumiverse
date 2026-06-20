@@ -56,6 +56,12 @@ export enum EventType {
   // World Info
   WORLD_INFO_ACTIVATED = 'WORLD_INFO_ACTIVATED',
 
+  // World Books (lorebook editor live-sync — mirror src/ws/events.ts)
+  WORLD_BOOK_CHANGED = 'WORLD_BOOK_CHANGED',
+  WORLD_BOOK_DELETED = 'WORLD_BOOK_DELETED',
+  WORLD_BOOK_ENTRY_CHANGED = 'WORLD_BOOK_ENTRY_CHANGED',
+  WORLD_BOOK_ENTRY_DELETED = 'WORLD_BOOK_ENTRY_DELETED',
+
   // Spindle extension events
   SPINDLE_EXTENSION_LOADED = 'SPINDLE_EXTENSION_LOADED',
   SPINDLE_EXTENSION_UNLOADED = 'SPINDLE_EXTENSION_UNLOADED',
@@ -571,6 +577,26 @@ export interface MigrationCompletedPayload {
 export interface MigrationFailedPayload {
   migrationId: string
   error: string
+}
+
+// ---- World Books (lorebook editor live-sync) ----
+/** Emitted on book create/update and on structural entry ops (reorder, bulk). */
+export interface WorldBookChangedPayload {
+  id: string
+  worldBook: import('./api').WorldBook
+}
+export interface WorldBookDeletedPayload {
+  id: string
+}
+/** Emitted on entry create/update. Carries the full entry so the editor can patch in place. */
+export interface WorldBookEntryChangedPayload {
+  id: string
+  worldBookId: string
+  entry: import('./api').WorldBookEntry
+}
+export interface WorldBookEntryDeletedPayload {
+  id: string
+  worldBookId: string
 }
 
 // ---- Council Tool Failure ----

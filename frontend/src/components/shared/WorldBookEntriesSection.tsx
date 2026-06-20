@@ -46,6 +46,13 @@ import {
 import { useScaledSortableStyle } from '@/lib/dndUiScale'
 import clsx from 'clsx'
 import { worldBooksApi } from '@/api/world-books'
+import { wsClient } from '@/ws/client'
+import { EventType } from '@/ws/events'
+import type {
+  WorldBookChangedPayload,
+  WorldBookEntryChangedPayload,
+  WorldBookEntryDeletedPayload,
+} from '@/types/ws-events'
 import WorldBookEntryEditor from '@/components/shared/WorldBookEntryEditor'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
@@ -68,6 +75,9 @@ import styles from './WorldBookEntriesSection.module.css'
 
 const DEFAULT_PAGE_SIZE = 50 as const
 const CUSTOM_PAGE_SIZE = 200 as const
+
+/** Ignore WORLD_BOOK_ENTRY_CHANGED echoes of our own writes for this long. */
+const SELF_ECHO_WINDOW_MS = 2_000
 
 function mapSortForApi(sortBy: WorldBookEntrySortBy): 'order' | 'priority' | 'created' | 'updated' | 'name' {
   return sortBy === 'custom' ? 'order' : sortBy
@@ -323,6 +333,16 @@ export default function WorldBookEntriesSection({
   const [pendingAction, setPendingAction] = useState(false)
   const entryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
+  // ── Live-sync (WORLD_BOOK_ENTRY_* / WORLD_BOOK_CHANGED) ──
+  // Mirror of `entries` for use inside WS handlers without re-subscribing.
+  const entriesRef = useRef<WorldBookEntry[]>(entries)
+  useEffect(() => { entriesRef.current = entries }, [entries])
+  // entryId → timestamp of the last local write; used to ignore our own echoes.
+  const recentLocalWrites = useRef<Map<string, number>>(new Map())
+  // Always-current silent refetch of the visible page, called from WS handlers.
+  const liveRefetchRef = useRef<() => void>(() => {})
+  const liveRefetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
   const pageSize = entryPageSize === 'all' ? null : entryPageSize
   const entryTotalPages = pageSize ? Math.max(1, Math.ceil(entryTotal / pageSize)) : 1
   const selectedBook = useMemo(
@@ -404,8 +424,12 @@ export default function WorldBookEntriesSection({
     sortDir: WorldBookEntrySortDir,
     search: string,
     nextPageSize: WorldBookEntryPageSize,
+    opts?: { silent?: boolean },
   ) => {
-    setLoadingEntries(true)
+    // Silent loads (live-sync refetches) skip the loading flash so they don't
+    // momentarily unmount an expanded entry editor and drop in-progress text.
+    const silent = opts?.silent ?? false
+    if (!silent) setLoadingEntries(true)
     try {
       const res = nextPageSize === 'all'
         ? await fetchAllEntries(bookId, sortBy, sortDir, search)
@@ -423,7 +447,7 @@ export default function WorldBookEntriesSection({
         setEntryPage(totalPages)
       }
     } finally {
-      setLoadingEntries(false)
+      if (!silent) setLoadingEntries(false)
     }
   }, [fetchAllEntries])
 
@@ -454,6 +478,65 @@ export default function WorldBookEntriesSection({
     return () => clearTimeout(handle)
   }, [selectedBookId, entryPage, entrySortBy, entrySortDir, entrySearchFilter, entryPageSize, loadEntries])
 
+  // Keep the silent-refetch closure current so the WS subscription (bound once
+  // per book) always refetches the page/sort/filter the user is actually viewing.
+  useEffect(() => {
+    liveRefetchRef.current = () => {
+      if (!selectedBookId) return
+      void loadEntries(selectedBookId, entryPage, entrySortBy, entrySortDir, entrySearchFilter.trim(), entryPageSize, { silent: true })
+    }
+  })
+
+  const scheduleLiveRefetch = useCallback(() => {
+    clearTimeout(liveRefetchTimer.current)
+    liveRefetchTimer.current = setTimeout(() => liveRefetchRef.current(), 250)
+  }, [])
+
+  // Reflect world-book changes made elsewhere (another tab/device, or a Spindle
+  // extension) into the open editor. WORLD_BOOK_ENTRY_CHANGED carries the full
+  // entry, so a visible entry is patched in place — safe because the entry editor
+  // keeps edited text in id-keyed local state and won't re-sync a same-id patch.
+  // Unknown entries (newly created / on another page) and structural book changes
+  // (reorder, bulk ops) trigger a silent refetch of the visible page instead.
+  useEffect(() => {
+    if (!selectedBookId) return
+    const isSelfEcho = (id: string) => {
+      const ts = recentLocalWrites.current.get(id)
+      if (ts == null) return false
+      if (Date.now() - ts > SELF_ECHO_WINDOW_MS) {
+        recentLocalWrites.current.delete(id)
+        return false
+      }
+      return true
+    }
+    const offEntryChanged = wsClient.on(EventType.WORLD_BOOK_ENTRY_CHANGED, (p: WorldBookEntryChangedPayload) => {
+      if (!p?.entry || p.worldBookId !== selectedBookId || isSelfEcho(p.id)) return
+      if (!entriesRef.current.some((e) => e.id === p.id)) {
+        scheduleLiveRefetch()
+        return
+      }
+      setEntries((cur) => cur.map((e) => (e.id === p.id ? p.entry : e)))
+    })
+    const offEntryDeleted = wsClient.on(EventType.WORLD_BOOK_ENTRY_DELETED, (p: WorldBookEntryDeletedPayload) => {
+      if (!p?.id || p.worldBookId !== selectedBookId) return
+      if (!entriesRef.current.some((e) => e.id === p.id)) return
+      setEntries((cur) => cur.filter((e) => e.id !== p.id))
+      setEntryTotal((tot) => Math.max(0, tot - 1))
+      setSelectedEntryId((cur) => (cur === p.id ? null : cur))
+      setSelectedIds((cur) => cur.filter((id) => id !== p.id))
+    })
+    const offBookChanged = wsClient.on(EventType.WORLD_BOOK_CHANGED, (p: WorldBookChangedPayload) => {
+      if (p?.id !== selectedBookId) return
+      scheduleLiveRefetch()
+    })
+    return () => {
+      offEntryChanged()
+      offEntryDeleted()
+      offBookChanged()
+      clearTimeout(liveRefetchTimer.current)
+    }
+  }, [selectedBookId, scheduleLiveRefetch])
+
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => entries.some((entry) => entry.id === id)))
   }, [entries])
@@ -464,6 +547,7 @@ export default function WorldBookEntriesSection({
 
   const updateEntry = useCallback((entryId: string, updates: Record<string, any>) => {
     setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...updates } : entry)))
+    recentLocalWrites.current.set(entryId, Date.now())
     void worldBooksApi.updateEntry(selectedBookId, entryId, updates)
       .then(async () => {
         await refreshVectorSummary()
@@ -475,6 +559,7 @@ export default function WorldBookEntriesSection({
 
   const debouncedUpdateEntry = useCallback((entryId: string, updates: Record<string, any>) => {
     setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...updates } : entry)))
+    recentLocalWrites.current.set(entryId, Date.now())
     const key = `${entryId}:${Object.keys(updates).sort().join(',')}`
     clearTimeout(entryTimers.current[key])
     entryTimers.current[key] = setTimeout(() => {
@@ -494,6 +579,7 @@ export default function WorldBookEntriesSection({
       key: [],
       content: '',
     })
+    recentLocalWrites.current.set(entry.id, Date.now())
     setSelectedEntryId(entry.id)
     setEntryPage(1)
     await loadEntries(selectedBookId, 1, entrySortBy, entrySortDir, entrySearchFilter.trim(), entryPageSize)
