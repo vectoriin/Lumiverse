@@ -2189,11 +2189,16 @@ export default function InputArea({ chatId }: InputAreaProps) {
                 title={chatAddonOverrideCount > 0 ? t('input.personaAddonsCustomized') : t('input.personaAddons')}
               >
                 <IconPlaylistAdd size={14} />
+                {chatAddonOverrideCount > 0 && <span className={styles.badge}>{chatAddonOverrideCount}</span>}
               </button>
             )}
             <button
               type="button"
-              className={clsx(styles.actionBtn, openPopover === 'guides' && styles.actionBtnActive)}
+              className={clsx(
+                styles.actionBtn,
+                openPopover === 'guides' && styles.actionBtnActive,
+                activeGuideCount > 0 && styles.actionBtnHasSelection,
+              )}
               onClick={() => setOpenPopover((p) => (p === 'guides' ? null : 'guides'))}
               title={t('input.guidedGenerations')}
             >
@@ -2227,16 +2232,6 @@ export default function InputArea({ chatId }: InputAreaProps) {
           </div>
         )}
       </div>
-
-      {activeGuideCount > 0 && (
-        <div className={styles.guidePills}>
-          {activeGuides.map((g) => (
-            <button key={g.id} type="button" className={styles.guidePill} onClick={() => toggleGuide(g.id)}>
-              {g.name}
-            </button>
-          ))}
-        </div>
-      )}
 
       <div className={clsx(styles.popoverSlot, openPopover && styles.popoverSlotOpen)}>
         <div className={styles.popoverSlotInner}>
