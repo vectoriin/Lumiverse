@@ -289,17 +289,15 @@ export interface NanoGptUsageWindow {
   remaining: number
   percentUsed: number
   resetAt: number | null
+  limit: number | null
 }
 
 export interface NanoGptSubscriptionUsage {
   active: boolean
-  enforceDailyLimit: boolean
-  limits: {
-    daily: number | null
-    monthly: number | null
-  }
-  daily: NanoGptUsageWindow | null
-  monthly: NanoGptUsageWindow | null
+  allowOverage: boolean
+  dailyInputTokens: NanoGptUsageWindow | null
+  weeklyInputTokens: NanoGptUsageWindow | null
+  dailyImages: NanoGptUsageWindow | null
   period: {
     currentPeriodEnd: string | null
   }

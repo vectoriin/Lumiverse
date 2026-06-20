@@ -312,19 +312,19 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
           </button>
         </div>
       )}
-      {showNanoGptUsage && nanoGptUsage && (nanoGptUsage.daily || nanoGptUsage.monthly) && (
+      {showNanoGptUsage && nanoGptUsage && (nanoGptUsage.dailyInputTokens || nanoGptUsage.weeklyInputTokens) && (
         [
-          { key: 'daily', label: t('connectionItem.daily'), window: nanoGptUsage.daily, limit: nanoGptUsage.limits.daily },
-          { key: 'monthly', label: t('connectionItem.monthly'), window: nanoGptUsage.monthly, limit: nanoGptUsage.limits.monthly },
+          { key: 'daily', label: t('connectionItem.dailyTokens'), window: nanoGptUsage.dailyInputTokens },
+          { key: 'weekly', label: t('connectionItem.weeklyTokens'), window: nanoGptUsage.weeklyInputTokens },
         ]
           .filter((entry): entry is typeof entry & { window: NonNullable<typeof entry.window> } => entry.window != null)
-          .map(({ key, label, window: win, limit }, idx) => (
+          .map(({ key, label, window: win }, idx) => (
             <div key={key} className={clsx(styles.creditsBar, styles.nanoGptUsageBar)}>
               <div className={styles.creditCell}>
                 <span className={styles.creditLabel}>{label}</span>
                 <span className={styles.creditValue}>
-                  {limit !== null
-                    ? `${formatCompactCount(win.remaining)} / ${formatCompactCount(limit)}`
+                  {win.limit !== null
+                    ? `${formatCompactCount(win.remaining)} / ${formatCompactCount(win.limit)}`
                     : formatCompactCount(win.remaining)}
                 </span>
               </div>

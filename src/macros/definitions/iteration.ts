@@ -19,8 +19,13 @@ import { evaluateMacroCondition } from "../conditions";
 // give position/size/edge info. See bindLoopVars.
 const LOOP_SUFFIXES = ["", "_index", "_number", "_count", "_first", "_last"] as const;
 
-function loopKeys(varName: string): string[] {
-  return LOOP_SUFFIXES.map((s) => `${varName}${s}`);
+/**
+ * Names of the variables a loop binds. `extra` adds macro-specific suffixes
+ * (e.g. `_name`/`_is_user` for messages, `_key`/`_value` for variables) so they
+ * are snapshotted and restored alongside the standard positional bindings.
+ */
+function loopKeys(varName: string, extra: readonly string[] = []): string[] {
+  return [...LOOP_SUFFIXES, ...extra].map((s) => `${varName}${s}`);
 }
 
 /** Snapshot the loop variables' current values so they can be restored. */
@@ -236,4 +241,157 @@ export function registerIterationMacros(): void {
       return result ? "true" : "";
     },
   });
+
+  // ---- foreachMessage: iterate the chat history ----
+  //
+  // {{foreachMessage}}body{{/foreachMessage}}        — every message
+  // {{foreachMessage::5}}body{{/foreachMessage}}     — last 5 (chronological)
+  // {{foreachMessage::5::m}}body{{/foreachMessage}}  — last 5, var "m"
+  // {{foreachMessage::m}}body{{/foreachMessage}}     — every message, var "m"
+  //
+  // Bindings (replace `msg`): {{.msg}} content, {{.msg_name}} author,
+  // {{.msg_is_user}} ("true"/""), plus {{.msg_index/_number/_count/_first/_last}}.
+  registry.registerMacro({
+    builtIn: true,
+    name: "foreachMessage",
+    category: "Iteration",
+    description:
+      "Iterate over chat history, resolving the body once per message. Optional first arg: a " +
+      "number (iterate the last N messages) or a loop variable name (default 'msg'). Bindings: " +
+      "{{.msg}}, {{.msg_name}}, {{.msg_is_user}}, plus the usual index/number/count/first/last.",
+    returnType: "string",
+    delayArgResolution: true,
+    aliases: ["for_each_message"],
+    handler: async (ctx) => {
+      if (!ctx.isScoped) {
+        ctx.warn("{{foreachMessage}} needs a body: {{foreachMessage}}...{{/foreachMessage}}");
+        return "";
+      }
+      // First arg is either a count (last N) or — when non-numeric — the loop
+      // variable name; the second arg is the variable name when a count is given.
+      const a0 = ctx.rawArgs[0] ? (await ctx.resolveNodes(ctx.rawArgs[0])).trim() : "";
+      const a1 = ctx.rawArgs[1] ? (await ctx.resolveNodes(ctx.rawArgs[1])).trim() : "";
+      let count = 0; // 0 = all
+      let varName = "msg";
+      if (a0 !== "") {
+        if (/^\d+$/.test(a0)) {
+          count = parseInt(a0, 10);
+          if (a1) varName = a1;
+        } else {
+          varName = a0;
+        }
+      }
+
+      const all = getMessages(ctx);
+      let messages = count > 0 ? all.slice(-count) : all;
+      if (messages.length > MAX_LIST_ITEMS) {
+        ctx.warn(`{{foreachMessage}} capped at ${MAX_LIST_ITEMS} messages`);
+        messages = messages.slice(-MAX_LIST_ITEMS);
+      }
+      if (messages.length === 0) return "";
+
+      const local = ctx.env.variables.local;
+      const saved = snapshotVars(local, loopKeys(varName, ["_name", "_is_user"]));
+      let out = "";
+      try {
+        for (let i = 0; i < messages.length; i++) {
+          const m = messages[i];
+          bindLoopVars(local, varName, m.content ?? "", i, messages.length);
+          local.set(`${varName}_name`, m.name ?? "");
+          local.set(`${varName}_is_user`, m.is_user ? "true" : "");
+          out += await ctx.resolveNodes(ctx.bodyRaw);
+        }
+      } finally {
+        restoreVars(local, saved);
+      }
+      return out;
+    },
+  });
+
+  // ---- foreachVar / foreachChatVar / foreachGlobalVar: iterate namespaced variables ----
+  //
+  // Iterate the variables in a scope whose name starts with a prefix. Build a
+  // state table with {{@hp_Alice = 100}} / {{@hp_Bob = 80}} then render it:
+  //   {{foreachChatVar::hp_::p}}{{.p}}: {{.p_value}}{{newline}}{{/foreachChatVar}}
+  //
+  // Bindings (replace `item`): {{.item}} name after the prefix, {{.item_key}}
+  // full name, {{.item_value}} value, plus index/number/count/first/last.
+  // Marked volatile: the result depends on the full keyset, which the dependency
+  // fingerprint cannot track (it only records individual var get/has).
+  const VAR_SCOPES = [
+    { name: "foreachVar", scope: "local", aliases: ["for_each_var"] },
+    { name: "foreachChatVar", scope: "chat", aliases: ["for_each_chat_var"] },
+    { name: "foreachGlobalVar", scope: "global", aliases: ["foreachGvar", "for_each_global_var"] },
+  ] as const;
+  for (const { name, scope, aliases } of VAR_SCOPES) {
+    registry.registerMacro({
+      builtIn: true,
+      volatile: true,
+      name,
+      category: "Iteration",
+      description:
+        `Iterate ${scope} variables whose name starts with a prefix (alphabetical order). ` +
+        `Bindings: {{.item}} (name after the prefix), {{.item_key}} (full name), {{.item_value}}, ` +
+        `plus index/number/count/first/last. Usage: {{${name}::prefix::var}}...{{/${name}}}.`,
+      returnType: "string",
+      delayArgResolution: true,
+      aliases: [...aliases],
+      handler: (ctx) => runForeachVar(ctx, ctx.env.variables[scope]),
+    });
+  }
+}
+
+interface SimpleMessage {
+  content: string;
+  name: string;
+  is_user: boolean;
+}
+
+/** Chat history off the env (same source as {{messageAt}}), or [] when absent. */
+function getMessages(ctx: MacroExecContext): SimpleMessage[] {
+  const m = ctx.env.extra?.messages;
+  return Array.isArray(m) ? (m as SimpleMessage[]) : [];
+}
+
+/**
+ * Shared implementation for the foreach*Var family. Iterates the variables of
+ * `scopeMap` whose name starts with the prefix, in alphabetical order. The
+ * loop bindings always live in the LOCAL scope (so {{.var}} shorthand resolves)
+ * regardless of which scope is being read.
+ */
+async function runForeachVar(ctx: MacroExecContext, scopeMap: Map<string, string>): Promise<string> {
+  if (!ctx.isScoped) {
+    ctx.warn(`{{${ctx.name}}} needs a body: {{${ctx.name}::prefix}}...{{/${ctx.name}}}`);
+    return "";
+  }
+  const prefix = ctx.rawArgs[0] ? (await ctx.resolveNodes(ctx.rawArgs[0])).trim() : "";
+  const varName = (ctx.rawArgs[1] ? (await ctx.resolveNodes(ctx.rawArgs[1])).trim() : "") || "item";
+
+  // Snapshot the matching variables BEFORE binding loop vars, so writing the
+  // loop bindings can't perturb the set being iterated (matters when iterating
+  // the local scope, which is also where the loop bindings live).
+  let matched = [...scopeMap.keys()].filter((k) => k.startsWith(prefix)).sort();
+  if (matched.length === 0) return "";
+  if (matched.length > MAX_LIST_ITEMS) {
+    ctx.warn(`{{${ctx.name}}} capped at ${MAX_LIST_ITEMS} variables (got ${matched.length})`);
+    matched = matched.slice(0, MAX_LIST_ITEMS);
+  }
+  const entries = matched.map((k) => [k, scopeMap.get(k) ?? ""] as const);
+
+  const local = ctx.env.variables.local;
+  const saved = snapshotVars(local, loopKeys(varName, ["_key", "_value"]));
+  let out = "";
+  try {
+    for (let i = 0; i < entries.length; i++) {
+      const [fullKey, value] = entries[i];
+      const id = prefix && fullKey.startsWith(prefix) ? fullKey.slice(prefix.length) : fullKey;
+      bindLoopVars(local, varName, id, i, entries.length);
+      local.set(`${varName}_key`, fullKey);
+      local.set(`${varName}_value`, value);
+      out += await ctx.resolveNodes(ctx.bodyRaw);
+    }
+  } finally {
+    restoreVars(local, saved);
+  }
+  return out;
 }

@@ -393,6 +393,9 @@
     "imagesLeft": "Images Left",
     "daily": "Daily",
     "monthly": "Monthly",
+    "dailyTokens": "Daily tokens",
+    "weeklyTokens": "Weekly tokens",
+    "dailyImages": "Daily images",
     "comfyWorkflow": "ComfyUI workflow",
     "loadComfyWorkflowFailed": "Failed to load ComfyUI workflow"
   },

@@ -2200,3 +2200,141 @@ describe("filter / some / every macros", () => {
     ).toBe("has-bob");
   });
 });
+
+// ===========================================================================
+// NEW MACROS — numeric reductions (E)
+// ===========================================================================
+
+describe("numeric reduction macros", () => {
+  test("sum (ignores non-numbers, float-noise-safe)", async () => {
+    expect(await ev("{{sum::1,2,3,4}}")).toBe("10");
+    expect(await ev("{{sum::}}")).toBe("0");
+    expect(await ev("{{sum::1,x,2}}")).toBe("3");
+    expect(await ev("{{sum::0.1,0.2}}")).toBe("0.3");
+  });
+
+  test("avg / mean", async () => {
+    expect(await ev("{{avg::2,4,6}}")).toBe("4");
+    expect(await ev("{{avg::1,2}}")).toBe("1.5");
+    expect(await ev("{{mean::1,2,3}}")).toBe("2");
+    expect(await ev("{{avg::}}")).toBe(""); // no numbers → no average
+  });
+
+  test("listMax / listMin", async () => {
+    expect(await ev("{{listMax::3,9,2}}")).toBe("9");
+    expect(await ev("{{listMin::3,9,2}}")).toBe("2");
+    expect(await ev("{{listMax::}}")).toBe("");
+    expect(await ev("{{listMin::}}")).toBe("");
+  });
+
+  test("compose with range", async () => {
+    expect(await ev("{{sum::{{range::1::5}}}}")).toBe("15");
+    expect(await ev("{{avg::{{range::1::5}}}}")).toBe("3");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — foreachMessage (D1)
+// ===========================================================================
+
+describe("foreachMessage macro", () => {
+  test("iterates all messages with name + content", async () => {
+    expect(await ev("{{foreachMessage}}{{.msg_name}}: {{.msg}}\n{{/foreachMessage}}")).toBe(
+      "Alice: Hello, how are you?\n" +
+        "Bob: I'm fine, thanks!\n" +
+        "Alice: Let's go on an adventure.\n" +
+        "Bob: The forest is dark.\n" +
+        "Alice: I draw my sword.\n",
+    );
+  });
+
+  test("last N messages, in chronological order", async () => {
+    expect(await ev("{{foreachMessage::2}}[{{.msg_name}}]{{/foreachMessage}}")).toBe("[Bob][Alice]");
+    expect(await ev("{{foreachMessage::2::m}}{{.m}};{{/foreachMessage}}")).toBe(
+      "The forest is dark.;I draw my sword.;",
+    );
+  });
+
+  test("non-numeric first arg is the loop variable name", async () => {
+    expect(await ev("{{foreachMessage::m}}{{.m_number}}{{/foreachMessage}}")).toBe("12345");
+  });
+
+  test("is_user flag drives branching", async () => {
+    expect(
+      await ev("{{foreachMessage::m}}{{if::{{.m_is_user}}}}U{{else}}A{{/if}}{{/foreachMessage}}"),
+    ).toBe("UAUAU");
+  });
+
+  test("first / last bindings", async () => {
+    expect(
+      await ev(
+        "{{foreachMessage}}{{if::{{.msg_first}}}}<{{/if}}{{.msg_index}}{{if::{{.msg_last}}}}>{{/if}}{{/foreachMessage}}",
+      ),
+    ).toBe("<01234>");
+  });
+
+  test("empty history → nothing; non-scoped → nothing", async () => {
+    expect(await ev("{{foreachMessage}}x{{/foreachMessage}}", makeEnv({ messages: [] }))).toBe("");
+    expect(await ev("a{{foreachMessage}}b")).toBe("ab");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — foreachVar family (D2)
+// ===========================================================================
+
+describe("foreachVar family", () => {
+  test("foreachChatVar iterates a namespaced table in key order", async () => {
+    const env = makeEnv({ chatVars: { hp_Bob: "80", hp_Alice: "100", mood: "calm" } });
+    expect(await ev("{{foreachChatVar::hp_::p}}{{.p}}={{.p_value}};{{/foreachChatVar}}", env)).toBe(
+      "Alice=100;Bob=80;", // sorted by key; "mood" excluded by prefix
+    );
+  });
+
+  test("bindings: id vs full key vs value", async () => {
+    const env = makeEnv({ chatVars: { hp_Alice: "100" } });
+    expect(
+      await ev("{{foreachChatVar::hp_::p}}{{.p_key}}|{{.p}}|{{.p_value}}{{/foreachChatVar}}", env),
+    ).toBe("hp_Alice|Alice|100");
+  });
+
+  test("foreachVar (local) and foreachGlobalVar (global)", async () => {
+    const localEnv = makeEnv({ localVars: { item_sword: "1", item_shield: "1", gold: "5" } });
+    expect(await ev("{{foreachVar::item_::i}}[{{.i}}]{{/foreachVar}}", localEnv)).toBe(
+      "[shield][sword]",
+    );
+    const globalEnv = makeEnv({ globalVars: { theme_dark: "1", theme_light: "1" } });
+    expect(await ev("{{foreachGlobalVar::theme_::t}}{{.t}};{{/foreachGlobalVar}}", globalEnv)).toBe(
+      "dark;light;",
+    );
+  });
+
+  test("empty prefix iterates the whole scope", async () => {
+    const env = makeEnv({ chatVars: { a: "1", b: "2" } });
+    expect(await ev("{{foreachChatVar::::k}}{{.k}}={{.k_value}};{{/foreachChatVar}}", env)).toBe(
+      "a=1;b=2;",
+    );
+  });
+
+  test("no matches → nothing", async () => {
+    const env = makeEnv({ chatVars: { mood: "calm" } });
+    expect(await ev("{{foreachChatVar::hp_::p}}x{{/foreachChatVar}}", env)).toBe("");
+  });
+
+  test("foreachGvar alias", async () => {
+    const env = makeEnv({ globalVars: { g_x: "1" } });
+    expect(await ev("{{foreachGvar::g_::v}}{{.v}}{{/foreachGvar}}", env)).toBe("x");
+  });
+
+  test("compose: sum a stat table", async () => {
+    const env = makeEnv({ chatVars: { hp_Alice: "100", hp_Bob: "80", hp_Cara: "60" } });
+    expect(
+      await ev("{{sum::{{foreachChatVar::hp_::p}}{{.p_value}},{{/foreachChatVar}}}}", env),
+    ).toBe("240");
+  });
+
+  test("hygiene: loop variable restored after the loop", async () => {
+    const env = makeEnv({ chatVars: { n_a: "1" }, localVars: { p: "ORIG" } });
+    expect(await ev("{{foreachChatVar::n_::p}}{{.p}}{{/foreachChatVar}}|{{.p}}", env)).toBe("a|ORIG");
+  });
+});

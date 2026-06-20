@@ -241,4 +241,72 @@ export function registerListMacros(): void {
       return formatList(items);
     },
   });
+
+  // ---- numeric reductions: sum / avg / listMax / listMin ----
+  registry.registerMacro({
+    builtIn: true,
+    terminal: true,
+    name: "sum",
+    category: "Lists",
+    description: "Sum the numeric items of a list (non-numbers ignored). 0 for an empty list.",
+    returnType: "number",
+    args: [{ name: "list", description: "Comma-separated list of numbers" }],
+    handler: (ctx) => fmtNum(toNumbers(parseList(ctx.args[0] ?? "")).reduce((a, b) => a + b, 0)),
+  });
+
+  registry.registerMacro({
+    builtIn: true,
+    terminal: true,
+    name: "avg",
+    category: "Lists",
+    description: "Average (mean) of the numeric items of a list. Empty when there are no numbers.",
+    returnType: "number",
+    args: [{ name: "list", description: "Comma-separated list of numbers" }],
+    aliases: ["mean", "average"],
+    handler: (ctx) => {
+      const nums = toNumbers(parseList(ctx.args[0] ?? ""));
+      if (nums.length === 0) return "";
+      return fmtNum(nums.reduce((a, b) => a + b, 0) / nums.length);
+    },
+  });
+
+  registry.registerMacro({
+    builtIn: true,
+    terminal: true,
+    name: "listMax",
+    category: "Lists",
+    description: "Largest numeric item of a list. Empty when there are no numbers.",
+    returnType: "number",
+    args: [{ name: "list", description: "Comma-separated list of numbers" }],
+    aliases: ["list_max"],
+    handler: (ctx) => {
+      const nums = toNumbers(parseList(ctx.args[0] ?? ""));
+      return nums.length === 0 ? "" : fmtNum(Math.max(...nums));
+    },
+  });
+
+  registry.registerMacro({
+    builtIn: true,
+    terminal: true,
+    name: "listMin",
+    category: "Lists",
+    description: "Smallest numeric item of a list. Empty when there are no numbers.",
+    returnType: "number",
+    args: [{ name: "list", description: "Comma-separated list of numbers" }],
+    aliases: ["list_min"],
+    handler: (ctx) => {
+      const nums = toNumbers(parseList(ctx.args[0] ?? ""));
+      return nums.length === 0 ? "" : fmtNum(Math.min(...nums));
+    },
+  });
+}
+
+/** Parse a list's items into finite numbers, dropping anything non-numeric. */
+function toNumbers(items: string[]): number[] {
+  return items.map((x) => Number(x)).filter((n) => !isNaN(n) && isFinite(n));
+}
+
+/** Format a number for output: strip floating-point noise and trailing zeros. */
+function fmtNum(n: number): string {
+  return String(parseFloat(n.toFixed(6)));
 }

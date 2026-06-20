@@ -250,6 +250,48 @@ Test whether **any** (`{{some}}`) or **all** (`{{every}}`) items satisfy a predi
 {{if::{{every::{{range::1::5}}::n}}{{gt::{{.n}}::0}}{{/every}}}}all positive{{/if}}
 ```
 
+### `{{foreachMessage}}`
+
+Loop over the chat history, resolving the body once per message — for custom transcripts, pulling out a speaker's lines, or scanning recent turns.
+
+```
+{{foreachMessage}}{{.msg_name}}: {{.msg}}{{newline}}{{/foreachMessage}}
+{{foreachMessage::5}}…{{/foreachMessage}}            — only the last 5 messages
+{{foreachMessage::5::m}}…{{.m}}…{{/foreachMessage}}  — last 5, body variable "m"
+```
+
+A **numeric** first argument iterates the last N messages (oldest-first); a **non-numeric** first argument is the loop variable name (default `msg`). Body bindings (replace `msg`):
+
+| Variable | Value |
+|----------|-------|
+| `{{.msg}}` | Message content |
+| `{{.msg_name}}` | Author name |
+| `{{.msg_is_user}}` | `"true"` for a user message, otherwise empty |
+| `{{.msg_index}}` / `{{.msg_number}}` / `{{.msg_count}}` | Position and total |
+| `{{.msg_first}}` / `{{.msg_last}}` | Edge flags (`"true"` / `""`) |
+
+```
+{{foreachMessage::10::m}}{{if::{{.m_is_user}}}}> {{.m}}{{newline}}{{/if}}{{/foreachMessage}}    — the user's recent lines
+```
+
+### `{{foreachVar}}` / `{{foreachChatVar}}` / `{{foreachGlobalVar}}`
+
+Loop over the variables in a scope whose name starts with a prefix — the way to render a **dynamic state table** when you don't know the keys ahead of time. `{{foreachVar}}` reads local (`.`) variables, `{{foreachChatVar}}` reads chat-persisted (`@`) variables, and `{{foreachGlobalVar}}` reads global (`$`) variables. Items are visited in alphabetical key order.
+
+```
+{{@hp_Alice = 100}}{{@hp_Bob = 80}}
+{{foreachChatVar::hp_::p}}{{.p}}: {{.p_value}} HP{{newline}}{{/foreachChatVar}}
+```
+
+produces:
+
+```
+Alice: 100 HP
+Bob: 80 HP
+```
+
+Body bindings (replace `item`): `{{.item}}` is the name **after** the prefix, `{{.item_key}}` is the full variable name, `{{.item_value}}` is its value, plus the usual `{{.item_index}}` / `{{.item_number}}` / `{{.item_count}}` / `{{.item_first}}` / `{{.item_last}}`.
+
 ---
 
 ## Lists
@@ -282,6 +324,22 @@ Query and transform comma-separated lists. These compose with the iteration macr
 
 !!! note "Delimiters"
     The Lists macros operate on **comma-separated** lists — the form every list-producing macro emits. To bring in data with another delimiter, parse it through `{{foreach}}`'s delimiter argument or normalise it first with `{{replace}}`.
+
+### Numeric reductions
+
+Reduce a list of numbers to a single value (non-numeric items are ignored).
+
+| Macro | Aliases | Returns |
+|-------|---------|---------|
+| `{{sum::list}}` | — | Total (`0` for an empty list) |
+| `{{avg::list}}` | `{{mean}}`, `{{average}}` | Mean (empty when there are no numbers) |
+| `{{listMax::list}}` | `{{list_max}}` | Largest number |
+| `{{listMin::list}}` | `{{list_min}}` | Smallest number |
+
+```
+{{sum::{{range::1::10}}}}                                            — "55"
+{{avg::{{foreachChatVar::hp_::p}}{{.p_value}},{{/foreachChatVar}}}}   — average party HP
+```
 
 ---
 
@@ -1010,6 +1068,9 @@ The adventure is well underway.
 
 !!! tip "Shape lists before you loop"
     The `{{sort}}`, `{{unique}}`, `{{filter}}`, `{{slice}}`, and `{{take}}` macros all return lists, so they chain: `{{foreach::{{unique::{{sort::{{group}}}}}}::name}}…{{/foreach}}` loops a sorted, de-duplicated roster. Use `{{count}}` / `{{includes}}` / `{{some}}` / `{{every}}` to gate on a list without looping at all.
+
+!!! tip "Dynamic state tables"
+    Track per-entity state with prefixed chat variables — `{{@hp_Alice = 100}}`, `{{@hp_Bob = 80}}` — then render or aggregate the whole table without hard-coding names: `{{foreachChatVar::hp_::p}}{{.p}}: {{.p_value}}{{newline}}{{/foreachChatVar}}` to list it, or `{{sum::{{foreachChatVar::hp_::p}}{{.p_value}},{{/foreachChatVar}}}}` to total it. Combine with `{{foreachMessage}}` to drive state from the conversation.
 
 !!! tip "`{{wrap}}` for conditional formatting"
     `{{wrap}}` only outputs if the content is non-empty — `{{wrap::(**::**)::{{.note}}}}` produces nothing when the note is unset, avoiding stray delimiters.
