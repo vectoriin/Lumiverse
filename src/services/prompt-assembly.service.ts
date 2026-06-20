@@ -1029,6 +1029,33 @@ export function setMultiplayerWorldInfoProvider(fn: MultiplayerWorldInfoProvider
   multiplayerWorldInfoProvider = fn;
 }
 
+// ── Multiplayer room macro context ──
+// Registered by the multiplayer service (initMultiplayer). Returns a live
+// snapshot of the room (roster, host, whose turn it is) so the multiplayer
+// macros — {{isMultiplayer}}, {{players}}, {{playerCount}}, etc. — can read it
+// off env.extra. Same inverted dependency as the providers above: assembly never
+// imports the multiplayer service, so there is no import cycle. Null for
+// non-room chats.
+export interface MultiplayerMacroContext {
+  /** Number of active participants (host + peers). */
+  playerCount: number;
+  /** Active participant display names in join order (host first). */
+  playerNames: string[];
+  /** Host's display name ("" if somehow absent). */
+  hostName: string;
+  /** Display name of whoever's turn it is, or "" (freeform / unknown). */
+  currentTurnName: string;
+  /** Room turn strategy ("round_robin" | "freeform"). */
+  turnStrategy: string;
+}
+type MultiplayerMacroContextProvider = (chatId: string) => MultiplayerMacroContext | null;
+let multiplayerMacroContextProvider: MultiplayerMacroContextProvider | null = null;
+export function setMultiplayerMacroContextProvider(
+  fn: MultiplayerMacroContextProvider | null,
+): void {
+  multiplayerMacroContextProvider = fn;
+}
+
 export async function assemblePrompt(
   ctx: AssemblyContext,
 ): Promise<AssemblyResult> {
@@ -1712,6 +1739,14 @@ export async function assemblePrompt(
   const themeVal = settingsMap.get("theme");
   if (themeVal) {
     macroEnv.extra.theme = { mode: themeVal.mode ?? "dark" };
+  }
+
+  // Populate multiplayer room state for {{isMultiplayer}} / {{players}} /
+  // {{playerCount}} / {{hostName}} / {{currentPlayer}}. Resolved via the
+  // inverted provider so assembly stays decoupled from the multiplayer service.
+  const multiplayerContext = multiplayerMacroContextProvider?.(ctx.chatId) ?? null;
+  if (multiplayerContext) {
+    macroEnv.extra.multiplayer = multiplayerContext;
   }
 
   // Populate Lumia / Loom / Council / OOC / Sovereign Hand context for macros

@@ -17,6 +17,13 @@ function makeEnv(opts: {
   characterTags?: string[];
   chatCreatedAt?: number;
   worldInfoOutlets?: Record<string, string>;
+  multiplayer?: {
+    playerCount: number;
+    playerNames: string[];
+    hostName: string;
+    currentTurnName: string;
+    turnStrategy: string;
+  };
 } = {}): MacroEnv {
   const env: MacroEnv = {
     commit: true,
@@ -90,6 +97,7 @@ function makeEnv(opts: {
       chatCreatedAt: opts.chatCreatedAt ?? Math.floor(Date.now() / 1000) - 3600,
       characterTags: opts.characterTags ?? ["fantasy", "warrior", "male"],
       worldInfoOutlets: opts.worldInfoOutlets ?? {},
+      ...(opts.multiplayer ? { multiplayer: opts.multiplayer } : {}),
     },
   };
   return env;
@@ -1854,5 +1862,168 @@ describe("Edge cases", () => {
     const env = makeEnv();
     env.character.description = "Friend of {{user}}";
     expect(await ev("{{if::{{description}} == Friend of Alice}}match{{else}}nomatch{{/if}}", env)).toBe("match");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — foreach (iteration)
+// ===========================================================================
+
+describe("foreach macro", () => {
+  test("iterates an inline comma list", async () => {
+    expect(await ev("{{foreach::a,b,c}}[{{.item}}]{{/foreach}}")).toBe("[a][b][c]");
+  });
+
+  test("trims items and drops blanks", async () => {
+    expect(await ev("{{foreach::a, b , ,c}}[{{.item}}]{{/foreach}}")).toBe("[a][b][c]");
+  });
+
+  test("exposes 0-based index and 1-based number", async () => {
+    expect(await ev("{{foreach::x,y,z}}{{.item_index}}:{{.item_number}} {{/foreach}}")).toBe(
+      "0:1 1:2 2:3 ",
+    );
+  });
+
+  test("exposes total count", async () => {
+    expect(await ev("{{foreach::a,b,c}}{{.item_count}}{{/foreach}}")).toBe("333");
+  });
+
+  test("exposes first / last flags", async () => {
+    expect(await ev("{{foreach::a,b,c}}{{.item}}={{.item_first}}/{{.item_last}} {{/foreach}}")).toBe(
+      "a=true/ b=/ c=/true ",
+    );
+  });
+
+  test("first/last enable clean separators via if/else", async () => {
+    expect(
+      await ev("{{foreach::a,b,c::x}}{{if::{{.x_last}}}}{{.x}}{{else}}{{.x}}, {{/if}}{{/foreach}}"),
+    ).toBe("a, b, c");
+  });
+
+  test("first/last enable clean separators via negated last flag", async () => {
+    expect(await ev("{{foreach::a,b,c::x}}{{.x}}{{if::!{{.x_last}}}}, {{/if}}{{/foreach}}")).toBe(
+      "a, b, c",
+    );
+  });
+
+  test("supports a custom loop variable name", async () => {
+    expect(await ev("{{foreach::a,b::letter}}{{.letter}}!{{/foreach}}")).toBe("a!b!");
+  });
+
+  test("supports a custom delimiter", async () => {
+    expect(await ev("{{foreach::a|b|c::item::|}}{{.item}}-{{/foreach}}")).toBe("a-b-c-");
+  });
+
+  test("empty delimiter treats the whole string as one item", async () => {
+    expect(await ev("{{foreach::hello world::w::}}[{{.w}}]{{/foreach}}")).toBe("[hello world]");
+  });
+
+  test("iterates the value of a variable", async () => {
+    const env = makeEnv({ localVars: { fruits: "apple,banana" } });
+    expect(await ev("{{foreach::{{.fruits}}::f}}{{.f}};{{/foreach}}", env)).toBe("apple;banana;");
+  });
+
+  test("resolves nested macros in the body", async () => {
+    expect(await ev("{{foreach::a,b}}{{upper::{{.item}}}}{{/foreach}}")).toBe("AB");
+  });
+
+  test("nests cleanly with distinct variable names", async () => {
+    expect(
+      await ev("{{foreach::1,2::n}}{{foreach::a,b::l}}{{.n}}{{.l}} {{/foreach}}{{/foreach}}"),
+    ).toBe("1a 1b 2a 2b ");
+  });
+
+  test("empty list resolves to nothing", async () => {
+    expect(await ev("{{foreach::}}body{{/foreach}}")).toBe("");
+  });
+
+  test("non-scoped usage resolves to nothing", async () => {
+    expect(await ev("before{{foreach::a,b,c}}after")).toBe("beforeafter");
+  });
+
+  test("restores a pre-existing loop variable after the loop (hygiene)", async () => {
+    const env = makeEnv({ localVars: { item: "ORIGINAL" } });
+    expect(await ev("{{foreach::x,y}}{{.item}}{{/foreach}}|{{.item}}", env)).toBe("xy|ORIGINAL");
+    expect(env.variables.local.get("item")).toBe("ORIGINAL");
+  });
+
+  test("does not leak the loop variable when none existed before (hygiene)", async () => {
+    const env = makeEnv();
+    expect(await ev("{{foreach::x,y}}{{.item}}{{/foreach}}|{{.item}}", env)).toBe("xy|");
+    expect(env.variables.local.has("item")).toBe(false);
+    expect(env.variables.local.has("item_index")).toBe(false);
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — Multiplayer
+// ===========================================================================
+
+describe("Multiplayer macros", () => {
+  const mpEnv = () =>
+    makeEnv({
+      multiplayer: {
+        playerCount: 3,
+        playerNames: ["Alice", "Bob", "Charlie"],
+        hostName: "Alice",
+        currentTurnName: "Bob",
+        turnStrategy: "round_robin",
+      },
+    });
+
+  test("isMultiplayer is 'no' outside a room", async () => {
+    expect(await ev("{{isMultiplayer}}")).toBe("no");
+  });
+
+  test("isMultiplayer is 'yes' inside a room", async () => {
+    expect(await ev("{{isMultiplayer}}", mpEnv())).toBe("yes");
+  });
+
+  test("playerCount", async () => {
+    expect(await ev("{{playerCount}}", mpEnv())).toBe("3");
+    expect(await ev("{{playerCount}}")).toBe("0");
+  });
+
+  test("players is a comma-separated roster", async () => {
+    expect(await ev("{{players}}", mpEnv())).toBe("Alice, Bob, Charlie");
+    expect(await ev("{{players}}")).toBe("");
+  });
+
+  test("hostName", async () => {
+    expect(await ev("{{hostName}}", mpEnv())).toBe("Alice");
+    expect(await ev("{{hostName}}")).toBe("");
+  });
+
+  test("currentPlayer", async () => {
+    expect(await ev("{{currentPlayer}}", mpEnv())).toBe("Bob");
+    expect(await ev("{{currentPlayer}}")).toBe("");
+  });
+
+  test("gates content with {{if}}", async () => {
+    expect(
+      await ev("{{if::{{isMultiplayer}}}}room of {{playerCount}}{{else}}solo{{/if}}", mpEnv()),
+    ).toBe("room of 3");
+    expect(await ev("{{if::{{isMultiplayer}}}}room{{else}}solo{{/if}}")).toBe("solo");
+  });
+
+  test("aliases resolve", async () => {
+    const env = mpEnv();
+    expect(await ev("{{is_multiplayer}}", env)).toBe("yes");
+    expect(await ev("{{player_count}}", env)).toBe("3");
+    expect(await ev("{{player_names}}", env)).toBe("Alice, Bob, Charlie");
+    expect(await ev("{{host_name}}", env)).toBe("Alice");
+    expect(await ev("{{current_player}}", env)).toBe("Bob");
+  });
+
+  test("pairs with foreach to enumerate the roster", async () => {
+    expect(await ev("{{foreach::{{players}}}}- {{.item}}\n{{/foreach}}", mpEnv())).toBe(
+      "- Alice\n- Bob\n- Charlie\n",
+    );
+  });
+
+  test("foreach numbers the roster for a turn order", async () => {
+    expect(await ev("{{foreach::{{players}}::p}}{{.p_number}}. {{.p}}\n{{/foreach}}", mpEnv())).toBe(
+      "1. Alice\n2. Bob\n3. Charlie\n",
+    );
   });
 });

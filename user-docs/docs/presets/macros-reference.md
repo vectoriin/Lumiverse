@@ -149,6 +149,74 @@ Only the selected branch is resolved. Side-effect macros in the unselected branc
 
 ---
 
+## Iteration
+
+### `{{foreach}}`
+
+Repeat a block of content once for each item in a list — the macro equivalent of a JavaScript `forEach`. The list is a single string that is split on a delimiter (`,` by default); each item is trimmed and blank items are dropped.
+
+```
+{{foreach::apple, banana, cherry}}
+- {{.item}}
+{{/foreach}}
+```
+
+produces:
+
+```
+- apple
+- banana
+- cherry
+```
+
+**Custom loop variable** — the second argument renames the loop variable (default `item`):
+
+```
+{{foreach::Alice,Bob::name}}{{.name}} is here. {{/foreach}}
+```
+
+**Custom delimiter** — the third argument changes the split character. Pass an empty delimiter (`::`) to treat the whole string as a single item:
+
+```
+{{foreach::a|b|c::item::|}}{{.item}} {{/foreach}}    — splits on "|"
+```
+
+Inside the body, these loop variables are available (replace `item` with your variable name):
+
+| Variable | Value |
+|----------|-------|
+| `{{.item}}` | The current item |
+| `{{.item_index}}` | 0-based position (`0`, `1`, `2`, …) |
+| `{{.item_number}}` | 1-based position (`1`, `2`, `3`, …) |
+| `{{.item_count}}` | Total number of items |
+| `{{.item_first}}` | `"true"` on the first item, otherwise empty |
+| `{{.item_last}}` | `"true"` on the last item, otherwise empty |
+
+**Numbered list:**
+
+```
+{{foreach::Sword,Shield,Potion::loot}}{{.loot_number}}. {{.loot}}{{newline}}{{/foreach}}
+```
+
+**Comma-joined list** — use `{{.x_last}}` to skip the trailing separator:
+
+```
+{{foreach::a,b,c::x}}{{.x}}{{if::!{{.x_last}}}}, {{/if}}{{/foreach}}    — "a, b, c"
+```
+
+`{{foreach}}` pairs naturally with any macro that returns a delimited list, such as `{{players}}` or `{{group}}`:
+
+```
+{{foreach::{{players}}}}- {{.item}}{{newline}}{{/foreach}}
+```
+
+!!! note "Good to know"
+    - The loop variable is scoped to the loop: its previous value (if any) is restored when the loop ends, so it never clobbers a variable of the same name used elsewhere.
+    - Loops can be nested — give the inner loop a different variable name.
+    - Iteration is capped at 1000 items.
+
+---
+
 ## Identity & Names
 
 Macros for character and user identity.
@@ -167,6 +235,38 @@ Macros for character and user identity.
 | `{{groupMemberCount}}` | `{{group_member_count}}` | Number of characters in the group |
 | `{{groupLastSpeaker}}` | `{{group_last_speaker}}` | Last character who spoke |
 | `{{groupCardMode}}` | `{{group_card_mode}}` | Card composition mode: `"solo"`, `"swap"`, `"merge"`, or `"merge_ignore_muted"` |
+
+---
+
+## Multiplayer
+
+State about the current multiplayer room. Outside a room every macro returns a safe "not multiplayer" value (`{{isMultiplayer}}` → `"no"`, counts → `0`, names → empty), so presets can reference them unconditionally. Names match what you see on messages: a player's persona name if they set one, otherwise their display name.
+
+| Macro | Aliases | Returns |
+|-------|---------|---------|
+| `{{isMultiplayer}}` | `{{is_multiplayer}}`, `{{is_multiplayer_room}}` | `"yes"` or `"no"` — usable as a condition |
+| `{{playerCount}}` | `{{player_count}}`, `{{players_count}}` | Number of active players (host + peers) |
+| `{{players}}` | `{{player_names}}` | Comma-separated names of all active players (host first) |
+| `{{hostName}}` | `{{host_name}}` | Display name of the room's host |
+| `{{currentPlayer}}` | `{{current_player}}`, `{{current_turn}}` | Name of the player whose turn it is (round-robin rooms; empty in freeform) |
+
+**Gate room-only content** so it costs nothing in solo chats:
+
+```
+{{if::{{isMultiplayer}}}}
+This is a group session with {{playerCount}} players: {{players}}.
+It is currently {{currentPlayer}}'s turn.
+{{/if}}
+```
+
+**Enumerate the roster** with `{{foreach}}`:
+
+```
+{{if::{{isMultiplayer}}}}
+Players in the room:
+{{foreach::{{players}}::player}}{{.player_number}}. {{.player}}{{newline}}{{/foreach}}
+{{/if}}
+```
 
 ---
 
@@ -780,6 +880,7 @@ These macros return `"yes"` / `"no"` or `"true"` / `"false"` and are designed fo
 |-------|-----------|
 | `{{isGroupChat}}` | Chat has multiple characters |
 | `{{isNarrator}}` | Active persona is marked as a narrator |
+| `{{isMultiplayer}}` | Chat is a multiplayer room |
 | `{{lumiaCouncilModeActive}}` | Council mode is enabled |
 | `{{lumiaCouncilToolsActive}}` | Council tools ran this generation |
 | `{{loomSovHandActive}}` | Sovereign Hand mode is on |
@@ -832,6 +933,9 @@ The adventure is well underway.
 
 !!! tip "`{{switch}}` for multi-branch logic"
     Instead of nested if/else chains, use `{{switch::{{.mood}}::happy::cheerful tone::sad::somber tone::neutral tone}}`.
+
+!!! tip "`{{foreach}}` over lists"
+    Any macro that returns a comma-separated list — `{{players}}`, `{{group}}`, a `{{.var}}` you built up — can be fed straight into `{{foreach}}`: `{{foreach::{{players}}::p}}{{.p_number}}. {{.p}}{{newline}}{{/foreach}}`. Wrap multiplayer-only content in `{{if::{{isMultiplayer}}}}` so it stays out of solo chats.
 
 !!! tip "`{{wrap}}` for conditional formatting"
     `{{wrap}}` only outputs if the content is non-empty — `{{wrap::(**::**)::{{.note}}}}` produces nothing when the note is unset, avoiding stray delimiters.

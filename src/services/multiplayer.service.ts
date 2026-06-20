@@ -29,6 +29,8 @@ import * as worldBooksSvc from "./world-books.service";
 import {
   setMultiplayerPersonaProvider,
   setMultiplayerWorldInfoProvider,
+  setMultiplayerMacroContextProvider,
+  type MultiplayerMacroContext,
 } from "./prompt-assembly.service";
 import { mpidConfig } from "../multiplayer/config";
 import type { Message } from "../types/message";
@@ -1295,7 +1297,7 @@ export function submitPeerMessage(roomId: string, participantId: string, rawCont
 }
 
 function writePeerMessage(room: Room, participant: Participant, content: string): Message {
-  const name = participant.persona_snapshot?.name || participant.display_name || "Guest";
+  const name = participantSpeakingName(participant);
   return chatsSvc.createMessage(
     room.chat_id,
     {
@@ -1487,6 +1489,42 @@ export function getActivePeerPersonasForChat(chatId: string): Array<{ name: stri
     .map((p) => ({ name: p.persona_snapshot!.name, description: p.persona_snapshot!.description }));
 }
 
+/**
+ * The name a participant "speaks as" in the chat transcript: their persona name
+ * if set, else their display name, else "Guest". Kept as the single source of
+ * truth so macro output ({{players}}, {{hostName}}, …) matches the author names
+ * users actually see on messages (see writePeerMessage).
+ */
+function participantSpeakingName(p: Participant): string {
+  return p.persona_snapshot?.name || p.display_name || "Guest";
+}
+
+/**
+ * Live snapshot of a room's state for prompt-assembly macros, or null for a
+ * non-room chat. Reads are synchronous DB queries — the same hot-path cost as
+ * the persona / world-info providers — so this is safe to call inline during
+ * assembly. Returned shape is owned by prompt-assembly (MultiplayerMacroContext)
+ * to keep the macro contract in one place.
+ */
+export function getMacroContextForChat(chatId: string): MultiplayerMacroContext | null {
+  const roomId = getRoomIdForChat(chatId);
+  if (!roomId) return null;
+  const room = getRoom(roomId);
+  if (!room) return null;
+  const participants = listParticipants(roomId, { activeOnly: true });
+  const host = participants.find((p) => p.role === "host");
+  const current = room.current_turn_participant_id
+    ? participants.find((p) => p.id === room.current_turn_participant_id)
+    : undefined;
+  return {
+    playerCount: participants.length,
+    playerNames: participants.map(participantSpeakingName),
+    hostName: host ? participantSpeakingName(host) : "",
+    currentTurnName: current ? participantSpeakingName(current) : "",
+    turnStrategy: room.turn_strategy,
+  };
+}
+
 // ─── init: fan-out listener + persona provider + freeform timer re-arm ───────────
 
 let initialized = false;
@@ -1544,6 +1582,8 @@ export function initMultiplayer(): void {
   setMultiplayerPersonaProvider(getActivePeerPersonasForChat);
   // Inject active peers' attached persona lorebooks into world-info assembly.
   setMultiplayerWorldInfoProvider(getActivePeerLorebookEntriesForChat);
+  // Expose room roster/turn state to the multiplayer macros.
+  setMultiplayerMacroContextProvider(getMacroContextForChat);
 
   // Re-arm freeform deadline timers dropped by a restart.
   try {
