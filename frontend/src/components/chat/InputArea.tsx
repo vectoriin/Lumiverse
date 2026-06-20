@@ -532,16 +532,19 @@ export default function InputArea({ chatId }: InputAreaProps) {
   }), [activeCharacterId, activeCharacter?.tags, personas, characterPersonaBindings, personaTagBindings])
 
   const currentChatAddonOverrides = activePersonaId ? (chatAddonStatesByPersona[activePersonaId] ?? {}) : {}
-  const effectivePersonaAddonStates = useMemo(() => {
+  const basePersonaAddonStates = useMemo(() => {
     const states: Record<string, boolean> = {}
     for (const addon of personaAddons) states[addon.id] = addon.enabled
     for (const addon of attachedGlobalAddons) states[addon.id] = addon.enabled
     if (activePersonaId && resolvedPersonaBinding.personaId === activePersonaId && resolvedPersonaBinding.addonStates) {
       Object.assign(states, resolvedPersonaBinding.addonStates)
     }
-    Object.assign(states, currentChatAddonOverrides)
     return states
-  }, [activePersonaId, personaAddons, attachedGlobalAddons, resolvedPersonaBinding, currentChatAddonOverrides])
+  }, [activePersonaId, personaAddons, attachedGlobalAddons, resolvedPersonaBinding])
+  const effectivePersonaAddonStates = useMemo(
+    () => ({ ...basePersonaAddonStates, ...currentChatAddonOverrides }),
+    [basePersonaAddonStates, currentChatAddonOverrides],
+  )
   const effectivePersonaAddons = useMemo(
     () => personaAddons.map((addon) => ({ ...addon, enabled: effectivePersonaAddonStates[addon.id] ?? addon.enabled })),
     [personaAddons, effectivePersonaAddonStates],
@@ -550,7 +553,9 @@ export default function InputArea({ chatId }: InputAreaProps) {
     () => attachedGlobalAddons.map((addon) => ({ ...addon, enabled: effectivePersonaAddonStates[addon.id] ?? addon.enabled })),
     [attachedGlobalAddons, effectivePersonaAddonStates],
   )
-  const chatAddonOverrideCount = Object.keys(currentChatAddonOverrides).length
+  const chatAddonOverrideCount = Object.entries(currentChatAddonOverrides)
+    .filter(([id, enabled]) => id in basePersonaAddonStates && enabled !== basePersonaAddonStates[id])
+    .length
   const activeGenerationAddonStates = activePersonaId && Object.keys(effectivePersonaAddonStates).length > 0
     ? effectivePersonaAddonStates
     : undefined
