@@ -1,6 +1,6 @@
 import { getLinkConfig } from "../services/lumihub-link.service";
 
-type SealedManifest = {
+export type SealedManifest = {
   version?: string | null;
   blocks?: Array<{ key?: string; sha256?: string }>;
 };
@@ -43,6 +43,15 @@ export async function resolveSealedPresetBlock(
     console.warn("[LumiHub] Failed to resolve sealed preset block:", err);
     return "";
   }
+}
+
+export async function resolveSealedPresetBlocksForInstall(
+  hubPresetId: string,
+  version: string | null,
+  manifest: SealedManifest,
+): Promise<Record<string, string>> {
+  if (!hubPresetId || !manifest.blocks?.length) return {};
+  return fetchSealedBlocks(hubPresetId, version, manifest);
 }
 
 async function fetchSealedBlocks(

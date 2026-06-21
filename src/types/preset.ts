@@ -122,6 +122,12 @@ export interface PromptBlock {
   group: string | null;
   categoryMode?: 'radio' | 'checkbox' | null;
   variables?: PromptVariableDef[];
+  sealed?: boolean;
+  sealedKey?: string;
+  sealedSource?: string;
+  sealedOriginPresetId?: string;
+  sealedOriginVersion?: string | null;
+  sealedSha256?: string;
 }
 
 export interface PromptBehavior {

@@ -375,6 +375,7 @@ function BlockEditor({ block, blocks, promptVariables, onSave, onBack, available
   const { t } = useLb()
   const { t: tc } = useTranslation('common')
   const { injectionTriggerTypes, injectionTriggerLabel } = useLoomOptionLabels()
+  const isInstalledLumiHubSealed = block.sealedSource === 'lumihub'
   const [name, setName] = useState(block.name)
   const [role, setRole] = useState<PromptBlock['role']>(block.role || 'system')
   const [content, setContent] = useState(block.content || '')
@@ -450,14 +451,19 @@ function BlockEditor({ block, blocks, promptVariables, onSave, onBack, available
   const handleSave = () => {
     const isAppend = role === 'user_append' || role === 'assistant_append'
     const cleanedVariables = variables.filter((v) => v && v.name?.trim().length > 0)
-    const cleanSealedKey = sanitizeSealedBlockKey(sealedKey)
+    const cleanSealedKey = sanitizeSealedBlockKey(sealedKey || block.sealedKey || block.id)
+    const shouldSeal = isInstalledLumiHubSealed || (sealed && !!cleanSealedKey)
     onSave({
       name, role, content,
       position: isAppend ? 'pre_history' : position,
       depth: (position === 'in_history' || isAppend) ? depth : 0,
       isLocked, injectionTrigger,
-      sealed: sealed && cleanSealedKey ? true : undefined,
-      sealedKey: sealed && cleanSealedKey ? cleanSealedKey : undefined,
+      sealed: shouldSeal ? true : undefined,
+      sealedKey: shouldSeal ? cleanSealedKey : undefined,
+      sealedSource: isInstalledLumiHubSealed ? block.sealedSource : undefined,
+      sealedOriginPresetId: isInstalledLumiHubSealed ? block.sealedOriginPresetId : undefined,
+      sealedOriginVersion: isInstalledLumiHubSealed ? block.sealedOriginVersion : undefined,
+      sealedSha256: isInstalledLumiHubSealed ? block.sealedSha256 : undefined,
       categoryMode: block.marker === 'category' ? categoryMode : null,
       variables: cleanedVariables.length ? cleanedVariables : undefined,
     })
@@ -630,7 +636,7 @@ function BlockEditor({ block, blocks, promptVariables, onSave, onBack, available
               </button>
               {sealControlsOpen && (
                 <div className={s.sealedBlockBody}>
-                  <p className={s.sealedBlockText}>{t('blockEditor.sealedBlockHint')}</p>
+                  <p className={s.sealedBlockText}>{t(isInstalledLumiHubSealed ? 'blockEditor.sealedBlockInstalledHint' : 'blockEditor.sealedBlockHint')}</p>
                   <div className={s.formGroup}>
                     <label className={s.label}>{t('blockEditor.sealedBlockKey')}</label>
                     <input
@@ -639,17 +645,18 @@ function BlockEditor({ block, blocks, promptVariables, onSave, onBack, available
                       onChange={e => setSealedKey(filterSealedBlockKeyInput(e.target.value))}
                       placeholder={t('blockEditor.sealedBlockKeyPlaceholder')}
                       spellCheck={false}
+                      disabled={isInstalledLumiHubSealed}
                     />
                     <span className={s.settingsHint}>{t('blockEditor.sealedBlockKeyHint')}</span>
                   </div>
                   <label className={clsx(s.sealedBlockArmRow, !sealedKey.trim() && s.sealedBlockArmRowDisabled)}>
                     <input
                       type="checkbox"
-                      checked={sealed && !!sealedKey.trim()}
-                      disabled={!sealedKey.trim()}
+                      checked={(isInstalledLumiHubSealed || sealed) && !!sealedKey.trim()}
+                      disabled={isInstalledLumiHubSealed || !sealedKey.trim()}
                       onChange={e => setSealed(e.target.checked)}
                     />
-                    <span>{t('blockEditor.sealedBlockEnable')}</span>
+                    <span>{t(isInstalledLumiHubSealed ? 'blockEditor.sealedBlockInstalledEnable' : 'blockEditor.sealedBlockEnable')}</span>
                   </label>
                 </div>
               )}

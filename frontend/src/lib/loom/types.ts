@@ -96,6 +96,11 @@ export interface PromptBlock {
   /** When uploaded to LumiHub, content is extracted into a private sidecar block. */
   sealed?: boolean
   sealedKey?: string
+  /** LumiHub-installed sealed blocks are editable locally but never export raw content. */
+  sealedSource?: 'lumihub' | string
+  sealedOriginPresetId?: string
+  sealedOriginVersion?: string | null
+  sealedSha256?: string
 }
 
 export interface SamplerOverrides {

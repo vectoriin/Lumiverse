@@ -19,6 +19,7 @@ import * as settingsSvc from "../services/settings.service";
 import * as themeAssetsSvc from "../services/theme-assets.service";
 import { getCharacterWorldBookIds, setCharacterWorldBookIds } from "../utils/character-world-books";
 import { applyCharxModulesAndAssets } from "../services/charx-import.service";
+import { resolveSealedPresetBlocksForInstall, type SealedManifest } from "./sealed-presets";
 import type {
   InstallCharacterPayload,
   InstallPresetPayload,
@@ -653,6 +654,8 @@ export async function installPreset(
       : null;
     const presetSlug = typeof payload.presetSlug === "string" ? payload.presetSlug : null;
     const presetCreator = typeof payload.presetCreator === "string" ? payload.presetCreator : null;
+    const sealedPreset = isPlainObject(payload.sealedPreset) ? payload.sealedPreset as SealedManifest : null;
+    const materializedBlocks = await materializeSealedPresetBlocks(blocks, payload.presetId, presetVersion, sealedPreset);
 
     const presetInput = {
       name,
@@ -661,7 +664,7 @@ export async function installPreset(
         samplerOverrides: isPlainObject(p.samplerOverrides) ? p.samplerOverrides : {},
         customBody: isPlainObject(p.customBody) ? p.customBody : {},
       },
-      prompt_order: blocks,
+      prompt_order: materializedBlocks,
       prompts: {
         promptBehavior: isPlainObject(p.promptBehavior) ? p.promptBehavior : {},
         completionSettings: isPlainObject(p.completionSettings) ? p.completionSettings : {},
@@ -682,7 +685,7 @@ export async function installPreset(
         _lumiverse_preset_version: presetVersion,
         _lumiverse_preset_slug: presetSlug,
         _lumiverse_preset_creator: presetCreator,
-        _lumiverse_sealed_preset: isPlainObject(payload.sealedPreset) ? payload.sealedPreset : null,
+        _lumiverse_sealed_preset: sealedPreset,
       },
     };
 
@@ -734,6 +737,62 @@ export async function installPreset(
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function materializeSealedPresetBlocks(
+  blocks: any[],
+  hubPresetId: string,
+  version: string | null,
+  sealedPreset: SealedManifest | null,
+): Promise<any[]> {
+  if (!sealedPreset) return blocks;
+  const manifestBlocks = Array.isArray(sealedPreset?.blocks) ? sealedPreset.blocks : [];
+  if (!manifestBlocks.length) return blocks;
+
+  const manifestByKey = new Map<string, { sha256: string }>();
+  for (const entry of manifestBlocks) {
+    if (typeof entry?.key === "string" && typeof entry?.sha256 === "string") {
+      manifestByKey.set(entry.key, { sha256: entry.sha256 });
+    }
+  }
+  if (!manifestByKey.size) return blocks;
+
+  const usedKeys = new Set<string>();
+  for (const block of blocks) {
+    if (!isPlainObject(block) || typeof block.content !== "string") continue;
+    const key = extractExactSealedPlaceholder(block.content);
+    if (key && manifestByKey.has(key)) usedKeys.add(key);
+  }
+  if (!usedKeys.size) return blocks;
+
+  const resolved = await resolveSealedPresetBlocksForInstall(hubPresetId, version, sealedPreset);
+  for (const key of usedKeys) {
+    if (typeof resolved[key] !== "string") {
+      throw new Error(`Unable to fetch or verify sealed preset block: ${key}`);
+    }
+  }
+
+  return blocks.map((block) => {
+    if (!isPlainObject(block) || typeof block.content !== "string") return block;
+    const key = extractExactSealedPlaceholder(block.content);
+    const manifestEntry = key ? manifestByKey.get(key) : null;
+    if (!key || !manifestEntry) return block;
+    return {
+      ...block,
+      content: resolved[key],
+      sealed: true,
+      sealedKey: key,
+      sealedSource: "lumihub",
+      sealedOriginPresetId: hubPresetId,
+      sealedOriginVersion: version,
+      sealedSha256: manifestEntry.sha256,
+    };
+  });
+}
+
+function extractExactSealedPlaceholder(content: string): string | null {
+  const match = content.trim().match(/^\{\{(?:presetBlock|pblock)::([^}]+)\}\}$/);
+  return match?.[1]?.trim() || null;
 }
 
 /**
