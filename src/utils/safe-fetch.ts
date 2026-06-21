@@ -118,6 +118,14 @@ const BLOCKED_HOSTNAMES = new Set([
   "metadata.goog",
 ]);
 
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/g, "");
+}
+
+function isLocalhostName(hostname: string): boolean {
+  return hostname === "localhost" || hostname.endsWith(".localhost");
+}
+
 /**
  * Fallback resolver for environments where the system DNS resolver can't
  * see a hostname but a public DoH endpoint can (Termux + custom TLDs,
@@ -170,6 +178,7 @@ async function resolveViaDoh(
 }
 
 export interface ValidateHostOptions {
+  /** Allow loopback IP literals and RFC-localhost names, but not LAN/private ranges. */
   allowLoopback?: boolean;
   allowPrivate?: boolean;
   /**
@@ -182,8 +191,15 @@ export interface ValidateHostOptions {
 }
 
 export async function validateHost(hostname: string, options?: ValidateHostOptions): Promise<void> {
-  if (BLOCKED_HOSTNAMES.has(hostname.toLowerCase())) {
+  hostname = normalizeHostname(hostname);
+
+  if (BLOCKED_HOSTNAMES.has(hostname)) {
     throw new SSRFError(`Blocked hostname: ${hostname}`);
+  }
+
+  if (isLocalhostName(hostname)) {
+    if (options?.allowLoopback) return;
+    throw new SSRFError(`URL resolves to private IP: ${hostname}`);
   }
 
   // If hostname is already an IP literal, check directly
