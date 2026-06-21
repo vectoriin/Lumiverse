@@ -93,6 +93,9 @@ export interface PromptBlock {
   group?: string | null
   categoryMode?: 'radio' | 'checkbox' | null
   variables?: PromptVariableDef[]
+  /** When uploaded to LumiHub, content is extracted into a private sidecar block. */
+  sealed?: boolean
+  sealedKey?: string
 }
 
 export interface SamplerOverrides {

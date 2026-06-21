@@ -57,6 +57,7 @@ import {
   Camera,
   Link,
   Unlink,
+  Shield,
 } from 'lucide-react'
 import clsx from 'clsx'
 import ExpandedTextEditor, { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
@@ -140,6 +141,18 @@ function hasExplicitGroup(block: PromptBlock) {
 
 function blockGroup(block: PromptBlock) {
   return block.group ?? null
+}
+
+function sanitizeSealedBlockKey(value: string) {
+  return value.trim().replace(/[^A-Za-z0-9._:-]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+function filterSealedBlockKeyInput(value: string) {
+  return value.replace(/[^A-Za-z0-9._:-]+/g, '-')
+}
+
+function suggestedSealedBlockKey(block: PromptBlock, name: string) {
+  return sanitizeSealedBlockKey(name || block.name || block.id) || block.id
 }
 
 function inferGroupAtIndex(blocks: PromptBlock[], index: number) {
@@ -303,6 +316,7 @@ function SortableBlockItem({ block, onEdit, onDelete, onToggle, indented, dragDi
           <span className={s.blockName}>
             {isMarker && <Hash size={12} className={s.blockNameIcon} />}
             {block.isLocked && <Lock size={10} className={clsx(s.blockNameIcon, s.blockNameIconMuted)} />}
+            {block.sealed === true && <Shield size={10} className={clsx(s.blockNameIcon, s.blockNameIconSealed)} />}
             <span className={s.blockNameText}>{block.name}</span>
           </span>
           <span className={s.blockMetaRow}>
@@ -362,6 +376,9 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
   const [position, setPosition] = useState<PromptBlock['position']>(block.position || 'pre_history')
   const [depth, setDepth] = useState(block.depth || 0)
   const [isLocked, setIsLocked] = useState(block.isLocked || false)
+  const [sealControlsOpen, setSealControlsOpen] = useState(block.sealed === true)
+  const [sealed, setSealed] = useState(block.sealed === true)
+  const [sealedKey, setSealedKey] = useState(typeof block.sealedKey === 'string' ? block.sealedKey : '')
   const [injectionTrigger, setInjectionTrigger] = useState<string[]>(block.injectionTrigger || [])
   const [categoryMode, setCategoryMode] = useState<PromptBlock['categoryMode']>(block.categoryMode ?? null)
   const [variables, setVariables] = useState<PromptVariableDef[]>(
@@ -417,11 +434,14 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
   const handleSave = () => {
     const isAppend = role === 'user_append' || role === 'assistant_append'
     const cleanedVariables = variables.filter((v) => v && v.name?.trim().length > 0)
+    const cleanSealedKey = sanitizeSealedBlockKey(sealedKey)
     onSave({
       name, role, content,
       position: isAppend ? 'pre_history' : position,
       depth: (position === 'in_history' || isAppend) ? depth : 0,
       isLocked, injectionTrigger,
+      sealed: sealed && cleanSealedKey ? true : undefined,
+      sealedKey: sealed && cleanSealedKey ? cleanSealedKey : undefined,
       categoryMode: block.marker === 'category' ? categoryMode : null,
       variables: cleanedVariables.length ? cleanedVariables : undefined,
     })
@@ -573,6 +593,52 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Toggle.Checkbox checked={isLocked} onChange={setIsLocked} label={<><Lock size={14} /> {t('blockEditor.lockBlock')}</>} />
           </div>
+
+          {!block.marker && (
+            <div className={clsx(s.sealedBlockPanel, sealed && s.sealedBlockPanelActive)}>
+              <button
+                className={s.sealedBlockReveal}
+                type="button"
+                onClick={() => {
+                  const nextOpen = !sealControlsOpen
+                  setSealControlsOpen(nextOpen)
+                  if (nextOpen && !sealedKey.trim()) setSealedKey(suggestedSealedBlockKey(block, name))
+                }}
+                aria-expanded={sealControlsOpen}
+              >
+                <span className={s.sealedBlockRevealCopy}>
+                  <Shield size={14} />
+                  <span>{t('blockEditor.sealedBlockTitle')}</span>
+                </span>
+                <ChevronDown size={14} className={clsx(s.sealedBlockChevron, sealControlsOpen && s.sealedBlockChevronOpen)} />
+              </button>
+              {sealControlsOpen && (
+                <div className={s.sealedBlockBody}>
+                  <p className={s.sealedBlockText}>{t('blockEditor.sealedBlockHint')}</p>
+                  <div className={s.formGroup}>
+                    <label className={s.label}>{t('blockEditor.sealedBlockKey')}</label>
+                    <input
+                      className={s.input}
+                      value={sealedKey}
+                      onChange={e => setSealedKey(filterSealedBlockKeyInput(e.target.value))}
+                      placeholder={t('blockEditor.sealedBlockKeyPlaceholder')}
+                      spellCheck={false}
+                    />
+                    <span className={s.settingsHint}>{t('blockEditor.sealedBlockKeyHint')}</span>
+                  </div>
+                  <label className={clsx(s.sealedBlockArmRow, !sealedKey.trim() && s.sealedBlockArmRowDisabled)}>
+                    <input
+                      type="checkbox"
+                      checked={sealed && !!sealedKey.trim()}
+                      disabled={!sealedKey.trim()}
+                      onChange={e => setSealed(e.target.checked)}
+                    />
+                    <span>{t('blockEditor.sealedBlockEnable')}</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
 
           {block.marker === 'category' && (
             <div className={s.formGroup}>

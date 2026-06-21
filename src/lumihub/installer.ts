@@ -682,6 +682,7 @@ export async function installPreset(
         _lumiverse_preset_version: presetVersion,
         _lumiverse_preset_slug: presetSlug,
         _lumiverse_preset_creator: presetCreator,
+        _lumiverse_sealed_preset: isPlainObject(payload.sealedPreset) ? payload.sealedPreset : null,
       },
     };
 

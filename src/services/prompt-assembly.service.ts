@@ -1696,6 +1696,10 @@ export async function assemblePrompt(
       : undefined,
     signal: ctx.signal,
   });
+  if (preset) {
+    macroEnv.extra.presetId = preset.id;
+    macroEnv.extra.presetMetadata = preset.metadata || {};
+  }
 
   // Prompt variables — resolve creator-defined schemas + end-user overrides and
   // surface them on env.extra so {{var::name}} / {{hasVar::name}} / {{varDefault::name}}

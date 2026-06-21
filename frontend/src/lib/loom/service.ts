@@ -89,6 +89,12 @@ function migratePreset(preset: LoomPreset): LoomPreset {
       block.categoryMode = block.marker === 'category'
         ? coerceCategoryMode(block.categoryMode)
         : null
+      if (block.sealed !== true) {
+        delete block.sealed
+        delete block.sealedKey
+      } else if (typeof block.sealedKey !== 'string') {
+        block.sealedKey = block.id
+      }
     }
   }
   preset.blocks = normalizeCategoryBlockState(preset.blocks || [])

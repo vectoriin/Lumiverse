@@ -650,6 +650,97 @@
   font-size: calc(11px * var(--lumiverse-font-scale, 1));
 }
 
+.blockNameIconSealed {
+  color: color-mix(in srgb, var(--lumiverse-primary) 75%, var(--lumiverse-text));
+}
+
+.sealedBlockPanel {
+  border: 1px dashed color-mix(in srgb, var(--lumiverse-border) 86%, var(--lumiverse-text-dim));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04)) 64%, transparent);
+  overflow: hidden;
+}
+
+.sealedBlockPanelActive {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--lumiverse-primary) 42%, var(--lumiverse-border));
+  background: color-mix(in srgb, var(--lumiverse-primary) 7%, transparent);
+}
+
+.sealedBlockReveal {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--lumiverse-text-muted);
+  font: inherit;
+  font-size: calc(12px * var(--lumiverse-font-scale, 1));
+  cursor: pointer;
+}
+
+.sealedBlockReveal:hover {
+  color: var(--lumiverse-text);
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.05));
+}
+
+.sealedBlockRevealCopy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.sealedBlockChevron {
+  flex-shrink: 0;
+  transition: transform var(--lumiverse-transition-fast);
+}
+
+.sealedBlockChevronOpen {
+  transform: rotate(180deg);
+}
+
+.sealedBlockBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 11px 11px;
+}
+
+.sealedBlockText {
+  margin: 0;
+  color: var(--lumiverse-text-dim);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  line-height: 1.45;
+}
+
+.sealedBlockArmRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--lumiverse-primary) 28%, var(--lumiverse-border));
+  color: var(--lumiverse-text);
+  background: color-mix(in srgb, var(--lumiverse-primary) 6%, transparent);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.sealedBlockArmRow input {
+  margin-top: 1px;
+}
+
+.sealedBlockArmRowDisabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* ── Configure prompt variables action ── */
 .variablesAction {
   padding: 12px 12px 10px;
