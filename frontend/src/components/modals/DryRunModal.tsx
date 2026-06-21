@@ -47,10 +47,12 @@ interface MessageListItemProps {
   msg: DryRunMessage
   index: number
   selected: boolean
+  clipBoundary: boolean
+  clipBoundaryLabel?: string
   onSelect: () => void
 }
 
-function MessageListItem({ msg, index, selected, onSelect }: MessageListItemProps) {
+function MessageListItem({ msg, index, selected, clipBoundary, clipBoundaryLabel, onSelect }: MessageListItemProps) {
   const { t: ts } = useTranslation('modals', { keyPrefix: 'shared' })
   const preview = summarizeMessage(msg.content)
   const lineCount = countLines(msg.content)
@@ -58,7 +60,11 @@ function MessageListItem({ msg, index, selected, onSelect }: MessageListItemProp
   return (
     <button
       type="button"
-      className={clsx(styles.messageRow, selected && styles.messageRowActive)}
+      className={clsx(
+        styles.messageRow,
+        clipBoundary && styles.messageRowClipBoundary,
+        selected && styles.messageRowActive,
+      )}
       onClick={onSelect}
     >
       <div className={styles.messageRowHeader}>
@@ -66,6 +72,9 @@ function MessageListItem({ msg, index, selected, onSelect }: MessageListItemProp
           {msg.role}
         </Badge>
         <span className={styles.messageIndex}>#{index + 1}</span>
+        {clipBoundary && clipBoundaryLabel && (
+          <span className={styles.messageClipBadge}>{clipBoundaryLabel}</span>
+        )}
         <span className={styles.messageMeta}>
           {ts('chars', { count: msg.content.length })}
           {lineCount > 0 && ` • ${ts('lines', { count: lineCount })}`}
@@ -104,10 +113,12 @@ function ChunkPreview({ text }: ChunkPreviewProps) {
 interface VirtualizedMessagesProps {
   messages: DryRunMessage[]
   selectedIndex: number
+  clipBoundaryIndex: number
+  clipBoundaryLabel?: string
   onSelect: (index: number) => void
 }
 
-function VirtualizedMessages({ messages, selectedIndex, onSelect }: VirtualizedMessagesProps) {
+function VirtualizedMessages({ messages, selectedIndex, clipBoundaryIndex, clipBoundaryLabel, onSelect }: VirtualizedMessagesProps) {
   const parentRef = useRef<HTMLDivElement>(null)
 
   const virtualizer = useVirtualizer({
@@ -144,6 +155,8 @@ function VirtualizedMessages({ messages, selectedIndex, onSelect }: VirtualizedM
                 msg={msg}
                 index={virtualRow.index}
                 selected={selectedIndex === virtualRow.index}
+                clipBoundary={virtualRow.index === clipBoundaryIndex}
+                clipBoundaryLabel={clipBoundaryLabel}
                 onSelect={() => onSelect(virtualRow.index)}
               />
             </div>
@@ -242,6 +255,19 @@ export default function DryRunModal() {
 
   const selectedMessage = messages[selectedMessageIndex] ?? null
   const selectedMessageLineCount = selectedMessage ? countLines(selectedMessage.content) : 0
+  const clippedMessagesText = contextClipStats?.enabled && contextClipStats.messagesDropped > 0
+    ? t('clipped', { count: contextClipStats.messagesDropped }).trim()
+    : ''
+  const clippedMessagesSeparator = clippedMessagesText.match(/^[,，、]\s*/)?.[0] ?? ', '
+  const clippedMessagesLabel = clippedMessagesText.replace(/^[,，、]\s*/, '').trim()
+  const clipBoundaryIndex = useMemo(() => {
+    if (!contextClipStats?.enabled || contextClipStats.messagesDropped <= 0 || messages.length === 0) return -1
+    const firstKeptHistoryIndex = messages.findIndex((msg) => msg.__chatHistorySource)
+    return firstKeptHistoryIndex >= 0 ? firstKeptHistoryIndex : 0
+  }, [contextClipStats?.enabled, contextClipStats?.messagesDropped, messages])
+  const clipBoundaryLabel = clipBoundaryIndex >= 0
+    ? t('clipBoundaryMarker', { defaultValue: 'first kept after clip' })
+    : undefined
 
   const handleSelectMessage = (index: number) => {
     setSelectedMessageIndex(index)
@@ -276,13 +302,16 @@ export default function DryRunModal() {
                   size={14}
                   className={clsx(styles.chevron, messagesOpen && styles.chevronOpen)}
                 />
-                {t('messages')} ({messages.length}
-                {contextClipStats?.enabled && contextClipStats.messagesDropped > 0 && (
-                  <span style={{ color: '#ffab00', marginLeft: 6 }}>
-                    {t('clipped', { count: contextClipStats.messagesDropped })}
-                  </span>
-                )}
-                )
+                <span className={styles.collapsibleTitleText}>
+                  {t('messages')} ({messages.length}
+                  {clippedMessagesLabel && (
+                    <>
+                      {clippedMessagesSeparator}
+                      <span className={styles.clippedInlineLabel}>{clippedMessagesLabel}</span>
+                    </>
+                  )}
+                  )
+                </span>
               </button>
               {messagesOpen && messages.length > 0 && (
                 <div
@@ -294,6 +323,8 @@ export default function DryRunModal() {
                   <VirtualizedMessages
                     messages={messages}
                     selectedIndex={selectedMessageIndex}
+                    clipBoundaryIndex={clipBoundaryIndex}
+                    clipBoundaryLabel={clipBoundaryLabel}
                     onSelect={handleSelectMessage}
                   />
                   <div className={styles.messageInspector}>

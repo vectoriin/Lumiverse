@@ -1,5 +1,6 @@
 import { connect as connectTcp } from "node:net";
 import type { MilvusConnectionConfig, VectorStoreTuningProfile } from "../../vector-store-config.service";
+import { adaptiveStorageBatch, isRetryableStorageError } from "../addressing";
 import { milvusCapabilities } from "../capabilities";
 import type {
   CollectionName,
@@ -21,6 +22,8 @@ const CONNECT_TIMEOUT_MS = 5_000;
 const OUTPUT_FIELDS = ["id", "user_id", "source_type", "source_id", "owner_id", "chunk_index", "content", "metadata_json", "updated_at"];
 const SCALAR_INDEX_FIELDS = ["user_id", "source_type", "source_id", "owner_id", "chunk_index"];
 const SPARSE_FIELD = "sparse";
+const DEFAULT_UPSERT_BATCH_SIZE = 128;
+const BULK_UPSERT_BATCH_SIZE = 256;
 
 type MilvusSdk = typeof import("@zilliz/milvus2-sdk-node");
 type MilvusClientLike = any;
@@ -179,10 +182,18 @@ export class MilvusStore implements VectorStore {
     const client = await this.getClient();
     const name = this.collectionName(collection);
     await this.ensureCollection(collection, rows[0].vector.length);
-    for (let i = 0; i < rows.length; i += 256) {
-      const batch = rows.slice(i, i + 256).map(rowToMilvusData);
-      await assertOk(client.upsert({ collection_name: name, data: batch }));
-    }
+    const initialBatchSize = this.tuningProfile === "bulk_reindex" ? BULK_UPSERT_BATCH_SIZE : DEFAULT_UPSERT_BATCH_SIZE;
+    await adaptiveStorageBatch(
+      rows,
+      initialBatchSize,
+      async (batch) => {
+        await assertOk(client.upsert({ collection_name: name, data: batch.map(rowToMilvusData) }));
+      },
+      {
+        label: `Milvus upsert ${name}`,
+        isRetryable: isRetryableStorageError,
+      },
+    );
     if (this.tuningProfile !== "bulk_reindex") {
       await this.flush(name);
       await this.loadCollection(name, true);
@@ -633,7 +644,9 @@ function describeMilvusError(err: unknown): string {
 }
 
 async function assertOk(promise: Promise<any>): Promise<any> {
-  const res = await promise;
+  const res = await promise.catch((err) => {
+    throw new Error(`Milvus request failed: ${describeMilvusError(err)}`);
+  });
   const status = res?.status ?? res;
   const code = status?.error_code ?? status?.code;
   const reason = status?.reason ?? status?.message;
