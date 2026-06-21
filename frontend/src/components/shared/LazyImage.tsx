@@ -77,7 +77,7 @@ export default function LazyImage({
           width: '100%',
           height: '100%',
           objectFit: 'cover',
-          transition: 'opacity 0.2s ease',
+          transition: 'opacity 0.2s ease, transform var(--lazy-image-transform-transition, 0ms)',
           objectPosition,
           opacity: isLoading ? 0 : 1,
           ...style,

@@ -379,7 +379,7 @@
 .listAvatar picture img,
 .mosaicCell img,
 .mosaicCell picture img {
-  transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+  --lazy-image-transform-transition: 500ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .card:hover .cardImage img,
@@ -387,6 +387,7 @@
 .listItem:hover .listAvatar img,
 .listItem:hover .listAvatar picture img {
   transform: scale(1.06);
+  will-change: transform;
 }
 
 /* Parallax — the image participates in the card's tilt but sits on a
@@ -408,6 +409,7 @@
 .cardTilt.tilting .cardImage img,
 .cardTilt.tilting .cardImage picture img,
 .cardTilt.tilting .cardAvatarFallback {
+  --lazy-image-transform-transition: 120ms ease-out;
   transition: transform 120ms ease-out;
   transform:
     translate3d(calc(var(--tilt-x, 0) * 8px), calc(var(--tilt-y, 0) * 8px), 0)
@@ -419,7 +421,7 @@
 
 .cardTilt.tilting .mosaicCell img,
 .cardTilt.tilting .mosaicCell picture img {
-  transition: transform 120ms ease-out;
+  --lazy-image-transform-transition: 120ms ease-out;
   transform:
     translate3d(calc(var(--tilt-x, 0) * 4px), calc(var(--tilt-y, 0) * 4px), 0)
     rotateX(calc(var(--tilt-y, 0) * 1deg))
@@ -439,7 +441,9 @@
   .listAvatar picture img,
   .mosaicCell img,
   .mosaicCell picture img {
+    --lazy-image-transform-transition: 0ms;
     transition: none;
+    will-change: auto;
   }
   .card:hover .cardImage img,
   .card:hover .cardImage picture img,
