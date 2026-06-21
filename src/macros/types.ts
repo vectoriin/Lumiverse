@@ -196,6 +196,7 @@ export interface MacroEnv {
     isMobile: boolean;
   };
   variables: {
+    /** Transient variables scoped to the current macro environment / render only. */
     local: Map<string, string>;
     global: Map<string, string>;
     /** Chat-scoped persisted variables — saved to chat.metadata.chat_variables after generation. */

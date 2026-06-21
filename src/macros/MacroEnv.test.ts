@@ -189,6 +189,32 @@ describe("buildEnv rejected swipe", () => {
   });
 });
 
+describe("buildEnv variables", () => {
+  test("does not rehydrate transient local macro variables from chat metadata", () => {
+    const env = buildEnv({
+      character: baseCharacter,
+      persona: null,
+      chat: {
+        ...baseChat,
+        metadata: {
+          macro_variables: {
+            local: { stale: "from-disabled-block" },
+            global: { theme: "noir" },
+          },
+          chat_variables: { mood: "calm" },
+        },
+      },
+      messages: [],
+      generationType: "normal",
+      connection: null,
+    });
+
+    expect(env.variables.local.has("stale")).toBe(false);
+    expect(env.variables.global.get("theme")).toBe("noir");
+    expect(env.variables.chat.get("mood")).toBe("calm");
+  });
+});
+
 describe("buildEnv groupCardMode", () => {
   test("returns 'solo' for non-group chats regardless of metadata", () => {
     const env = buildEnv({
