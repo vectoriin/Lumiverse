@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, type SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   RefreshCw,
@@ -421,6 +421,7 @@ export default function OperatorPanel() {
   // show "Reconnecting..." once the WS drops and recover on reconnect.
   const pendingRestartOp = useRef<string | null>(null)
   const trustedHostsRequestId = useRef(0)
+  const vectorDraftDirty = useRef(false)
 
   const normalizedStoreBusy = normalizeOperatorOperation(storeBusy)
   const effectiveBusy = reconnecting ? 'reconnecting' : (normalizedStoreBusy || normalizeOperatorOperation(busy))
@@ -589,24 +590,32 @@ export default function OperatorPanel() {
     }
   }, [])
 
-  const refreshVectorConfig = useCallback(async () => {
+  const refreshVectorConfig = useCallback(async (resetDraft = false) => {
     try {
       const config = await embeddingsApi.getVectorStoreConfig()
       setVectorConfig(config)
-      setVectorDraft(vectorDraftFromConfig(config))
-      setVectorTestResult(null)
-      setQdrantApiKeyDraft('')
-      setMilvusPasswordDraft('')
+      if (resetDraft || !vectorDraftDirty.current) {
+        vectorDraftDirty.current = false
+        setVectorDraft(vectorDraftFromConfig(config))
+        setVectorTestResult(null)
+        setQdrantApiKeyDraft('')
+        setMilvusPasswordDraft('')
+      }
       return config
     } catch {
       return null
     }
   }, [])
 
-  const handleVectorProviderChange = useCallback((provider: VectorStoreProviderId) => {
-    setVectorDraft((prev) => ({ ...prev, provider }))
-    setVectorTestResult(null)
+  const updateVectorDraft = useCallback((value: SetStateAction<VectorStoreDraft>) => {
+    vectorDraftDirty.current = true
+    setVectorDraft(value)
   }, [])
+
+  const handleVectorProviderChange = useCallback((provider: VectorStoreProviderId) => {
+    updateVectorDraft((prev) => ({ ...prev, provider }))
+    setVectorTestResult(null)
+  }, [updateVectorDraft])
 
   const handleVectorTest = useCallback(async () => {
     setVectorConfigBusy('testing')
@@ -631,6 +640,7 @@ export default function OperatorPanel() {
     try {
       const result = await embeddingsApi.switchVectorStore(vectorDraftToPayload(vectorDraft, qdrantApiKeyDraft, milvusPasswordDraft))
       setVectorConfig(result)
+      vectorDraftDirty.current = false
       setVectorDraft(vectorDraftFromConfig(result))
       setQdrantApiKeyDraft('')
       setMilvusPasswordDraft('')
@@ -655,6 +665,7 @@ export default function OperatorPanel() {
     try {
       const result = await embeddingsApi.updateVectorStoreConfig({ tuningProfile: vectorDraft.tuningProfile })
       setVectorConfig(result)
+      vectorDraftDirty.current = false
       setVectorDraft(vectorDraftFromConfig(result))
       await refreshVectorHealth()
       addToast({ type: 'success', message: 'Vector store tuning profile saved.' })
@@ -2075,7 +2086,7 @@ export default function OperatorPanel() {
                     className={styles.fieldInput}
                     value={vectorDraft.tuningProfile}
                     disabled={!!vectorConfigBusy}
-                    onChange={(e) => setVectorDraft((prev) => ({ ...prev, tuningProfile: e.target.value as VectorStoreTuningProfile }))}
+                    onChange={(e) => updateVectorDraft((prev) => ({ ...prev, tuningProfile: e.target.value as VectorStoreTuningProfile }))}
                   >
                     <option value="balanced">Balanced</option>
                     <option value="low_latency">Low latency</option>
@@ -2094,7 +2105,7 @@ export default function OperatorPanel() {
                         placeholder="http://localhost:6333"
                         value={vectorDraft.qdrantUrl}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setVectorDraft((prev) => ({ ...prev, qdrantUrl: e.target.value }))}
+                        onChange={(e) => updateVectorDraft((prev) => ({ ...prev, qdrantUrl: e.target.value }))}
                       />
                     </label>
                     <label className={styles.fieldGroup}>
@@ -2104,7 +2115,7 @@ export default function OperatorPanel() {
                         placeholder="lumiverse_"
                         value={vectorDraft.qdrantCollectionPrefix}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setVectorDraft((prev) => ({ ...prev, qdrantCollectionPrefix: e.target.value }))}
+                        onChange={(e) => updateVectorDraft((prev) => ({ ...prev, qdrantCollectionPrefix: e.target.value }))}
                       />
                     </label>
                     <label className={styles.fieldGroup}>
@@ -2115,7 +2126,10 @@ export default function OperatorPanel() {
                         placeholder={vectorConfig.qdrantHasApiKey ? 'Saved key will be reused' : 'Optional'}
                         value={qdrantApiKeyDraft}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setQdrantApiKeyDraft(e.target.value)}
+                        onChange={(e) => {
+                          vectorDraftDirty.current = true
+                          setQdrantApiKeyDraft(e.target.value)
+                        }}
                       />
                     </label>
                   </>
@@ -2130,7 +2144,7 @@ export default function OperatorPanel() {
                         placeholder="localhost:19530"
                         value={vectorDraft.milvusAddress}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setVectorDraft((prev) => ({ ...prev, milvusAddress: e.target.value }))}
+                        onChange={(e) => updateVectorDraft((prev) => ({ ...prev, milvusAddress: e.target.value }))}
                       />
                     </label>
                     <label className={styles.fieldGroup}>
@@ -2140,7 +2154,7 @@ export default function OperatorPanel() {
                         placeholder="default"
                         value={vectorDraft.milvusDatabase}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setVectorDraft((prev) => ({ ...prev, milvusDatabase: e.target.value }))}
+                        onChange={(e) => updateVectorDraft((prev) => ({ ...prev, milvusDatabase: e.target.value }))}
                       />
                     </label>
                     <label className={styles.fieldGroup}>
@@ -2150,7 +2164,7 @@ export default function OperatorPanel() {
                         placeholder="Optional"
                         value={vectorDraft.milvusUsername}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setVectorDraft((prev) => ({ ...prev, milvusUsername: e.target.value }))}
+                        onChange={(e) => updateVectorDraft((prev) => ({ ...prev, milvusUsername: e.target.value }))}
                       />
                     </label>
                     <label className={styles.fieldGroup}>
@@ -2161,7 +2175,10 @@ export default function OperatorPanel() {
                         placeholder={vectorConfig.milvusHasPassword ? 'Saved password will be reused' : 'Optional'}
                         value={milvusPasswordDraft}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setMilvusPasswordDraft(e.target.value)}
+                        onChange={(e) => {
+                          vectorDraftDirty.current = true
+                          setMilvusPasswordDraft(e.target.value)
+                        }}
                       />
                     </label>
                     <label className={styles.fieldGroup}>
@@ -2170,7 +2187,7 @@ export default function OperatorPanel() {
                         className={styles.fieldInput}
                         value={vectorDraft.milvusTransport}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(e) => setVectorDraft((prev) => ({ ...prev, milvusTransport: e.target.value as 'grpc' | 'http' }))}
+                        onChange={(e) => updateVectorDraft((prev) => ({ ...prev, milvusTransport: e.target.value as 'grpc' | 'http' }))}
                       >
                         <option value="grpc">gRPC</option>
                       </select>
@@ -2181,7 +2198,7 @@ export default function OperatorPanel() {
                       <Toggle.Switch
                         checked={vectorDraft.milvusSsl}
                         disabled={vectorConfigManagedByEnv || !!vectorConfigBusy}
-                        onChange={(checked) => setVectorDraft((prev) => ({ ...prev, milvusSsl: checked }))}
+                        onChange={(checked) => updateVectorDraft((prev) => ({ ...prev, milvusSsl: checked }))}
                       />
                     </div>
                   </>
@@ -2200,7 +2217,7 @@ export default function OperatorPanel() {
                 <button
                   className={styles.controlBtn}
                   disabled={!!vectorConfigBusy}
-                  onClick={refreshVectorConfig}
+                  onClick={() => refreshVectorConfig(true)}
                 >
                   <RefreshCw size={14} />
                   Reload Config
