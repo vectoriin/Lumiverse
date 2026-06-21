@@ -47,6 +47,7 @@ import { pushRoutes } from "./routes/push.routes";
 import { memoryCortexRoutes } from "./routes/memory-cortex.routes";
 import { operatorRoutes } from "./routes/operator.routes";
 import { openrouterRoutes } from "./routes/openrouter.routes";
+import { nanogptRoutes } from "./routes/nanogpt.routes";
 import { ttsConnectionsRoutes } from "./routes/tts-connections.routes";
 import { sttConnectionsRoutes } from "./routes/stt-connections.routes";
 import { ttsRoutes } from "./routes/tts.routes";
@@ -95,6 +96,7 @@ const PUBLIC_POST_PREFIXES = [
   "/api/spindle-oauth/",
   "/api/v1/lumihub",
   "/api/v1/openrouter/oauth-landing",
+  "/api/v1/nanogpt/oauth-landing",
 ];
 app.use("/api/*", async (c, next) => {
   const clientId = getClientIp(c);
@@ -373,6 +375,57 @@ if (code && window.opener) {
 </body></html>`);
 });
 
+// NanoGPT OAuth landing — unauthenticated (popup redirect from NanoGPT)
+app.get("/api/v1/nanogpt/oauth-landing", async (c) => {
+  const rawCode = c.req.query("code") || "";
+  const rawState = c.req.query("state") || "";
+  const rawError = c.req.query("error") || "";
+  const rawOpenerOrigin = c.req.query("opener_origin") || "";
+  const code = /^[A-Za-z0-9._~+/=-]{1,512}$/.test(rawCode) ? rawCode : "";
+  const state = /^[A-Za-z0-9._~+/=-]{1,512}$/.test(rawState) ? rawState : "";
+  const error = /^[A-Za-z0-9._~+/=-]{1,128}$/.test(rawError) ? rawError : "";
+  let openerOrigin = "";
+  try {
+    const parsed = new URL(rawOpenerOrigin);
+    if (parsed.origin === rawOpenerOrigin && isOriginAllowed(parsed.origin)) {
+      openerOrigin = parsed.origin;
+    }
+  } catch {
+    openerOrigin = "";
+  }
+  const htmlAttr = (value: string) => value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return c.html(`<!DOCTYPE html>
+<html><head><title>NanoGPT Authorization</title>
+<style>body{background:#10151e;color:rgba(255,255,255,.82);font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:14px}</style></head>
+<body>
+<div id="s" data-code="${htmlAttr(code)}" data-state="${htmlAttr(state)}" data-error="${htmlAttr(error)}" data-opener-origin="${htmlAttr(openerOrigin)}">Completing authorization...</div>
+<script>
+var el = document.getElementById('s');
+var code = el.dataset.code || '';
+var state = el.dataset.state || '';
+var error = el.dataset.error || '';
+var targetOrigin = el.dataset.openerOrigin || window.location.origin;
+if (error) {
+  el.textContent = 'Authorization failed: ' + error;
+} else if (code && state && window.opener) {
+  window.opener.postMessage({ type: 'nanogpt_oauth_code', code: code, state: state }, targetOrigin);
+  el.textContent = 'Authorized! Closing...';
+  setTimeout(function(){ window.close(); }, 500);
+} else if (!code) {
+  el.textContent = 'No authorization code received.';
+} else if (!state) {
+  el.textContent = 'No authorization state received.';
+} else {
+  el.textContent = 'Could not reach parent window. Copy this code: ' + code;
+}
+</script>
+</body></html>`);
+});
+
 // Image gen results — unauthenticated, public access for push notifications and embeds
 app.get("/api/v1/image-gen/results/:id", async (c) => {
   const { getImageFilePathPublic } = await import("./services/images.service");
@@ -398,6 +451,7 @@ app.route("/api/v1/secrets", secretsRoutes);
 app.route("/api/v1/presets", presetsRoutes);
 app.route("/api/v1/connections", connectionsRoutes);
 app.route("/api/v1/openrouter", openrouterRoutes);
+app.route("/api/v1/nanogpt", nanogptRoutes);
 app.route("/api/v1/files", filesRoutes);
 app.route("/api/v1/images", imagesRoutes);
 app.route("/api/v1/audio", audioRoutes);

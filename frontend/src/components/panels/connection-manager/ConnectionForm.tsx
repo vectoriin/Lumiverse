@@ -3,6 +3,7 @@ import { FormField, TextInput, Select, Button } from '@/components/shared/FormCo
 import { Toggle } from '@/components/shared/Toggle'
 import { useTranslation } from 'react-i18next'
 import { connectionsApi } from '@/api/connections'
+import { buildNanoGptOAuthCallbackUrl, nanoGptApi } from '@/api/nanogpt'
 import { useStore } from '@/store'
 import {
   areReasoningSettingsEqual,
@@ -43,6 +44,7 @@ const FALLBACK_PROVIDERS = [
   { value: 'pollinations_text', label: 'Pollinations (Text)' },
   { value: 'pollinations', label: 'Pollinations (Gen)' },
   { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'nanogpt', label: 'NanoGPT' },
   { value: 'custom', label: 'Custom (OpenAI-compatible)' },
 ]
 
@@ -108,6 +110,8 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
   const [modelsLoading, setModelsLoading] = useState(false)
   const [byopLoading, setByopLoading] = useState(false)
   const [byopStatus, setByopStatus] = useState<string | null>(null)
+  const [nanoGptOauthLoading, setNanoGptOauthLoading] = useState(false)
+  const [nanoGptOauthStatus, setNanoGptOauthStatus] = useState<string | null>(null)
 
   // Vertex AI specific state
   const [vertexRegion, setVertexRegion] = useState(profile?.metadata?.vertex_region || 'us-central1')
@@ -268,6 +272,7 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
   const showAnthropicPromptCachingToggle = provider === 'anthropic'
   const showNanoGptCachingToggle = provider === 'nanogpt'
   const isOpenRouter = provider === 'openrouter'
+  const isNanoGpt = provider === 'nanogpt'
   // Vertex AI derives its host from `metadata.vertex_region`, so the API URL
   // field has no purpose and we don't display it.
   const hideApiUrl = isOpenRouter || provider === 'nanogpt' || isVertexAI || isBedrock
@@ -307,6 +312,63 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
       setByopLoading(false)
     }
   }, [model, profile?.id, t])
+
+  const handleNanoGptSignIn = useCallback(async () => {
+    if (!profile?.id && !name.trim()) return
+    setNanoGptOauthStatus(null)
+    setNanoGptOauthLoading(true)
+    try {
+      const callbackUrl = buildNanoGptOAuthCallbackUrl()
+      const { auth_url, session_token } = await nanoGptApi.initiateAuth(callbackUrl, profile?.id
+        ? { connectionId: profile.id }
+        : { connectionName: name.trim() }
+      )
+
+      const popup = window.open(auth_url, 'nanogpt_auth', 'width=600,height=700,scrollbars=yes')
+
+      let handled = false
+      const cleanup = () => {
+        if (handled) return
+        handled = true
+        window.removeEventListener('message', onMessage)
+        clearInterval(checkClosed)
+        setNanoGptOauthLoading(false)
+      }
+
+      const onMessage = async (event: MessageEvent) => {
+        if (event.data?.type !== 'nanogpt_oauth_code' || !event.data.code || event.data.state !== session_token) return
+        window.removeEventListener('message', onMessage)
+        clearInterval(checkClosed)
+
+        try {
+          const result = await nanoGptApi.completeAuth(session_token, event.data.code)
+          if (result.created && result.profile) {
+            onOAuthCreated?.(result.profile)
+          } else {
+            setApiKey('')
+            setNanoGptOauthStatus(t('connectionForm.nanoGptSaved'))
+          }
+        } catch (err: any) {
+          setNanoGptOauthStatus(String(err?.message || t('connectionForm.nanoGptExchangeFailed')))
+        }
+        handled = true
+        setNanoGptOauthLoading(false)
+      }
+      window.addEventListener('message', onMessage)
+
+      const checkClosed = setInterval(() => {
+        if (!popup || popup.closed) {
+          clearInterval(checkClosed)
+          setTimeout(cleanup, 1500)
+        }
+      }, 500)
+
+      setTimeout(cleanup, 5 * 60 * 1000)
+    } catch (err: any) {
+      setNanoGptOauthStatus(String(err?.message || t('connectionForm.nanoGptStartFailed')))
+      setNanoGptOauthLoading(false)
+    }
+  }, [name, onOAuthCreated, profile?.id, t])
 
   // Handle service account JSON file upload
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -474,6 +536,21 @@ export default function ConnectionForm({ providers, profile, onSave, onCancel, o
                   {byopLoading ? t('connectionForm.redirecting') : t('connectionForm.signInWithPollinations')}
                 </Button>
                 {byopStatus && <span className={styles.byopStatus}>{byopStatus}</span>}
+              </div>
+            </FormField>
+          )}
+          {isNanoGpt && (
+            <FormField label={t('connectionForm.nanoGptOAuth')} hint={t('connectionForm.nanoGptOAuthHint')}>
+              <div className={styles.byopRow}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleNanoGptSignIn}
+                  disabled={nanoGptOauthLoading || (!profile?.id && !name.trim())}
+                >
+                  {nanoGptOauthLoading ? t('connectionForm.redirecting') : t('connectionForm.signInWithNanoGpt')}
+                </Button>
+                {nanoGptOauthStatus && <span className={styles.byopStatus}>{nanoGptOauthStatus}</span>}
               </div>
             </FormField>
           )}

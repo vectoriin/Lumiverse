@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Trash2, Edit3, Zap, Check, Star, BrainCircuit, Copy, LogIn, RefreshCw, MoreVertical } from 'lucide-react'
 import { connectionsApi } from '@/api/connections'
 import { buildOpenRouterOAuthCallbackUrl, openrouterApi, type OpenRouterCreditsInfo } from '@/api/openrouter'
+import { buildNanoGptOAuthCallbackUrl, nanoGptApi } from '@/api/nanogpt'
 import {
   getReasoningBindingSummary,
   getReasoningBindingTitle,
@@ -41,6 +42,11 @@ function formatTimeUntil(resetAt: number | null) {
   if (days > 0) return `${days}d, ${hours}h`
   if (hours > 0) return `${hours}h, ${minutes}m`
   return `${minutes}m`
+}
+
+function isNanoGptSubscriptionInactive(usage: NanoGptSubscriptionUsage) {
+  const state = usage.state?.toLowerCase()
+  return !usage.active || state === 'disabled' || state === 'inactive' || state === 'canceled' || state === 'cancelled'
 }
 
 interface ConnectionItemProps {
@@ -140,12 +146,15 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
   }, [profile.id, onUpdate])
 
   const handleOAuthLogin = useCallback(async () => {
+    const isNanoGptOAuth = profile.provider === 'nanogpt'
     setOauthLoading(true)
     try {
-      const callbackUrl = buildOpenRouterOAuthCallbackUrl()
-      const { auth_url, session_token } = await openrouterApi.initiateAuth(callbackUrl, { connectionId: profile.id })
+      const callbackUrl = isNanoGptOAuth ? buildNanoGptOAuthCallbackUrl() : buildOpenRouterOAuthCallbackUrl()
+      const { auth_url, session_token } = isNanoGptOAuth
+        ? await nanoGptApi.initiateAuth(callbackUrl, { connectionId: profile.id })
+        : await openrouterApi.initiateAuth(callbackUrl, { connectionId: profile.id })
 
-      const popup = window.open(auth_url, 'openrouter_auth', 'width=600,height=700,scrollbars=yes')
+      const popup = window.open(auth_url, isNanoGptOAuth ? 'nanogpt_auth' : 'openrouter_auth', 'width=600,height=700,scrollbars=yes')
 
       let handled = false
       const cleanup = () => {
@@ -158,12 +167,18 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
 
       // Landing page sends us the code via postMessage
       const onMessage = async (event: MessageEvent) => {
-        if (event.data?.type !== 'openrouter_oauth_code' || !event.data.code) return
+        const expectedType = isNanoGptOAuth ? 'nanogpt_oauth_code' : 'openrouter_oauth_code'
+        if (event.data?.type !== expectedType || !event.data.code) return
+        if (isNanoGptOAuth && event.data.state !== session_token) return
         window.removeEventListener('message', onMessage)
         clearInterval(checkClosed)
 
         try {
-          await openrouterApi.completeAuth(session_token, event.data.code)
+          if (isNanoGptOAuth) {
+            await nanoGptApi.completeAuth(session_token, event.data.code)
+          } else {
+            await openrouterApi.completeAuth(session_token, event.data.code)
+          }
           const updated = await connectionsApi.get(profile.id)
           onUpdate(updated)
         } catch (err) {
@@ -187,7 +202,7 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
       console.error('[ConnectionItem] OAuth init failed:', err)
       setOauthLoading(false)
     }
-  }, [profile.id, onUpdate])
+  }, [profile.id, profile.provider, onUpdate])
 
   const boundReasoning = profile.metadata?.reasoningBindings?.settings
   const boundPromptBias = profile.metadata?.reasoningBindings?.promptBias
@@ -203,6 +218,13 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
     ? formatNanoGptCachingSummary(profile.metadata?.nanogpt_caching)
     : null
   const cachingSummary = anthropicCachingSummary ?? nanogptCachingSummary
+  const nanoGptSubscriptionInactive = nanoGptUsage ? isNanoGptSubscriptionInactive(nanoGptUsage) : false
+  const nanoGptUsageRows = nanoGptUsage
+    ? [
+        { key: 'daily', label: t('connectionItem.dailyTokens'), window: nanoGptUsage.dailyInputTokens },
+        { key: 'weekly', label: t('connectionItem.weeklyTokens'), window: nanoGptUsage.weeklyInputTokens },
+      ].filter((entry): entry is typeof entry & { window: NonNullable<typeof entry.window> } => entry.window != null)
+    : []
 
   if (editing) {
     return (
@@ -245,11 +267,13 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
           {isActive && <Check size={14} className={styles.activeCheck} />}
         </button>
         <div className={styles.itemActions}>
-          {isOpenRouter && (
+          {(isOpenRouter || isNanoGpt) && (
             <Button
               size="icon-sm" variant="ghost"
               onClick={handleOAuthLogin}
-              title={profile.has_api_key ? t('connectionItem.reauthorizeOpenRouter') : t('connectionItem.signInOpenRouter')}
+              title={profile.has_api_key
+                ? (isNanoGpt ? t('connectionItem.reauthorizeNanoGpt') : t('connectionItem.reauthorizeOpenRouter'))
+                : (isNanoGpt ? t('connectionItem.signInNanoGpt') : t('connectionItem.signInOpenRouter'))}
               disabled={oauthLoading}
               icon={oauthLoading ? <Spinner size={13} /> : <LogIn size={13} />}
             />
@@ -282,6 +306,12 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
           <span>{t('connectionItem.signInOpenRouterHint')}</span>
         </button>
       )}
+      {isNanoGpt && !profile.has_api_key && !editing && (
+        <button type="button" className={styles.oauthBanner} onClick={handleOAuthLogin} disabled={oauthLoading}>
+          {oauthLoading ? <Spinner size={12} /> : <LogIn size={12} />}
+          <span>{t('connectionItem.signInNanoGptHint')}</span>
+        </button>
+      )}
       {testResult && (
         <div className={clsx(styles.testMessage, testResult.success ? styles.testMessageSuccess : styles.testMessageFail)}>
           {testResult.message}
@@ -312,13 +342,9 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
           </button>
         </div>
       )}
-      {showNanoGptUsage && nanoGptUsage && (nanoGptUsage.dailyInputTokens || nanoGptUsage.weeklyInputTokens) && (
-        [
-          { key: 'daily', label: t('connectionItem.dailyTokens'), window: nanoGptUsage.dailyInputTokens },
-          { key: 'weekly', label: t('connectionItem.weeklyTokens'), window: nanoGptUsage.weeklyInputTokens },
-        ]
-          .filter((entry): entry is typeof entry & { window: NonNullable<typeof entry.window> } => entry.window != null)
-          .map(({ key, label, window: win }, idx) => (
+      {showNanoGptUsage && nanoGptUsage && (nanoGptUsageRows.length > 0 || nanoGptSubscriptionInactive) && (
+        nanoGptUsageRows.length > 0
+          ? nanoGptUsageRows.map(({ key, label, window: win }, idx) => (
             <div key={key} className={clsx(styles.creditsBar, styles.nanoGptUsageBar)}>
               <div className={styles.creditCell}>
                 <span className={styles.creditLabel}>{label}</span>
@@ -333,8 +359,8 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
                 <span className={styles.creditValue}>{formatCompactCount(win.used)}</span>
               </div>
               <div className={styles.creditCell}>
-                <span className={styles.creditLabel}>{t('connectionItem.resetsIn')}</span>
-                <span className={styles.creditValue}>{formatTimeUntil(win.resetAt) || unknownReset}</span>
+                <span className={styles.creditLabel}>{nanoGptSubscriptionInactive ? t('connectionItem.status') : t('connectionItem.resetsIn')}</span>
+                <span className={styles.creditValue}>{nanoGptSubscriptionInactive ? t('connectionItem.inactive') : (formatTimeUntil(win.resetAt) || unknownReset)}</span>
               </div>
               {idx === 0 && (
                 <button type="button" className={styles.creditsRefresh} onClick={refreshNanoGptUsage} disabled={nanoGptUsageLoading}>
@@ -343,6 +369,17 @@ profile, isActive, providers, onSelect, onUpdate, onDuplicate, onDelete }: Conne
               )}
             </div>
           ))
+          : (
+            <div className={clsx(styles.creditsBar, styles.nanoGptUsageBar)}>
+              <div className={styles.creditCell}>
+                <span className={styles.creditLabel}>{t('connectionItem.status')}</span>
+                <span className={styles.creditValue}>{t('connectionItem.inactive')}</span>
+              </div>
+              <button type="button" className={styles.creditsRefresh} onClick={refreshNanoGptUsage} disabled={nanoGptUsageLoading}>
+                {nanoGptUsageLoading ? <Spinner size={10} /> : <RefreshCw size={10} />}
+              </button>
+            </div>
+          )
       )}
     </div>
   )
