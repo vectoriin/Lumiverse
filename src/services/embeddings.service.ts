@@ -256,6 +256,22 @@ export interface PerChatMemoryOverrides {
   exclusionWindow?: number;   // Override exclusion window
 }
 
+const LEGACY_CHAT_MEMORY_HEADER_TEMPLATE = "Relevant context from earlier in this conversation:\n{{memories}}";
+const LEGACY_CHAT_MEMORY_CHUNK_TEMPLATE = "{{content}}";
+
+export const DEFAULT_CHAT_MEMORY_HEADER_TEMPLATE = `Long-term continuity notes from earlier in this conversation.
+These are retrieval results, not live chat history.
+Use them only to preserve continuity.
+Do not quote, continue, imitate, or replay their wording, actions, emotional beats, or dialogue.
+If an event appears complete, treat it as background consequence rather than repeating it.
+
+{{memories}}`;
+
+export const DEFAULT_CHAT_MEMORY_CHUNK_TEMPLATE = `Earlier retrieved context:
+{{content}}
+
+Use only the continuity-relevant facts/state above. Do not reuse its phrasing.`;
+
 export const DEFAULT_CHAT_MEMORY_SETTINGS: ChatMemorySettings = {
   autoWarmup: false,
   chunkTargetTokens: 800,
@@ -267,8 +283,8 @@ export const DEFAULT_CHAT_MEMORY_SETTINGS: ChatMemorySettings = {
   similarityThreshold: 0,
   queryStrategy: "recent_messages",
   queryMaxTokens: 8000,
-  memoryHeaderTemplate: "Relevant context from earlier in this conversation:\n{{memories}}",
-  chunkTemplate: "{{content}}",
+  memoryHeaderTemplate: DEFAULT_CHAT_MEMORY_HEADER_TEMPLATE,
+  chunkTemplate: DEFAULT_CHAT_MEMORY_CHUNK_TEMPLATE,
   chunkSeparator: "\n---\n",
   splitOnSceneBreaks: true,
   splitOnTimeGapMinutes: 0,
@@ -295,8 +311,12 @@ export function normalizeChatMemorySettings(input: any): ChatMemorySettings {
     queryStrategy: ["recent_messages", "last_user_message", "weighted_recent"].includes(input?.queryStrategy)
       ? input.queryStrategy : d.queryStrategy,
     queryMaxTokens: clampInt(input?.queryMaxTokens, 1000, 32000, d.queryMaxTokens),
-    memoryHeaderTemplate: typeof input?.memoryHeaderTemplate === "string" ? input.memoryHeaderTemplate : d.memoryHeaderTemplate,
-    chunkTemplate: typeof input?.chunkTemplate === "string" ? input.chunkTemplate : d.chunkTemplate,
+    memoryHeaderTemplate: typeof input?.memoryHeaderTemplate === "string"
+      ? (input.memoryHeaderTemplate === LEGACY_CHAT_MEMORY_HEADER_TEMPLATE ? d.memoryHeaderTemplate : input.memoryHeaderTemplate)
+      : d.memoryHeaderTemplate,
+    chunkTemplate: typeof input?.chunkTemplate === "string"
+      ? (input.chunkTemplate === LEGACY_CHAT_MEMORY_CHUNK_TEMPLATE ? d.chunkTemplate : input.chunkTemplate)
+      : d.chunkTemplate,
     chunkSeparator: typeof input?.chunkSeparator === "string" ? input.chunkSeparator : d.chunkSeparator,
     splitOnSceneBreaks: input?.splitOnSceneBreaks !== undefined ? !!input.splitOnSceneBreaks : d.splitOnSceneBreaks,
     splitOnTimeGapMinutes: clampInt(input?.splitOnTimeGapMinutes, 0, 1440, d.splitOnTimeGapMinutes),

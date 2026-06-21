@@ -3056,7 +3056,7 @@ function AdvancedSettings() {
                 <label className={styles.fieldLabel}>{t('advanced.headerTemplate')}</label>
                 <textarea
                   className={styles.textarea}
-                  rows={2}
+                  rows={7}
                   value={cfg.memoryHeaderTemplate}
                   onChange={(e) => update({ memoryHeaderTemplate: e.target.value })}
                 />
@@ -3065,8 +3065,9 @@ function AdvancedSettings() {
               <div className={styles.drawerRow}>
                 <div className={styles.field}>
                   <label className={styles.fieldLabel}>{t('advanced.chunkTemplate')}</label>
-                  <input
-                    className={styles.select}
+                  <textarea
+                    className={styles.textarea}
+                    rows={4}
                     value={cfg.chunkTemplate}
                     onChange={(e) => update({ chunkTemplate: e.target.value })}
                   />
