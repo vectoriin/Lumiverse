@@ -152,7 +152,10 @@ function filterSealedBlockKeyInput(value: string) {
 }
 
 function suggestedSealedBlockKey(block: PromptBlock, name: string) {
-  return sanitizeSealedBlockKey(name || block.name || block.id) || block.id
+  const fromTitle = (name || block.name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+  return fromTitle || sanitizeSealedBlockKey(block.id).toLowerCase() || block.id.toLowerCase()
 }
 
 function inferGroupAtIndex(blocks: PromptBlock[], index: number) {
