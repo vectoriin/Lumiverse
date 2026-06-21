@@ -160,6 +160,35 @@ describe("buildEnv persona pronouns", () => {
   });
 });
 
+describe("buildEnv rejected swipe", () => {
+  test("defaults rejectedSwipe to empty", () => {
+    const env = buildEnv({
+      character: baseCharacter,
+      persona: null,
+      chat: baseChat,
+      messages: [],
+      generationType: "normal",
+      connection: null,
+    });
+
+    expect(env.chat.rejectedSwipe).toBe("");
+  });
+
+  test("threads rejectedSwipe into chat macro state", () => {
+    const env = buildEnv({
+      character: baseCharacter,
+      persona: null,
+      chat: baseChat,
+      messages: [],
+      generationType: "regenerate",
+      connection: null,
+      rejectedSwipe: "Yes I am!",
+    });
+
+    expect(env.chat.rejectedSwipe).toBe("Yes I am!");
+  });
+});
+
 describe("buildEnv groupCardMode", () => {
   test("returns 'solo' for non-group chats regardless of metadata", () => {
     const env = buildEnv({

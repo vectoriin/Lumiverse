@@ -439,6 +439,7 @@ Macros for the current chat state.
 | `{{firstDisplayedMessageId}}` | — | Index of the first displayed message |
 | `{{lastSwipeId}}` | — | Index of the last swipe on the final message |
 | `{{currentSwipeId}}` | — | Index of the active swipe |
+| `{{rejectedSwipe}}` | `{{rejectedGeneration}}`, `{{regeneratedMessage}}` | Content of the regenerate/swipe target before the new swipe was staged; empty otherwise |
 
 ---
 

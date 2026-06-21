@@ -50,6 +50,7 @@ function makeEnv(): MacroEnv {
       firstIncludedMessageId: -1,
       lastSwipeId: 0,
       currentSwipeId: 0,
+      rejectedSwipe: "",
     },
     system: {
       model: "",

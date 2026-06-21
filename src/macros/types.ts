@@ -185,6 +185,7 @@ export interface MacroEnv {
     firstIncludedMessageId: number;
     lastSwipeId: number;
     currentSwipeId: number;
+    rejectedSwipe: string;
   };
   system: {
     model: string;

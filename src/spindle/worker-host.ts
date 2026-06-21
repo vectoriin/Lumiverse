@@ -10484,7 +10484,7 @@ export class WorkerHost {
           },
           chat: {
             id: "", messageCount: 0, lastMessage: "", lastMessageName: "", lastUserMessage: "",
-            lastCharMessage: "", lastMessageId: -1, firstIncludedMessageId: -1, lastSwipeId: 0, currentSwipeId: 0,
+            lastCharMessage: "", lastMessageId: -1, firstIncludedMessageId: -1, lastSwipeId: 0, currentSwipeId: 0, rejectedSwipe: "",
           },
           system: {
             model: connection?.model || "", maxPrompt: 0, maxContext: 0, maxResponse: 0,

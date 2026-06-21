@@ -1688,6 +1688,7 @@ export async function assemblePrompt(
     messages,
     generationType: ctx.generationType,
     connection,
+    rejectedSwipe: ctx.rejectedSwipe,
     groupCharacterNames,
     groupNotMutedNames,
     targetCharacterId: ctx.targetCharacterId,

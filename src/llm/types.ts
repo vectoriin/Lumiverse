@@ -222,6 +222,8 @@ export interface AssemblyContext {
   impersonateInput?: string;
   /** For regenerate: exclude this message from chat history (it has a blank swipe). */
   excludeMessageId?: string;
+  /** For regenerate/swipe: content of the active target swipe before it was replaced. */
+  rejectedSwipe?: string;
   /** For group chats: generate a response as this specific character. */
   targetCharacterId?: string;
   /** Council tool results (passed from generate.service when council executes before assembly). */

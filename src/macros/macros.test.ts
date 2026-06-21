@@ -17,6 +17,7 @@ function makeEnv(opts: {
   characterTags?: string[];
   chatCreatedAt?: number;
   worldInfoOutlets?: Record<string, string>;
+  rejectedSwipe?: string;
   multiplayer?: {
     playerCount: number;
     playerNames: string[];
@@ -71,6 +72,7 @@ function makeEnv(opts: {
       firstIncludedMessageId: 0,
       lastSwipeId: 0,
       currentSwipeId: 0,
+      rejectedSwipe: opts.rejectedSwipe ?? "",
     },
     system: {
       model: "gpt-4",
@@ -596,6 +598,13 @@ describe("Chat macros", () => {
 
   test("chatId", async () => {
     expect(await ev("{{chatId}}")).toBe("chat-123");
+  });
+
+  test("rejectedSwipe exposes the regenerate target content", async () => {
+    const env = makeEnv({ rejectedSwipe: "Yes I am!" });
+    expect(await ev("{{rejectedSwipe}}", env)).toBe("Yes I am!");
+    expect(await ev("{{rejectedGeneration}}", env)).toBe("Yes I am!");
+    expect(await ev("{{regeneratedMessage}}", env)).toBe("Yes I am!");
   });
 });
 

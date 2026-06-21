@@ -138,6 +138,7 @@ A snapshot of all data is taken and stored in the macro environment. This is the
 - `{{description}}`, `{{personality}}`, `{{scenario}}` — Character fields (with alternates applied)
 - `{{persona}}` — Persona description with enabled add-ons appended
 - `{{lastMessage}}`, `{{messageCount}}` — Chat state at this moment
+- `{{rejectedSwipe}}` — On regenerate/swipe, the target response content captured before the new swipe is staged; otherwise empty
 - `{{model}}`, `{{maxContext}}` — Connection/model info
 - Prompt Variables — End-user configured inputs are seeded into the local variable scope
 - Variables — Local and global variable maps are loaded

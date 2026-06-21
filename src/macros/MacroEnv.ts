@@ -28,6 +28,8 @@ export interface BuildEnvContext {
   targetCharacterName?: string;
   /** Optional abort signal — threaded onto MacroEnv so the evaluator can cancel between iterations. */
   signal?: AbortSignal;
+  /** Content of the regenerate/swipe target before the new swipe was staged. */
+  rejectedSwipe?: string;
 }
 
 export function resolvePersonaPronouns(persona: Persona | null): {
@@ -114,6 +116,7 @@ export function buildEnv(ctx: BuildEnvContext): MacroEnv {
       firstIncludedMessageId: messages.length > 0 ? 0 : -1,
       lastSwipeId: lastMsg?.swipes ? lastMsg.swipes.length - 1 : 0,
       currentSwipeId: lastMsg?.swipe_id ?? 0,
+      rejectedSwipe: ctx.rejectedSwipe ?? "",
     },
     system: {
       model: connection?.model || "",

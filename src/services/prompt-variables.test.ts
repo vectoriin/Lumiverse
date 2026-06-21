@@ -33,7 +33,7 @@ function makeEnv(overrides: {
     chat: {
       id: "x", messageCount: 0, lastMessage: "", lastMessageName: "",
       lastUserMessage: "", lastCharMessage: "", lastMessageId: 0,
-      firstIncludedMessageId: 0, lastSwipeId: 0, currentSwipeId: 0,
+      firstIncludedMessageId: 0, lastSwipeId: 0, currentSwipeId: 0, rejectedSwipe: "",
     },
     system: {
       model: "test", maxPrompt: 0, maxContext: 0, maxResponse: 0,

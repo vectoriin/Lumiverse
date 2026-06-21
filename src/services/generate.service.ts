@@ -1056,6 +1056,7 @@ async function runPromptPipeline(opts: {
   inputMessages?: LlmMessage[];
   inputParameters?: GenerationParameters;
   excludeMessageId?: string;
+  rejectedSwipe?: string;
   targetCharacterId?: string;
   councilToolResults?: any[];
   councilNamedResults?: Record<string, string>;
@@ -1123,6 +1124,7 @@ async function runPromptPipeline(opts: {
       impersonateMode: opts.impersonateMode,
       impersonateInput: opts.impersonateInput,
       excludeMessageId: opts.excludeMessageId,
+      rejectedSwipe: opts.rejectedSwipe,
       targetCharacterId: opts.targetCharacterId,
       councilToolResults: opts.councilToolResults,
       councilNamedResults: opts.councilNamedResults,
@@ -1675,6 +1677,7 @@ export async function startGeneration(
     }
 
     let excludeMessageId: string | undefined;
+    let rejectedSwipe: string | undefined;
     // Index of the swipe this generation streams into. Sent to the frontend so
     // it can gate the streaming buffer to the correct swipe — letting the user
     // navigate to other (already-saved) swipes mid-generation without smearing
@@ -1687,6 +1690,7 @@ export async function startGeneration(
       if (targetMsg) {
         lifecycle.targetMessageId = targetMsg.id;
         excludeMessageId = targetMsg.id;
+        rejectedSwipe = targetMsg.content;
         // Add a blank swipe immediately so the frontend shows cleared content
         // before council/assembly begins (MESSAGE_SWIPED event fires now).
         const withBlank = chatsSvc.addSwipe(input.userId, targetMsg.id, "");
@@ -2424,6 +2428,7 @@ export async function startGeneration(
             inputMessages: input.messages,
             inputParameters: input.parameters,
             excludeMessageId,
+            rejectedSwipe,
             targetCharacterId: pipelineTargetCharId,
             councilToolResults,
             councilNamedResults,

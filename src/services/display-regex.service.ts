@@ -161,6 +161,7 @@ function buildEnvFromContext(userId: string, ctx: DisplayRegexContext): MacroEnv
       firstIncludedMessageId: -1,
       lastSwipeId: 0,
       currentSwipeId: 0,
+      rejectedSwipe: "",
     },
     system: {
       model: connection?.model || "",
