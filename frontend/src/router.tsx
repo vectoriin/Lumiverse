@@ -1,4 +1,4 @@
-import { createBrowserRouter, createMemoryRouter } from 'react-router'
+import { createBrowserRouter } from 'react-router'
 import App from './App'
 import LandingPage from './components/landing/LandingPage'
 import ChatView from './components/chat/ChatView'
@@ -28,13 +28,4 @@ const routes = [
   },
 ]
 
-const isStandalone =
-  window.matchMedia('(display-mode: standalone)').matches ||
-  window.matchMedia('(display-mode: window-controls-overlay)').matches ||
-  (window.navigator as any).standalone === true
-
-const initialEntry = `${window.location.pathname}${window.location.search}${window.location.hash}`
-
-export const router = isStandalone
-  ? createMemoryRouter(routes, { initialEntries: [initialEntry] })
-  : createBrowserRouter(routes)
+export const router = createBrowserRouter(routes)
