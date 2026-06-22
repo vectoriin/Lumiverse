@@ -11,9 +11,7 @@ import { parseOOC, type OOCBlock } from '@/lib/oocParser'
 import MessageCard from './MessageCard'
 import GroupChatProgressBar from './GroupChatProgressBar'
 import GroupChatMemberBar from './GroupChatMemberBar'
-import { VirtualizerViewportProvider } from './VirtualizerViewportContext'
-import { LAZY_CONTENT_LOADING_EVENT } from '@/components/shared/LazyImage'
-import type { Message, MessageAttachment } from '@/types/api'
+import type { Message } from '@/types/api'
 import type { OOCStyleType } from '@/types/store'
 import styles from './MessageList.module.css'
 
@@ -87,34 +85,6 @@ function getElementLayoutHeight(element: Element) {
   // getBoundingClientRect() is affected by body-level CSS zoom; virtualizer
   // coordinates are not, so normalize the rare rect fallback to layout pixels.
   return element.getBoundingClientRect().height / getUiScale()
-}
-
-/**
- * Compute a realistic media contribution for a single image attachment using
- * the backend-recorded dimensions. Falls back to a conservative default when
- * dimensions are missing. Keeping the initial estimate close to the final
- * measured height means the virtualizer doesn't have to rebalance scroll
- * position after a lazy image decodes.
- */
-function estimateImageHeight(att: MessageAttachment, maxSize: number): number {
-  if (att.width && att.height) {
-    const scale = Math.min(1, maxSize / att.width, maxSize / att.height)
-    return Math.max(1, Math.round(att.height * scale))
-  }
-  // Unknown dimensions: assume the 4/3 placeholder frame used by
-  // MessageAttachments so the estimate matches the reserved layout.
-  return Math.round(maxSize * 0.75)
-}
-
-function estimateMediaHeight(attachments: MessageAttachment[] | undefined, isPhoneWidth: boolean, isCompactWidth: boolean): number {
-  if (!attachments || attachments.length === 0) return 0
-  const maxSize = isPhoneWidth ? 180 : isCompactWidth ? 220 : 240
-  let total = 0
-  for (const att of attachments) {
-    if (att.type !== 'image') continue
-    total += estimateImageHeight(att, maxSize)
-  }
-  return total
 }
 
 function hashString(value: string) {
@@ -452,9 +422,8 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     const wrappedLines = Math.ceil(proseContent.length / charsPerLine)
     const lineCount = proseContent.length > 0 ? Math.max(1, explicitLines, wrappedLines) : 0
     const codeBlockCount = (proseContent.match(/```/g)?.length ?? 0) / 2
-    const attachments = message.extra?.attachments
-    const imageCount = attachments?.filter((a) => a.type === 'image').length ?? 0
-    const audioCount = attachments?.filter((a) => a.type === 'audio').length ?? 0
+    const imageCount = message.extra?.attachments?.filter((a) => a.type === 'image').length ?? 0
+    const audioCount = message.extra?.attachments?.filter((a) => a.type === 'audio').length ?? 0
     const inlineStyleCount = proseContent.match(/\bstyle\s*=/gi)?.length ?? 0
     const htmlBlockCount = proseContent.match(/<(div|section|article|aside|nav|main|header|footer|form|fieldset|figure|details|table|tr|td|th|iframe|svg|video|audio)\b/gi)?.length ?? 0
     const hasStyledHtml = /<style[\s>]|\bstyle\s*=|<(div|section|article|aside|nav|main|header|footer|form|fieldset|figure|details|table|iframe|svg|video|audio)\b/i.test(proseContent)
@@ -463,7 +432,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     const hasExtensionTags = customTagCount > 0 || selfClosingCustomTagCount > 0
     const base = isBubble ? (isPhoneWidth ? 88 : isCompactWidth ? 96 : 104) : 76
     const lineHeight = 23
-    const mediaHeight = estimateMediaHeight(attachments, isPhoneWidth, isCompactWidth)
+    const mediaHeight = imageCount > 0 ? (isPhoneWidth ? 190 : isCompactWidth ? 220 : 250) : 0
     const audioHeight = audioCount * 58
     const codeHeight = codeBlockCount * 44
     const htmlBoost = hasStyledHtml
@@ -634,25 +603,6 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   }, [rowVirtualizer])
 
   const virtualItems = rowVirtualizer.getVirtualItems()
-
-  // The ids of messages whose rows are currently mounted in the virtualizer
-  // range. Sub-components use this to decide whether to load lazy media
-  // eagerly (visible) or defer it (offscreen).
-  const visibleMessageIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const item of virtualItems) {
-      const listItem = virtualListItems[item.index]
-      if (listItem?.type === 'message') {
-        ids.add(listItem.message.id)
-      }
-    }
-    return ids
-  }, [virtualItems, virtualListItems])
-
-  const viewportContextValue = useMemo(
-    () => ({ visibleMessageIds }),
-    [visibleMessageIds],
-  )
 
   // Gate that keeps the keyboard/safe-zone repin from fighting the unified
   // scroll guard while streaming is active.
@@ -1172,31 +1122,12 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     }
 
     el.addEventListener(MESSAGE_CONTENT_LAYOUT_EVENT, handleMessageContentLayout)
-
-    // When a lazy image or audio slot starts inflating while the user is
-    // scrolled up reading older messages, capture a reflow anchor and keep
-    // the viewport pinned to it until the content settles. Without this the
-    // row growing below the viewport can push the user's reading position.
-    const handleLazyContentLoading = () => {
-      if (isPinnedRef.current) return
-      if (streamEndSettleUntilRef.current !== 0) return
-      if (pendingRaf) return
-      pendingRaf = requestAnimationFrame(() => {
-        pendingRaf = 0
-        streamEndSettleUntilRef.current = performance.now() + STREAM_END_SETTLE_MS
-        captureReflowAnchor()
-        runSettleLoop()
-      })
-    }
-    el.addEventListener(LAZY_CONTENT_LOADING_EVENT, handleLazyContentLoading)
-
     return () => {
       el.removeEventListener(MESSAGE_CONTENT_LAYOUT_EVENT, handleMessageContentLayout)
-      el.removeEventListener(LAZY_CONTENT_LOADING_EVENT, handleLazyContentLoading)
       if (pendingRaf) cancelAnimationFrame(pendingRaf)
       if (settleRaf) cancelAnimationFrame(settleRaf)
     }
-  }, [pinToBottomIfNeeded, measureMountedRows, recoverTailVoid, captureReflowAnchor, runSettleLoop])
+  }, [pinToBottomIfNeeded, measureMountedRows, recoverTailVoid])
 
   return (
     <div
@@ -1213,73 +1144,71 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       data-group-chat={isGroupChat || undefined}
     >
       {isGroupChat && <GroupChatMemberBar chatId={chatId} />}
-      <VirtualizerViewportProvider value={viewportContextValue}>
-        <div
-          className={styles.virtualSpace}
-          style={{ height: rowVirtualizer.getTotalSize() }}
-        >
-          {virtualItems.map((virtualRow) => {
-            const item = virtualListItems[virtualRow.index]
-            if (!item) return null
+      <div
+        className={styles.virtualSpace}
+        style={{ height: rowVirtualizer.getTotalSize() }}
+      >
+        {virtualItems.map((virtualRow) => {
+          const item = virtualListItems[virtualRow.index]
+          if (!item) return null
 
-            let content: ReactNode = null
-            let messageId: string | undefined
-            let messageIndex: number | undefined
-            let measureKey: string | undefined
+          let content: ReactNode = null
+          let messageId: string | undefined
+          let messageIndex: number | undefined
+          let measureKey: string | undefined
 
-            switch (item.type) {
-              case 'loadingOlder':
-                content = <div className={styles.loadingOlder}>{t('messageList.loadingOlder')}</div>
-                break
-              case 'message':
-                messageId = item.message.id
-                messageIndex = item.messageIndex
-                measureKey = item.measureKey
-                content = (
-                  <MessageCard
-                    message={item.message}
-                    chatId={chatId}
-                    depth={visibleMessages.length - 1 - item.messageIndex}
-                  />
-                )
-                break
-              case 'progressBar':
-                content = <GroupChatProgressBar />
-                break
-              case 'error':
-                content = (
-                  <div className={styles.errorBubble}>
-                    <span className={styles.errorLabel}>{t('messageList.generationFailed')}</span> {item.error}
-                  </div>
-                )
-                break
-              case 'messageFooter':
-                content = <div data-spindle-mount="message_footer" />
-                break
-              case 'bottom':
-                content = <div ref={bottomRef} />
-                break
-            }
+          switch (item.type) {
+            case 'loadingOlder':
+              content = <div className={styles.loadingOlder}>{t('messageList.loadingOlder')}</div>
+              break
+            case 'message':
+              messageId = item.message.id
+              messageIndex = item.messageIndex
+              measureKey = item.measureKey
+              content = (
+                <MessageCard
+                  message={item.message}
+                  chatId={chatId}
+                  depth={visibleMessages.length - 1 - item.messageIndex}
+                />
+              )
+              break
+            case 'progressBar':
+              content = <GroupChatProgressBar />
+              break
+            case 'error':
+              content = (
+                <div className={styles.errorBubble}>
+                  <span className={styles.errorLabel}>{t('messageList.generationFailed')}</span> {item.error}
+                </div>
+              )
+              break
+            case 'messageFooter':
+              content = <div data-spindle-mount="message_footer" />
+              break
+            case 'bottom':
+              content = <div ref={bottomRef} />
+              break
+          }
 
-            return (
-              <VirtualRow
-                key={virtualRow.key}
-                virtualIndex={virtualRow.index}
-                itemType={item.type}
-                messageIndex={messageIndex}
-                messageId={messageId}
-                measureKey={measureKey}
-                start={virtualRow.start}
-                visualOffset={prependVisualOffset}
-                styleMode={styleMode}
-                measureElement={rowVirtualizer.measureElement}
-              >
-                {content}
-              </VirtualRow>
-            )
-          })}
-        </div>
-      </VirtualizerViewportProvider>
+          return (
+            <VirtualRow
+              key={virtualRow.key}
+              virtualIndex={virtualRow.index}
+              itemType={item.type}
+              messageIndex={messageIndex}
+              messageId={messageId}
+              measureKey={measureKey}
+              start={virtualRow.start}
+              visualOffset={prependVisualOffset}
+              styleMode={styleMode}
+              measureElement={rowVirtualizer.measureElement}
+            >
+              {content}
+            </VirtualRow>
+          )
+        })}
+      </div>
     </div>
   )
 }
