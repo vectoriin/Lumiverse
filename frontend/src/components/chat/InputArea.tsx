@@ -40,6 +40,7 @@ interface InputAreaProps {
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
 const TEXTAREA_MAX_HEIGHT = 180
 const STT_VISUALIZER_BARS = 18
+const LIVE_GENERATION_HEAD_STATUSES = new Set(['assembling', 'council', 'waiting', 'reasoning', 'streaming'])
 const STT_IDLE_BARS = Array.from({ length: STT_VISUALIZER_BARS }, (_, index) => {
   const centerBias = 1 - Math.abs(index - ((STT_VISUALIZER_BARS - 1) / 2)) / (STT_VISUALIZER_BARS / 2)
   return 0.12 + centerBias * 0.22
@@ -228,7 +229,15 @@ export default function InputArea({ chatId }: InputAreaProps) {
   const editingMessageId = useStore((s) => s.editingMessageId)
   const isMobile = useIsMobile()
   const hideForMobileEdit = isMobile && !!editingMessageId
+  const activeChatId = useStore((s) => s.activeChatId)
   const activeGenerationId = useStore((s) => s.activeGenerationId)
+  const liveChatGenerationId = useStore((s) =>
+    s.chatHeads.find((head) =>
+      head.chatId === chatId &&
+      !head.generationId.startsWith('mp-room:') &&
+      LIVE_GENERATION_HEAD_STATUSES.has(head.status)
+    )?.generationId ?? null
+  )
   const activeCharacterId = useStore((s) => s.activeCharacterId)
   const enterToSend = useStore((s) => s.chatSheldEnterToSend)
   const saveDraftInput = useStore((s) => s.saveDraftInput)
@@ -274,6 +283,9 @@ export default function InputArea({ chatId }: InputAreaProps) {
   const setImpersonateDraftContent = useStore((s) => s.setImpersonateDraftContent)
   const streamingContent = useStore((s) => s.streamingContent)
   const streamingGenerationType = useStore((s) => s.streamingGenerationType)
+  const localGenerationInChat = isStreaming && activeChatId === chatId
+  const isGeneratingInChat = !!liveChatGenerationId || localGenerationInChat
+  const generationIdForChat = liveChatGenerationId || (localGenerationInChat ? activeGenerationId : null)
 
   // Track whether the active character has expressions configured
   const [hasExpressions, setHasExpressions] = useState(false)
@@ -979,19 +991,19 @@ export default function InputArea({ chatId }: InputAreaProps) {
   useEffect(() => {
     const handleEscape = (e: globalThis.KeyboardEvent) => {
       // Peers can't stop the host's generation — ignore Escape for them.
-      if (e.key === 'Escape' && isStreaming && !isRoomPeer) {
+      if (e.key === 'Escape' && isGeneratingInChat && !isRoomPeer) {
         e.preventDefault()
         e.stopPropagation()
-        generateApi.stop(activeGenerationId || undefined, chatId).catch(console.error)
+        generateApi.stop(generationIdForChat || undefined, chatId).catch(console.error)
         // If in optimistic phase, revert locally
-        if (!activeGenerationId) {
+        if (localGenerationInChat && !activeGenerationId) {
           stopStreaming()
         }
       }
     }
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
-  }, [isStreaming, activeGenerationId, chatId, stopStreaming, isRoomPeer])
+  }, [isGeneratingInChat, generationIdForChat, localGenerationInChat, activeGenerationId, chatId, stopStreaming, isRoomPeer])
 
   useEffect(() => {
     if (openPopover !== 'persona') return
@@ -1170,7 +1182,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
   }, [text, chatId, saveDraftInput, resizeTextarea])
 
   const handleQueueMessage = useCallback(async () => {
-    if (sendingRef.current || isStreaming) return
+    if (sendingRef.current || isGeneratingInChat) return
     // In a room, queueing IS sending — gate by turn/window + route through the
     // host (peers can't write to the chat directly).
     if (attemptRoomSend() !== 'local') return
@@ -1216,10 +1228,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
     } finally {
       sendingRef.current = false
     }
-  }, [text, chatId, isStreaming, isTemporaryChat, activePersonaId, personas, sendPersonaId, pendingAttachments, addMessage, saveDraftInput, resizeTextarea, attemptRoomSend])
+  }, [text, chatId, isGeneratingInChat, isTemporaryChat, activePersonaId, personas, sendPersonaId, pendingAttachments, addMessage, saveDraftInput, resizeTextarea, attemptRoomSend])
 
   const handleSend = useCallback(async () => {
-    if (sendingRef.current || isStreaming) return
+    if (sendingRef.current || isGeneratingInChat) return
 
     // Multiplayer: route through the room (turn/window-gated) unless we're the
     // host in round-robin, who sends locally on their own chat.
@@ -1356,7 +1368,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     } finally {
       sendingRef.current = false
     }
-  }, [text, chatId, isStreaming, isTemporaryChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, personas, sendPersonaId, pendingAttachments, addMessage, startStreaming, setStreamingError, consumeOneshotGuides, saveDraftInput, hasQueuedMessages, isGroupChat, groupCharacterIds, mutedCharacterIds, characters, setMentionQueue, resizeTextarea, attemptRoomSend])
+  }, [text, chatId, isGeneratingInChat, isTemporaryChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, personas, sendPersonaId, pendingAttachments, addMessage, startStreaming, setStreamingError, consumeOneshotGuides, saveDraftInput, hasQueuedMessages, isGroupChat, groupCharacterIds, mutedCharacterIds, characters, setMentionQueue, resizeTextarea, attemptRoomSend])
 
   const finalizeSTTTranscript = useCallback(() => {
     const transcript = sttNormalizedFinalSegmentsRef.current.join(' ').trim()
@@ -1398,7 +1410,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
   }, [text, handleQueueMessage, handleSend])
 
   const doRegenerate = useCallback(async (feedback?: string | null) => {
-    if (isStreaming) return
+    if (isGeneratingInChat) return
     const nonce = ++generationNonceRef.current
 
     // 1. Delete the last assistant message (if after the latest user turn)
@@ -1472,10 +1484,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
       setStreamingError(msg)
       toast.error(msg, { title: t('toast.regenerationFailed') })
     }
-  }, [chatId, isStreaming, messages, isGroupChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, regenFeedback.position, retainCouncilForRegens, addMessage, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides])
+  }, [chatId, isGeneratingInChat, messages, isGroupChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, regenFeedback.position, retainCouncilForRegens, addMessage, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides])
 
   const handleRegenerate = useCallback(() => {
-    if (isStreaming) return
+    if (isGeneratingInChat) return
     if (regenFeedback.enabled) {
       openModal('regenFeedback', {
         onSubmit: (feedback: string) => doRegenerate(feedback),
@@ -1484,10 +1496,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
     } else {
       doRegenerate()
     }
-  }, [isStreaming, regenFeedback.enabled, openModal, doRegenerate])
+  }, [isGeneratingInChat, regenFeedback.enabled, openModal, doRegenerate])
 
   const handleContinue = useCallback(async () => {
-    if (isStreaming) return
+    if (isGeneratingInChat) return
     const nonce = ++generationNonceRef.current
     beginStreaming(undefined, 'continue')
     try {
@@ -1516,10 +1528,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
       setStreamingError(msg)
       toast.error(msg, { title: t('toast.continueFailed') })
     }
-  }, [chatId, isStreaming, messages, isGroupChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, retainCouncilForRegens, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides])
+  }, [chatId, isGeneratingInChat, messages, isGroupChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, retainCouncilForRegens, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides])
 
   const handleImpersonate = useCallback(async (mode: import('@/api/generate').ImpersonateMode) => {
-    if (isStreaming) return
+    if (isGeneratingInChat) return
     const nonce = ++generationNonceRef.current
     const impersonateInput = text.trim()
     beginStreaming(undefined, 'impersonate_draft')
@@ -1555,25 +1567,25 @@ export default function InputArea({ chatId }: InputAreaProps) {
       setStreamingError(msg)
       toast.error(msg, { title: t('toast.impersonationFailed') })
     }
-  }, [chatId, isStreaming, text, activeProfileId, activePersonaId, activeGenerationAddonStates, impersonationPresetId, getActivePresetForGeneration, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides, resizeTextarea])
+  }, [chatId, isGeneratingInChat, text, activeProfileId, activePersonaId, activeGenerationAddonStates, impersonationPresetId, getActivePresetForGeneration, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides, resizeTextarea])
 
   const handleStop = useCallback(async () => {
-    if (!isStreaming) return
+    if (!isGeneratingInChat) return
     // Peers don't own the host's generation — stopping is the host's to do.
     if (isRoomPeer) return
     try {
       // Stop the specific generation when we know its ID; the chat id lets the
       // backend fall back to the chat's active generation if the ID is stale
       // (or, in the optimistic phase, not yet known).
-      await generateApi.stop(activeGenerationId || undefined, chatId)
+      await generateApi.stop(generationIdForChat || undefined, chatId)
     } catch (err) {
       console.error('[InputArea] Failed to stop:', err)
     }
     // If we're in the optimistic phase (no WS events yet), revert locally
-    if (!activeGenerationId) {
+    if (localGenerationInChat && !activeGenerationId) {
       stopStreaming()
     }
-  }, [isStreaming, activeGenerationId, chatId, stopStreaming, isRoomPeer])
+  }, [isGeneratingInChat, generationIdForChat, localGenerationInChat, activeGenerationId, chatId, stopStreaming, isRoomPeer])
 
   const handleNewChat = useCallback(async () => {
     // For group chats, open group creator pre-populated with current members
@@ -1657,7 +1669,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
   }, [chatId, activeCharacterId, isGroupChat, navigate, openModal])
 
   const handleDryRun = useCallback(async () => {
-    if (dryRunning || isStreaming) return
+    if (dryRunning || isGeneratingInChat) return
     const presetId = getActivePresetForGeneration()
     if (!presetId) {
       toast.warning(t('toast.noPresetForDryRun'))
@@ -1681,10 +1693,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
     } finally {
       setDryRunning(false)
     }
-  }, [chatId, dryRunning, isStreaming, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, openModal, setStreamingError])
+  }, [chatId, dryRunning, isGeneratingInChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, openModal, setStreamingError])
 
   const handleResolveMacros = useCallback(async () => {
-    if (resolvingMacros || isStreaming) return
+    if (resolvingMacros) return
     const template = text.trim()
     if (!template) {
       toast.info(t('toast.nothingToResolve'))
@@ -1718,7 +1730,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
     } finally {
       setResolvingMacros(false)
     }
-  }, [text, chatId, resolvingMacros, isStreaming, activeCharacterId, activePersonaId, activeProfileId, queueTextareaSelection])
+  }, [text, chatId, resolvingMacros, activeCharacterId, activePersonaId, activeProfileId, queueTextareaSelection])
 
   const handleHashSelect = useCallback((result: { slug: string; name: string }) => {
     const before = text.slice(0, hashStartIndex)
@@ -1874,8 +1886,6 @@ export default function InputArea({ chatId }: InputAreaProps) {
   }, [runAutocompleteDetection])
 
   const handleSTTToggle = useCallback(async () => {
-    if (isStreaming) return
-
     if (isListeningToSTT) {
       setSttStatus('processing')
       stopSTTSession('stop')
@@ -1966,14 +1976,14 @@ export default function InputArea({ chatId }: InputAreaProps) {
       setSttStatus('idle')
       toast.error(err?.message || t('toast.sttFailed'), { title: t('toast.sttFailed') })
     }
-  }, [isStreaming, isListeningToSTT, isSTTSupported, voiceSettings, text, openModal, applySTTTranscript, stopSTTSession, finalizeSTTTranscript])
+  }, [isListeningToSTT, isSTTSupported, voiceSettings, text, openModal, applySTTTranscript, stopSTTSession, finalizeSTTTranscript])
 
   useEffect(() => {
-    if (isStreaming && isListeningToSTT) {
+    if (isGeneratingInChat && isListeningToSTT) {
       stopSTTSession('destroy')
       setSttStatus('idle')
     }
-  }, [isStreaming, isListeningToSTT, stopSTTSession])
+  }, [isGeneratingInChat, isListeningToSTT, stopSTTSession])
 
   useEffect(() => {
     if (!isListeningToSTT) return
@@ -2096,131 +2106,126 @@ export default function InputArea({ chatId }: InputAreaProps) {
         onClose={() => setAuthorsNoteOpen(false)}
       />
 
-      {/* Action bar — home button always visible, rest hidden during streaming */}
+      {/* Action bar */}
       <div data-spindle-mount="chat_toolbar">
-        {isStreaming && (
-          <div className={styles.actionBar}>
-            <button type="button" className={styles.actionBtn} onClick={() => navigate('/')} title={t('input.backHome')}>
-              <Home size={14} />
-            </button>
-          </div>
-        )}
-        {!isStreaming && (
-          <div className={styles.actionBar}>
-            <button type="button" className={styles.actionBtn} onClick={() => navigate('/')} title={t('input.backHome')}>
-              <Home size={14} />
-            </button>
-            <span className={styles.actionDivider} />
-            <button type="button" className={styles.actionBtn} onClick={handleRegenerate} title={t('input.regenerate')}>
-              <RotateCw size={14} />
-            </button>
-            <button type="button" className={styles.actionBtn} onClick={handleContinue} title={t('input.continue')}>
-              <CornerDownLeft size={14} />
-            </button>
-            <button
-              type="button"
-              className={clsx(styles.actionBtn, openPopover === 'persona' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'persona' ? null : 'persona'))}
-              title={t('input.sendAsPersona')}
-            >
-              <UserCircle size={14} />
-              {sendPersonaId && <span className={styles.badge}>1</span>}
-            </button>
-            <button
-              type="button"
-              className={clsx(styles.actionBtn, openPopover === 'connections' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'connections' ? null : 'connections'))}
-              title={activeProfile ? t('input.switchConnectionActive', { name: activeProfile.name }) : t('input.switchConnection')}
-            >
-              <Link2 size={14} />
-            </button>
-            {hasAltFields && (() => {
-              const selectionCount = activeAltSelectionCount
-              const hasSelection = selectionCount > 0
-              const titleParts: string[] = []
-              if (isGroupChat) {
-                for (const { char, altFields } of groupMembersWithAltFields) {
-                  const selections = groupAltFieldSelections[char.id] || {}
-                  const labels = Object.entries(selections)
-                    .map(([field, variantId]) => altFields[field]?.find((v) => v.id === variantId)?.label)
-                    .filter(Boolean)
-                  if (labels.length > 0) titleParts.push(`${char.name}: ${labels.join(', ')}`)
-                }
-              } else {
-                for (const [field, variantId] of Object.entries(altFieldSelections)) {
-                  const variant = altFieldsData[field]?.find((v) => v.id === variantId)
-                  if (variant) titleParts.push(`${field}: ${variant.label}`)
-                }
+        <div className={styles.actionBar}>
+          <button type="button" className={styles.actionBtn} onClick={() => navigate('/')} title={t('input.backHome')}>
+            <Home size={14} />
+          </button>
+          <span className={styles.actionDivider} />
+          {!isGeneratingInChat && (
+            <>
+              <button type="button" className={styles.actionBtn} onClick={handleRegenerate} title={t('input.regenerate')}>
+                <RotateCw size={14} />
+              </button>
+              <button type="button" className={styles.actionBtn} onClick={handleContinue} title={t('input.continue')}>
+                <CornerDownLeft size={14} />
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className={clsx(styles.actionBtn, openPopover === 'persona' && styles.actionBtnActive)}
+            onClick={() => setOpenPopover((p) => (p === 'persona' ? null : 'persona'))}
+            title={t('input.sendAsPersona')}
+          >
+            <UserCircle size={14} />
+            {sendPersonaId && <span className={styles.badge}>1</span>}
+          </button>
+          <button
+            type="button"
+            className={clsx(styles.actionBtn, openPopover === 'connections' && styles.actionBtnActive)}
+            onClick={() => setOpenPopover((p) => (p === 'connections' ? null : 'connections'))}
+            title={activeProfile ? t('input.switchConnectionActive', { name: activeProfile.name }) : t('input.switchConnection')}
+          >
+            <Link2 size={14} />
+          </button>
+          {hasAltFields && (() => {
+            const selectionCount = activeAltSelectionCount
+            const hasSelection = selectionCount > 0
+            const titleParts: string[] = []
+            if (isGroupChat) {
+              for (const { char, altFields } of groupMembersWithAltFields) {
+                const selections = groupAltFieldSelections[char.id] || {}
+                const labels = Object.entries(selections)
+                  .map(([field, variantId]) => altFields[field]?.find((v) => v.id === variantId)?.label)
+                  .filter(Boolean)
+                if (labels.length > 0) titleParts.push(`${char.name}: ${labels.join(', ')}`)
               }
-              const title = hasSelection
-                ? t('input.alternateFieldsActive', { details: titleParts.join(', ') })
-                : isGroupChat ? t('input.groupAlternateFields') : t('input.alternateFields')
-              return (
-                <button
-                  type="button"
-                  className={clsx(
-                    styles.actionBtn,
-                    openPopover === 'altFields' && styles.actionBtnActive,
-                    hasSelection && styles.actionBtnHasSelection,
-                  )}
-                  onClick={() => setOpenPopover((p) => (p === 'altFields' ? null : 'altFields'))}
-                  title={title}
-                  aria-label={title}
-                >
-                  <Layers size={14} />
-                  {hasSelection && <span className={styles.badge}>{selectionCount}</span>}
-                </button>
-              )
-            })()}
-            {activePersonaId && (
+            } else {
+              for (const [field, variantId] of Object.entries(altFieldSelections)) {
+                const variant = altFieldsData[field]?.find((v) => v.id === variantId)
+                if (variant) titleParts.push(`${field}: ${variant.label}`)
+              }
+            }
+            const title = hasSelection
+              ? t('input.alternateFieldsActive', { details: titleParts.join(', ') })
+              : isGroupChat ? t('input.groupAlternateFields') : t('input.alternateFields')
+            return (
               <button
                 type="button"
                 className={clsx(
                   styles.actionBtn,
-                  openPopover === 'addons' && styles.actionBtnActive,
-                  chatAddonOverrideCount > 0 && styles.actionBtnHasSelection,
+                  openPopover === 'altFields' && styles.actionBtnActive,
+                  hasSelection && styles.actionBtnHasSelection,
                 )}
-                onClick={() => setOpenPopover((p) => (p === 'addons' ? null : 'addons'))}
-                title={chatAddonOverrideCount > 0 ? t('input.personaAddonsCustomized') : t('input.personaAddons')}
+                onClick={() => setOpenPopover((p) => (p === 'altFields' ? null : 'altFields'))}
+                title={title}
+                aria-label={title}
               >
-                <IconPlaylistAdd size={14} />
+                <Layers size={14} />
+                {hasSelection && <span className={styles.badge}>{selectionCount}</span>}
               </button>
-            )}
+            )
+          })()}
+          {activePersonaId && (
             <button
               type="button"
-              className={clsx(styles.actionBtn, openPopover === 'guides' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'guides' ? null : 'guides'))}
-              title={t('input.guidedGenerations')}
+              className={clsx(
+                styles.actionBtn,
+                openPopover === 'addons' && styles.actionBtnActive,
+                chatAddonOverrideCount > 0 && styles.actionBtnHasSelection,
+              )}
+              onClick={() => setOpenPopover((p) => (p === 'addons' ? null : 'addons'))}
+              title={chatAddonOverrideCount > 0 ? t('input.personaAddonsCustomized') : t('input.personaAddons')}
             >
-              <Compass size={14} />
-              {activeGuideCount > 0 && <span className={styles.badge}>{activeGuideCount}</span>}
+              <IconPlaylistAdd size={14} />
             </button>
-            <button
-              type="button"
-              className={clsx(styles.actionBtn, openPopover === 'quick' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'quick' ? null : 'quick'))}
-              title={t('input.quickReplies')}
-            >
-              <MessageSquareQuote size={14} />
-            </button>
-            <button
-              type="button"
-              className={clsx(styles.actionBtn, openPopover === 'tools' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'tools' ? null : 'tools'))}
-              title={t('input.tools')}
-            >
-              <Wrench size={14} />
-            </button>
-            <button
-              type="button"
-              className={clsx(styles.actionBtn, openPopover === 'extras' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'extras' ? null : 'extras'))}
-              title={t('input.extras')}
-            >
-              <MoreHorizontal size={14} />
-            </button>
-          </div>
-        )}
+          )}
+          <button
+            type="button"
+            className={clsx(styles.actionBtn, openPopover === 'guides' && styles.actionBtnActive)}
+            onClick={() => setOpenPopover((p) => (p === 'guides' ? null : 'guides'))}
+            title={t('input.guidedGenerations')}
+          >
+            <Compass size={14} />
+            {activeGuideCount > 0 && <span className={styles.badge}>{activeGuideCount}</span>}
+          </button>
+          <button
+            type="button"
+            className={clsx(styles.actionBtn, openPopover === 'quick' && styles.actionBtnActive)}
+            onClick={() => setOpenPopover((p) => (p === 'quick' ? null : 'quick'))}
+            title={t('input.quickReplies')}
+          >
+            <MessageSquareQuote size={14} />
+          </button>
+          <button
+            type="button"
+            className={clsx(styles.actionBtn, openPopover === 'tools' && styles.actionBtnActive)}
+            onClick={() => setOpenPopover((p) => (p === 'tools' ? null : 'tools'))}
+            title={t('input.tools')}
+          >
+            <Wrench size={14} />
+          </button>
+          <button
+            type="button"
+            className={clsx(styles.actionBtn, openPopover === 'extras' && styles.actionBtnActive)}
+            onClick={() => setOpenPopover((p) => (p === 'extras' ? null : 'extras'))}
+            title={t('input.extras')}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </div>
       </div>
 
       {activeGuideCount > 0 && (
@@ -2380,6 +2385,19 @@ export default function InputArea({ chatId }: InputAreaProps) {
               <button
                 type="button"
                 className={styles.popRowBtn}
+                onClick={() => {
+                  setOpenPopover(null)
+                  handleNewChat()
+                }}
+              >
+                <span className={styles.personaMain}>
+                  <FilePlus size={14} />
+                  <span>{t('quickMenu.newChat')}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.popRowBtn}
                 onClick={async () => {
                   setOpenPopover(null)
                   try {
@@ -2524,6 +2542,8 @@ export default function InputArea({ chatId }: InputAreaProps) {
                     setOpenPopover(null)
                     handleImpersonate('prompts')
                   }}
+                  disabled={isGeneratingInChat}
+                  style={isGeneratingInChat ? { opacity: 0.5 } : undefined}
                 >
                   <span className={styles.personaMain}>
                     <ScrollText size={14} />
@@ -2540,6 +2560,8 @@ export default function InputArea({ chatId }: InputAreaProps) {
                     setOpenPopover(null)
                     handleImpersonate('oneliner')
                   }}
+                  disabled={isGeneratingInChat}
+                  style={isGeneratingInChat ? { opacity: 0.5 } : undefined}
                 >
                   <span className={styles.personaMain}>
                     <MessageSquare size={14} />
@@ -2564,22 +2586,9 @@ export default function InputArea({ chatId }: InputAreaProps) {
                     </span>
                   </span>
                 </button>
-                <button
-                  type="button"
-                  className={styles.popRowBtn}
-                  onClick={() => {
-                    setOpenPopover(null)
-                    handleNewChat()
-                  }}
-                >
-                  <span className={styles.personaMain}>
-                    <FilePlus size={14} />
-                    <span>{t('quickMenu.newChat')}</span>
-                  </span>
-                </button>
                 {(() => {
                   const hasPreset = !!getActivePresetForGeneration()
-                  const dryRunDisabled = dryRunning || !hasPreset
+                  const dryRunDisabled = dryRunning || !hasPreset || isGeneratingInChat
                   return (
                     <button
                       type="button"
@@ -3047,20 +3056,18 @@ export default function InputArea({ chatId }: InputAreaProps) {
         </button>
       ) : (
         <div className={styles.inputRow}>
-          {!isStreaming && (
-            <button
-              type="button"
-              className={styles.attachBtn}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              title={t('input.attachImageOrAudio')}
-              aria-label={t('input.attachFile')}
-            >
-              <Paperclip size={16} />
-            </button>
-          )}
+          <button
+            type="button"
+            className={styles.attachBtn}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title={t('input.attachImageOrAudio')}
+            aria-label={t('input.attachFile')}
+          >
+            <Paperclip size={16} />
+          </button>
 
-          {!isStreaming && voiceSettings.sttShowMicButton && (
+          {voiceSettings.sttShowMicButton && (
             <button
               type="button"
               className={clsx(styles.attachBtn, styles.sttBtn)}
@@ -3100,11 +3107,10 @@ export default function InputArea({ chatId }: InputAreaProps) {
               onBlur={() => setInputFocused(false)}
               placeholder={t('input.placeholder')}
               rows={1}
-              disabled={isStreaming}
             />
           </div>
 
-          {isStreaming && !isRoomPeer ? (
+          {isGeneratingInChat && !isRoomPeer ? (
             <button
               type="button"
               className={clsx(styles.sendBtn, styles.sendBtnStop)}
@@ -3122,15 +3128,21 @@ export default function InputArea({ chatId }: InputAreaProps) {
               onTouchStart={handleSendTouchStart}
               onTouchEnd={handleSendTouchEnd}
               onTouchCancel={handleSendTouchEnd}
+              disabled={isGeneratingInChat}
+              style={isGeneratingInChat ? { opacity: 0.55 } : undefined}
               title={
-                text.trim() || pendingAttachments.length > 0
+                isGeneratingInChat
+                  ? t('input.stopGeneration')
+                  : text.trim() || pendingAttachments.length > 0
                   ? t('input.sendMessageQueueHint', { mod: queueModLabel })
                   : hasQueuedMessages
                     ? t('input.sendQueuedMessages')
                     : t('input.nudgeFreshReply')
               }
               aria-label={
-                text.trim() || pendingAttachments.length > 0
+                isGeneratingInChat
+                  ? t('input.stopGeneration')
+                  : text.trim() || pendingAttachments.length > 0
                   ? t('input.sendMessage')
                   : hasQueuedMessages
                     ? t('input.sendQueuedMessages')
