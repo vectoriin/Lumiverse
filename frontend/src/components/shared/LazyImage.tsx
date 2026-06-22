@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef, type CSSProperties, type ReactNode, type SyntheticEvent } from 'react'
 import { Spinner } from '@/components/shared/Spinner'
 
+export const LAZY_CONTENT_LOADING_EVENT = 'lumiverse:lazy-content-loading'
+
 interface LazyImageProps {
   src?: string | null
   alt?: string
@@ -11,6 +13,24 @@ interface LazyImageProps {
   spinnerSize?: number
   containerClassName?: string
   containerStyle?: CSSProperties
+  /**
+   * When true, load the image immediately instead of deferring to the browser's
+   * lazy-loading scheduler. Useful for images inside currently-visible virtual
+   * rows so the virtualizer can measure the final row height on first paint.
+   */
+  eager?: boolean
+  /**
+   * Aspect ratio to reserve while the image is loading, e.g. "16 / 9" or 1.5.
+   * Lets the parent container hold the correct space before the image decode
+   * finishes, avoiding the layout thrash that occurs when a 0-height spinner
+   * suddenly becomes a fully-sized image.
+   */
+  aspectRatio?: string | number
+  /**
+   * Minimum height for the loading placeholder. Used as a fallback when no
+   * aspect ratio is available and the parent doesn't provide an explicit size.
+   */
+  placeholderMinHeight?: number
   [key: string]: any
 }
 
@@ -24,6 +44,9 @@ export default function LazyImage({
   spinnerSize = 24,
   containerClassName = '',
   containerStyle = {},
+  eager = false,
+  aspectRatio,
+  placeholderMinHeight,
   onLoad,
   onError,
   ...props
@@ -31,14 +54,28 @@ export default function LazyImage({
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
   const prevSrcRef = useRef(src)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const loadingNotifiedRef = useRef(false)
 
   useEffect(() => {
     if (src !== prevSrcRef.current) {
       prevSrcRef.current = src
       setIsLoading(true)
       setHasError(false)
+      loadingNotifiedRef.current = false
     }
   }, [src])
+
+  // Notify ancestors (notably the chat virtualizer) that this lazy element is
+  // about to perform work that may change the row's height. The virtualizer
+  // can capture a reflow anchor and restore scroll position once the content
+  // settles, rather than letting the user be pushed around by the inflation.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !src || !isLoading || loadingNotifiedRef.current) return
+    loadingNotifiedRef.current = true
+    container.dispatchEvent(new CustomEvent(LAZY_CONTENT_LOADING_EVENT, { bubbles: true }))
+  }, [src, isLoading])
 
   const handleLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
     setIsLoading(false)
@@ -56,22 +93,23 @@ export default function LazyImage({
     ? { position: 'relative', overflow: 'hidden', ...containerStyle }
     : { position: 'relative', width: '100%', height: '100%', ...containerStyle }
 
+  const placeholderStyle: CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'var(--lumiverse-primary, #9370db)',
+    opacity: 0.6,
+    background: 'var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04))',
+    aspectRatio: aspectRatio ? String(aspectRatio) : undefined,
+    minHeight: placeholderMinHeight,
+  }
+
   return (
-    <div style={containerInline} className={containerClassName || undefined}>
+    <div ref={containerRef} style={containerInline} className={containerClassName || undefined}>
       {isLoading && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--lumiverse-primary, #9370db)',
-            opacity: 0.6,
-          }}
-        >
+        <div style={placeholderStyle}>
           <Spinner size={spinnerSize} />
         </div>
       )}
@@ -89,7 +127,7 @@ export default function LazyImage({
           ...style,
         }}
         className={className}
-        loading="lazy"
+        loading={eager ? 'eager' : 'lazy'}
         onLoad={handleLoad}
         onError={handleError}
         {...props}

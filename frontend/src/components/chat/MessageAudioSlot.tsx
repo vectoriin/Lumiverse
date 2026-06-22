@@ -1,6 +1,8 @@
 import { clsx } from 'clsx'
+import { useEffect, useRef } from 'react'
 import type { MessageAttachment } from '@/types/api'
 import { audioApi } from '@/api/audio'
+import { LAZY_CONTENT_LOADING_EVENT } from '@/components/shared/LazyImage'
 import MessageAudioPlayer from './MessageAudioPlayer'
 import styles from './MessageAudioSlot.module.css'
 
@@ -43,9 +45,25 @@ export default function MessageAudioSlot({
   onDelete,
 }: MessageAudioSlotProps) {
   const active = !!audio
+  const slotRef = useRef<HTMLDivElement>(null)
+  const wasActiveRef = useRef(active)
+
+  // Notify the virtualizer when the slot is about to expand so it can anchor
+  // the viewport before the 280ms height transition begins. This mirrors the
+  // LazyImage notification and prevents the audio player from pushing older
+  // content up while the user is scrolled back reading history.
+  useEffect(() => {
+    if (active && !wasActiveRef.current) {
+      slotRef.current?.dispatchEvent(
+        new CustomEvent(LAZY_CONTENT_LOADING_EVENT, { bubbles: true }),
+      )
+    }
+    wasActiveRef.current = active
+  }, [active])
 
   return (
     <div
+      ref={slotRef}
       className={clsx(
         styles.slot,
         active && styles.slotActive,

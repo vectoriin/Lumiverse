@@ -9,6 +9,7 @@ import { useLongPress } from '@/hooks/useLongPress'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
 import ImageLightbox from '@/components/shared/ImageLightbox'
 import LazyImage from '@/components/shared/LazyImage'
+import { useIsMessageInViewport } from './VirtualizerViewportContext'
 import styles from './MessageAttachments.module.css'
 import clsx from 'clsx'
 
@@ -20,15 +21,40 @@ interface MessageAttachmentsProps {
   messageId?: string
 }
 
-function getImageFrameStyle(att: MessageAttachment): CSSProperties | undefined {
-  if (!att.width || !att.height) return undefined
-  const scale = Math.min(1, 240 / att.width, 240 / att.height)
+const MAX_IMAGE_SIZE = 240
+const DEFAULT_UNKNOWN_ASPECT_RATIO = '4 / 3'
 
+function getImageScale(att: MessageAttachment): number {
+  if (!att.width || !att.height) return 1
+  return Math.min(1, MAX_IMAGE_SIZE / att.width, MAX_IMAGE_SIZE / att.height)
+}
+
+function getImageFrameStyle(att: MessageAttachment): CSSProperties {
+  if (att.width && att.height) {
+    const scale = getImageScale(att)
+    return {
+      aspectRatio: `${att.width} / ${att.height}`,
+      width: Math.max(1, Math.round(att.width * scale)),
+      maxWidth: '100%',
+    }
+  }
+
+  // Even when the backend didn't record dimensions, reserve a predictable
+  // placeholder frame so the virtualizer's estimate and the actual layout
+  // agree. Without this, the spinner collapses to 0 height and the image
+  // popping in causes the scroll jump we're trying to eliminate.
   return {
-    aspectRatio: `${att.width} / ${att.height}`,
-    width: Math.max(1, Math.round(att.width * scale)),
+    aspectRatio: DEFAULT_UNKNOWN_ASPECT_RATIO,
+    width: MAX_IMAGE_SIZE,
     maxWidth: '100%',
   }
+}
+
+function getImageAspectRatio(att: MessageAttachment): string | number | undefined {
+  if (att.width && att.height) {
+    return `${att.width} / ${att.height}`
+  }
+  return DEFAULT_UNKNOWN_ASPECT_RATIO
 }
 
 function getLocalImageUrl(att: MessageAttachment): string {
@@ -42,6 +68,7 @@ function getRelayPreviewUrl(att: MessageAttachment): string | null {
 }
 
 export default function MessageAttachments({ attachments, isUser, chatId, messageId }: MessageAttachmentsProps) {
+  const isInViewport = useIsMessageInViewport(messageId)
   const { t } = useTranslation('chat')
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [lightboxFallbackSrc, setLightboxFallbackSrc] = useState<string | null>(null)
@@ -164,12 +191,18 @@ export default function MessageAttachments({ attachments, isUser, chatId, messag
                 alt={att.original_filename}
                 style={{ objectFit: 'contain' }}
                 spinnerSize={18}
+                eager={isInViewport}
+                aspectRatio={getImageAspectRatio(att)}
+                placeholderMinHeight={isUser ? 120 : 90}
                 fallback={getRelayPreviewUrl(att) ? (
                   <LazyImage
                     src={getRelayPreviewUrl(att)}
                     alt={att.original_filename}
                     style={{ objectFit: 'contain' }}
                     spinnerSize={18}
+                    eager={isInViewport}
+                    aspectRatio={getImageAspectRatio(att)}
+                    placeholderMinHeight={isUser ? 120 : 90}
                   />
                 ) : null}
               />
@@ -190,23 +223,23 @@ export default function MessageAttachments({ attachments, isUser, chatId, messag
                 src={getLocalImageUrl(att)}
                 alt={att.original_filename}
                 className={styles.inlineImage}
-                style={att.width && att.height
-                  ? { objectFit: 'contain' }
-                  : { objectFit: 'contain', width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '240px' }
-                }
+                style={{ objectFit: 'contain' }}
                 containerClassName={styles.inlineImageWrap}
                 spinnerSize={20}
+                eager={isInViewport}
+                aspectRatio={getImageAspectRatio(att)}
+                placeholderMinHeight={90}
                 fallback={getRelayPreviewUrl(att) ? (
                   <LazyImage
                     src={getRelayPreviewUrl(att)}
                     alt={att.original_filename}
                     className={styles.inlineImage}
-                    style={att.width && att.height
-                      ? { objectFit: 'contain' }
-                      : { objectFit: 'contain', width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '240px' }
-                    }
+                    style={{ objectFit: 'contain' }}
                     containerClassName={styles.inlineImageWrap}
                     spinnerSize={20}
+                    eager={isInViewport}
+                    aspectRatio={getImageAspectRatio(att)}
+                    placeholderMinHeight={90}
                   />
                 ) : null}
               />
