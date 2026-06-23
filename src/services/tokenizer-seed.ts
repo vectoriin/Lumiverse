@@ -183,6 +183,24 @@ const BUILT_IN_CONFIGS = [
     }),
   },
   {
+    id: "deepseek-v4-flash",
+    name: "DeepSeek V4 Flash",
+    type: "huggingface",
+    config: JSON.stringify({
+      url: "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/resolve/main/tokenizer.json",
+      configUrl: "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/resolve/main/tokenizer_config.json",
+    }),
+  },
+  {
+    id: "deepseek-v4-pro",
+    name: "DeepSeek V4 Pro",
+    type: "huggingface",
+    config: JSON.stringify({
+      url: "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/resolve/main/tokenizer.json",
+      configUrl: "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/resolve/main/tokenizer_config.json",
+    }),
+  },
+  {
     id: "approximate-4",
     name: "Rough Estimate (chars/4)",
     type: "approximate",
@@ -231,6 +249,9 @@ const BUILT_IN_PATTERNS = [
   { id: "pat-gemma-4", tokenizer_id: "gemma-4", pattern: "(?:^|[/:.])gemma-4", priority: 85 },
   // Moonshot Kimi K2.7 Code before the general kimi- pattern.
   { id: "pat-kimi-k2-7-code", tokenizer_id: "kimi-k2-7-code", pattern: "(?:^|[/:.])kimi-?k2[-.]7[-.]?code", priority: 85 },
+  // DeepSeek V4 family — Pro first so it doesn't fall through to Flash.
+  { id: "pat-deepseek-v4-pro", tokenizer_id: "deepseek-v4-pro", pattern: "(?:^|[/:.])deepseek-?v4[-.]?pro", priority: 85 },
+  { id: "pat-deepseek-v4-flash", tokenizer_id: "deepseek-v4-flash", pattern: "(?:^|[/:.])deepseek-?v4[-.]?flash", priority: 80 },
   { id: "pat-fallback", tokenizer_id: "approximate-4", pattern: ".*", priority: -1 },
 ];
 
