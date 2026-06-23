@@ -198,6 +198,10 @@ const LANDING_HINT_KEY = '__lumiverse_landing_hint'
 const SKELETON_MAX = 24
 const CARD_MIN_WIDTH = 200
 const CARD_GAP = 20
+const CARD_MOBILE_BREAKPOINT = 600
+const CARD_MOBILE_MIN_WIDTH = 160
+const CARD_MOBILE_GAP = 12
+const CARD_MOBILE_MAX_COLUMNS = 2
 const COMPACT_MIN_WIDTH = 320
 const COMPACT_GAP = 12
 const COMPACT_ROW_ESTIMATE = 86
@@ -232,9 +236,20 @@ function writeLandingHint(hint: LandingHint) {
 
 function getColumnCount(width: number, layout: 'cards' | 'compact') {
   if (width <= 0) return 1
-  const minWidth = layout === 'compact' ? COMPACT_MIN_WIDTH : CARD_MIN_WIDTH
-  const gap = layout === 'compact' ? COMPACT_GAP : CARD_GAP
-  return Math.max(1, Math.floor((width + gap) / (minWidth + gap)))
+  const mobileCards = layout === 'cards' && width <= CARD_MOBILE_BREAKPOINT
+  const minWidth = layout === 'compact'
+    ? COMPACT_MIN_WIDTH
+    : mobileCards
+      ? CARD_MOBILE_MIN_WIDTH
+      : CARD_MIN_WIDTH
+  const gap = getColumnGap(width, layout)
+  const columns = Math.max(1, Math.floor((width + gap) / (minWidth + gap)))
+  return mobileCards ? Math.min(CARD_MOBILE_MAX_COLUMNS, columns) : columns
+}
+
+function getColumnGap(width: number, layout: 'cards' | 'compact') {
+  if (layout === 'cards' && width <= CARD_MOBILE_BREAKPOINT) return CARD_MOBILE_GAP
+  return layout === 'compact' ? COMPACT_GAP : CARD_GAP
 }
 
 function clampParallax(value: number): number {
@@ -907,7 +922,7 @@ export default function LandingPage() {
 
   const hasMore = items.length < total
   const virtualLayout = landingPageLayoutMode === 'compact' ? 'compact' : 'cards'
-  const virtualGap = virtualLayout === 'compact' ? COMPACT_GAP : CARD_GAP
+  const virtualGap = getColumnGap(mainWidth, virtualLayout)
   const virtualColumns = getColumnCount(mainWidth, virtualLayout)
   const virtualRowCount = Math.ceil(items.length / virtualColumns)
   const virtualColumnWidth = Math.max(1, (mainWidth - virtualGap * (virtualColumns - 1)) / virtualColumns)

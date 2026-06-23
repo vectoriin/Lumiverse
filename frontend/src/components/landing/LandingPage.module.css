@@ -1129,7 +1129,7 @@
     padding: 16px;
   }
   .gridCards {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
   .compactList {
@@ -1153,5 +1153,11 @@
   .listTime,
   .listMeta {
     flex-shrink: 1;
+  }
+}
+
+@media (max-width: 364px) {
+  .gridCards {
+    grid-template-columns: 1fr;
   }
 }
