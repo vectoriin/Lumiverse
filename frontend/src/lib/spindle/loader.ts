@@ -125,6 +125,14 @@ function getManifestSignature(manifest: SpindleManifest): string {
   return `${manifest.identifier}:${manifest.version}:${manifest.entry_frontend || 'dist/frontend.js'}`
 }
 
+function getFrontendBundleUrl(extensionId: string, manifest: SpindleManifest): string {
+  const cacheKey = (manifest as SpindleManifest & { frontend_cache_key?: unknown }).frontend_cache_key
+  const version = typeof cacheKey === 'string' && cacheKey.trim()
+    ? cacheKey
+    : getManifestSignature(manifest)
+  return `/api/v1/spindle/${extensionId}/frontend?v=${encodeURIComponent(version)}`
+}
+
 async function doLoadFrontendExtension(
   extensionId: string,
   manifest: SpindleManifest,
@@ -145,7 +153,7 @@ async function doLoadFrontendExtension(
     await unloadFrontendExtension(extensionId)
   }
 
-  const bundleUrl = `/api/v1/spindle/${extensionId}/frontend`
+  const bundleUrl = getFrontendBundleUrl(extensionId, manifest)
 
   try {
     const responsePromise = fetch(bundleUrl)

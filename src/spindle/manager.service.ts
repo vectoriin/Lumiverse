@@ -1575,6 +1575,18 @@ export async function getFrontendBundlePath(identifier: string): Promise<string 
   return (await Bun.file(bundlePath).exists()) ? bundlePath : null;
 }
 
+export async function getFrontendBundleCacheKey(identifier: string): Promise<string | null> {
+  const bundlePath = await getFrontendBundlePath(identifier);
+  if (!bundlePath) return null;
+
+  try {
+    const stat = statSync(bundlePath);
+    return `${stat.size}-${Math.floor(stat.mtimeMs)}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function getBackendEntryPath(identifier: string): Promise<string | null> {
   const manifest = await readManifest(identifier);
   const entry = manifest.entry_backend || "dist/backend.js";
