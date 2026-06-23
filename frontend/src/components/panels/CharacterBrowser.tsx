@@ -280,15 +280,17 @@ export default function CharacterBrowser() {
             />
           )}
 
-          <Pagination
-            currentPage={browser.currentPage}
-            totalPages={browser.totalPages}
-            onPageChange={browser.setCurrentPage}
-            perPage={browser.charactersPerPage}
-            perPageOptions={[24, 50, 100, 200, 500]}
-            onPerPageChange={browser.setCharactersPerPage}
-            totalItems={browser.totalFiltered}
-          />
+          <div className={styles.paginationBar}>
+            <Pagination
+              currentPage={browser.currentPage}
+              totalPages={browser.totalPages}
+              onPageChange={browser.setCurrentPage}
+              perPage={browser.charactersPerPage}
+              perPageOptions={[24, 50, 100, 200, 500]}
+              onPerPageChange={browser.setCharactersPerPage}
+              totalItems={browser.totalFiltered}
+            />
+          </div>
         </>
       )}
 

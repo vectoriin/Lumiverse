@@ -1080,16 +1080,18 @@ export default function WorldBookEntriesSection({
           </DndContext>
 
           {entryPageSize !== 'all' && entryTotalPages > 1 && (
-            <Pagination
-              currentPage={entryPage}
-              totalPages={entryTotalPages}
-              onPageChange={(page) => {
-                setEntryPage(page)
-                setSelectedEntryId(null)
-                setSelectedIds([])
-              }}
-              totalItems={entryTotal}
-            />
+            <div className={styles.entryPagination}>
+              <Pagination
+                currentPage={entryPage}
+                totalPages={entryTotalPages}
+                onPageChange={(page) => {
+                  setEntryPage(page)
+                  setSelectedEntryId(null)
+                  setSelectedIds([])
+                }}
+                totalItems={entryTotal}
+              />
+            </div>
           )}
         </>
       )}
