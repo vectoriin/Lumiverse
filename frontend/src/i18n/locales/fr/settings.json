@@ -442,8 +442,8 @@
     "regenPosition": "Position d'injection",
     "regenUserMessage": "Message utilisateur",
     "regenSystemPrompt": "Invite système",
-    "regenHintUser": "Le commentaire est ajouté au dernier message utilisateur sous la forme [OOC : ...]",
-    "regenHintSystem": "Le commentaire est ajouté à la fin de l'invite système sous la forme [OOC : ...]",
+    "regenHintUser": "Le commentaire est ajouté au dernier message utilisateur sous la forme [OOC: ...]",
+    "regenHintSystem": "Le commentaire est ajouté à la fin du system prompt sous la forme [OOC: ...]",
     "messageInfoTitle": "Informations sur le message",
     "showTokenCount": "Afficher le nombre de jetons dans le message pill",
     "showTokenCountHint": "Affiche le nombre de jetons pour les messages de l'assistant dans le badge d'horodatage sous chaque message",
@@ -475,7 +475,7 @@
     "positionBefore": "Avant le message",
     "positionAfter": "Après le message",
     "guideName": "Nom du guide",
-    "guideContent": "Contenu de l'invite du guide"
+    "guideContent": "Contenu de prompt du guide"
   },
   "quickReplies": {
     "title": "Réponses rapides",
@@ -717,7 +717,7 @@
     "queryContextSize": "Taille du contexte de requête",
     "queryMaxTokens": "Interroger le nombre maximum de jetons",
     "formattingSection": "Formatage",
-    "formattingHelper": "Les modèles contrôlent la façon dont les mémoires récupérées apparaissent dans l'invite. Espaces réservés disponibles : {{memories}}, {{content}}, {{score}}, {{startIndex}}, {{endIndex}}.",
+    "formattingHelper": "Les modèles contrôlent la façon dont les mémoires récupérées apparaissent dans le prompt. Espaces réservés disponibles : {{memories}}, {{content}}, {{score}}, {{startIndex}}, {{endIndex}}.",
     "headerTemplate": "Modèle d'en-tête",
     "chunkTemplate": "Modèle de fragments",
     "chunkSeparator": "Séparateur de fragments"
@@ -1078,9 +1078,11 @@
     "diversitySelection": "Sélection de la diversité",
     "diversitySelectionHint": "Empêcher plusieurs souvenirs récupérés de la même période",
     "entitySnapshots": "Instantanés d'entité",
-    "entitySnapshotsHint": "Inclure des résumés de personnages/emplacements dans l'invite",
+    "entitySnapshotsHint": "Inclure des résumés de personnages/emplacements dans le prompt",
     "relationshipEdges": "Bords des relations",
-    "relationshipEdgesHint": "Inclure les relations des personnages dans l'invite",
+    "relationshipEdgesHint": "Inclure les relations des personnages dans le prompt",
+    "arcInjection": "Arc narratif",
+    "arcInjectionHint": "Inclure dans le prompt le dernier résumé de l'arc de l'histoire",
     "contextTokenBudget": "Budget des jetons de contexte",
     "memoryDecay": "Mémoire décroissance",
     "halfLifeTurns": "Demi-vie (tours)",

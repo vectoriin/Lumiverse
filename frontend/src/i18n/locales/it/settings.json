@@ -997,6 +997,8 @@
     "entitySnapshotsHint": "Includi riassunti personaggi/luoghi nel prompt",
     "relationshipEdges": "Relazioni",
     "relationshipEdgesHint": "Includi le relazioni dei personaggi nel prompt",
+    "arcInjection": "Arco narrativo",
+    "arcInjectionHint": "Includi nel prompt l'ultimo riassunto dell'arco della storia",
     "contextTokenBudget": "Budget token contesto",
     "memoryDecay": "Decadimento memoria",
     "halfLifeTurns": "Emivita (turni)",

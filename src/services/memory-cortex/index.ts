@@ -448,34 +448,82 @@ function buildCortexQueryKey(query: CortexQuery, config: MemoryCortexConfig): st
  * re-inject it as "memory". On a reject the caller falls through to
  * exclusion-aware vector retrieval.
  */
+/**
+ * Drop cached cortex memories whose underlying chunk contains any of the given
+ * message IDs. Lets a chatId-keyed warm-cache entry be reused across turns:
+ * instead of discarding the whole entry when the live-context tail has grown
+ * (which made cortex miss on every fresh message and never inject), keep the
+ * entry and filter out only the memories that would re-inject a now-live
+ * message. Recency safety preserved, warm cache reusable turn to turn.
+ */
+function filterCortexMemoriesByExcludedMessages(
+  result: CortexResult,
+  excludedMessageIds: string[],
+): CortexResult {
+  if (result.memories.length === 0 || excludedMessageIds.length === 0) {
+    return result;
+  }
+  const excluded = new Set(excludedMessageIds);
+  const chunkIds = result.memories.map((m) => m.sourceId).filter(Boolean);
+  if (chunkIds.length === 0) return result;
+
+  const db = getDb();
+  const placeholders = chunkIds.map(() => "?").join(",");
+  const rows = db
+    .query(`SELECT id, message_ids FROM chat_chunks WHERE id IN (${placeholders})`)
+    .all(...chunkIds) as Array<{ id: string; message_ids: string | null }>;
+
+  const chunkHasExcluded = new Map<string, boolean>();
+  for (const row of rows) {
+    let ids: string[] = [];
+    try {
+      ids = row.message_ids ? (JSON.parse(row.message_ids) as string[]) : [];
+    } catch {
+      ids = [];
+    }
+    chunkHasExcluded.set(row.id, ids.some((mid) => excluded.has(mid)));
+  }
+
+  const kept = result.memories.filter((m) => !chunkHasExcluded.get(m.sourceId));
+  if (kept.length === result.memories.length) return result;
+  return { ...result, memories: kept };
+}
+
 export function getCachedCortexResult(
   chatId: string,
   requiredExcludedMessageIds?: string | string[],
 ): CortexResult | null {
   const entry = cortexResultCache.get(chatId);
+  const inst = ((cortexResultCache as any).__id ??= Math.floor(Math.random() * 100000));
+  console.warn(`[cortex-debug] getCached chat=${chatId.slice(0, 8)} inst=${inst} size=${cortexResultCache.size} hit=${!!entry}`);
   if (!entry) return null;
   if (Date.now() - entry.queriedAt > CACHE_TTL_MS) {
+    console.warn(`[cortex-debug] getCached chat=${chatId.slice(0, 8)} EXPIRED age=${Date.now() - entry.queriedAt}ms`);
     cortexResultCache.delete(chatId);
     return null;
   }
   const required = typeof requiredExcludedMessageIds === "string"
     ? [requiredExcludedMessageIds]
     : (requiredExcludedMessageIds ?? []);
-  if (required.length > 0) {
-    const excluded = new Set(entry.excludeMessageIds);
-    for (const id of required) {
-      if (!excluded.has(id)) {
-        // Stale-context entry: it was warmed without excluding a message that is
-        // now live or being regenerated, so it may contain that chunk.
-        return null;
-      }
-    }
-  }
-  return entry.result;
+  if (required.length === 0) return entry.result;
+
+  // The warm cache is keyed by chatId, but the live-context tail grows every
+  // turn, so an entry primed last turn won't have excluded this turn's newest
+  // messages. Rather than reject the whole entry (which made cortex miss on
+  // every fresh message and never inject), keep it and drop only the memories
+  // whose chunk contains a now-excluded message.
+  const alreadyExcluded = new Set(entry.excludeMessageIds);
+  const newlyRequired = required.filter((id) => !alreadyExcluded.has(id));
+  if (newlyRequired.length === 0) return entry.result;
+
+  return filterCortexMemoriesByExcludedMessages(entry.result, newlyRequired);
 }
 
 /** Invalidate cached cortex result for a chat (e.g. on rebuild or delete). */
 export function invalidateCortexCache(chatId: string): void {
+  const inst = ((cortexResultCache as any).__id ??= Math.floor(Math.random() * 100000));
+  const had = cortexResultCache.has(chatId);
+  console.warn(`[cortex-debug] INVALIDATE chat=${chatId.slice(0, 8)} inst=${inst} had=${had}\n${new Error().stack?.split("\n").slice(2, 5).join("\n")}`);
   cortexResultCache.delete(chatId);
 }
 
@@ -497,11 +545,13 @@ export function primeCortexCache(
   excludeMessageIds: string[] = [],
 ): void {
   if (result.stats?.timedOut || result.stats?.aborted) return;
+  const inst = ((cortexResultCache as any).__id ??= Math.floor(Math.random() * 100000));
   cortexResultCache.set(chatId, {
     result,
     queriedAt: Date.now(),
     excludeMessageIds: [...excludeMessageIds],
   });
+  console.warn(`[cortex-debug] primeCortexCache SET chat=${chatId.slice(0, 8)} inst=${inst} size=${cortexResultCache.size} memories=${result.memories.length}`);
 }
 
 // ─── Linked Cortex Cache ──────────────────────────────────────
@@ -930,6 +980,8 @@ export async function queryCortex(
       queriedAt: Date.now(),
       excludeMessageIds: [...(query.excludeMessageIds ?? [])],
     });
+    const inst = ((cortexResultCache as any).__id ??= Math.floor(Math.random() * 100000));
+    console.warn(`[cortex-debug] queryCortex SELF-SET chat=${query.chatId.slice(0, 8)} inst=${inst} size=${cortexResultCache.size} memories=${result.memories.length}`);
 
     return result;
   })();

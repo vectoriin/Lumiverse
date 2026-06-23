@@ -1081,6 +1081,8 @@
     "entitySnapshotsHint": "プロンプトにキャラクター/場所の概要を含める",
     "relationshipEdges": "関係エッジ",
     "relationshipEdgesHint": "プロンプトにキャラクターの関係を含める",
+    "arcInjection": "物語のアーク",
+    "arcInjectionHint": "最新のこれまでのあらすじのアーク要約をプロンプトに含める",
     "contextTokenBudget": "コンテキスト トークンの予算",
     "memoryDecay": "記憶の減衰",
     "halfLifeTurns": "半減期(回転)",

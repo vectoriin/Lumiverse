@@ -100,6 +100,7 @@ export async function queryCortex(
   // chats), which blocks the event loop via the native NAPI call and is
   // the primary cause of server lockups on chats without cortex data.
   if (candidateChunkIds.size === 0) {
+    console.warn(`[cortex-debug] queryCortex chat=${query.chatId.slice(0, 8)} PHASE1 no candidates (entities=${activeEntityIds.length}); empty`);
     return emptyResult(startTime);
   }
 
@@ -117,6 +118,7 @@ export async function queryCortex(
     const [queryVector] = await embeddingsSvc.cachedEmbedTexts(query.userId, [query.queryText], { signal });
     if (signal?.aborted) return emptyResult(startTime);
     if (!queryVector || queryVector.length === 0) {
+      console.warn(`[cortex-debug] queryCortex chat=${query.chatId.slice(0, 8)} PHASE2 query embedding empty; empty`);
       return emptyResult(startTime);
     }
 
@@ -136,6 +138,7 @@ export async function queryCortex(
   }
 
   if (vectorResults.length === 0) {
+    console.warn(`[cortex-debug] queryCortex chat=${query.chatId.slice(0, 8)} PHASE2 scoped vector search 0 hits (candidates=${candidateChunkIds.size}); empty`);
     return emptyResult(startTime);
   }
 
@@ -307,6 +310,7 @@ export async function queryCortex(
   // Update retrieval stats on selected chunks
   batchUpdateRetrievalStats(db, selected.map((m) => m.sourceId));
 
+  console.warn(`[cortex-debug] queryCortex chat=${query.chatId.slice(0, 8)} OK candidates=${candidateChunkIds.size} vectorResults=${vectorResults.length} memories=${selected.length} entities=${entitySnapshots.length} arc=${arcCtx ? "y" : "n"}`);
   return {
     memories: selected,
     entityContext: entitySnapshots,

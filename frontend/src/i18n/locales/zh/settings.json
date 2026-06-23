@@ -997,6 +997,8 @@
     "entitySnapshotsHint": "在提示中包含角色/地点摘要",
     "relationshipEdges": "关系边",
     "relationshipEdgesHint": "在提示中包含角色关系",
+    "arcInjection": "叙事弧",
+    "arcInjectionHint": "在提示中包含最新的故事进展弧线摘要",
     "contextTokenBudget": "上下文 Token 预算",
     "memoryDecay": "记忆衰减",
     "halfLifeTurns": "半衰期（回合）",

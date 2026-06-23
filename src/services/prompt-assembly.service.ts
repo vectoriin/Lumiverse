@@ -1320,7 +1320,12 @@ export async function assemblePrompt(
             mainQuery: mainQueryParams,
             linkedQueryText: cortexQueryText,
           });
-          if (cortexSignal.aborted) return;
+          // Prime the warm cache whenever the worker returned a computed
+          // result, even if THIS generation's signal has since fired. The warm
+          // cache exists for the NEXT generation, so discarding a valid result
+          // on gen-end/teardown left the cache permanently cold and cortex
+          // never injected. primeCortexCache already drops genuinely-incomplete
+          // results (timed-out / aborted mid-compute) via its own guard.
           if (mainResult) {
             memoryCortex.primeCortexCache(
               ctx.chatId,
@@ -1346,23 +1351,27 @@ export async function assemblePrompt(
       // signal is threaded through so a user-initiated stop OR a newer
       // generation on this chat tears down the embedding API call and LanceDB
       // retrieval instead of letting the background task live on as an orphan.
-      // These calls self-populate the warm cache as a side effect.
-      const mainQuery = memoryCortex.queryCortex(
-        mainQueryParams,
-        cortexConfig,
-        cortexSignal,
-      );
-
-      // Linked cortex queries use the same queryText for semantic relevance
-      const linkedQuery = memoryCortex.queryLinkedCortex(
-        ctx.chatId,
-        ctx.userId,
-        cortexConfig,
-        cortexQueryText,
-        cortexSignal,
-      );
-
-      await Promise.all([mainQuery, linkedQuery]);
+      // queryCortex / queryLinkedCortex compute results but do NOT write the
+      // warm cache themselves (the "self-populate" the old comment claimed does
+      // not exist), so prime it explicitly — mirroring the worker branch above.
+      // Without this the in-process path computed memories and discarded them,
+      // so cortex never served when the worker was disabled or crashed.
+      const [mainResult, linkedResult] = await Promise.all([
+        memoryCortex.queryCortex(mainQueryParams, cortexConfig, cortexSignal),
+        memoryCortex.queryLinkedCortex(
+          ctx.chatId,
+          ctx.userId,
+          cortexConfig,
+          cortexQueryText,
+          cortexSignal,
+        ),
+      ]);
+      if (mainResult) {
+        memoryCortex.primeCortexCache(ctx.chatId, mainResult, excludeMessageIds);
+      }
+      if (linkedResult) {
+        memoryCortex.primeLinkedCortexCache(ctx.chatId, linkedResult);
+      }
     })().catch((err) => {
       if (cortexSignal.aborted) return;
       console.warn("[prompt-assembly] Background cortex query failed:", err);
@@ -1808,6 +1817,7 @@ export async function assemblePrompt(
 
   let memoryResult: Awaited<ReturnType<typeof collectChatVectorMemory>>;
 
+  console.warn(`[cortex-debug] assembly reached memory-read chat=${ctx.chatId.slice(0, 8)} cortexEnabled=${cortexConfig.enabled} genType=${ctx.generationType} worker=${runningInAssemblyWorker()}`);
   if (cortexConfig.enabled) {
     // Fast path: warm cache from a previous generation (synchronous, no I/O).
     // Require the cached entry to have excluded the current live-context tail
@@ -1822,6 +1832,7 @@ export async function assemblePrompt(
         ctx.excludeMessageId,
       ),
     );
+    console.warn(`[cortex-debug] assembly cache read chat=${ctx.chatId.slice(0, 8)} hit=${!!cortexResult} memories=${cortexResult?.memories.length ?? 0} worker=${runningInAssemblyWorker()}`);
 
     if (cortexResult && cortexResult.memories.length > 0) {
       memoryResult = formatCortexForAssembly(
@@ -1833,15 +1844,83 @@ export async function assemblePrompt(
         chatMemSettings ?? embeddingsSvc.DEFAULT_CHAT_MEMORY_SETTINGS,
       );
     } else {
-      // Genuinely no memories (new chat, no chunks, etc.) — fall back to vector retrieval
-      memoryResult = await safeCollectChatVectorMemory(
-        ctx.userId,
-        ctx.chatId,
+      // Warm cache is structurally unreliable: it is primed in a deferred task
+      // AFTER assembly, but the assistant message saved at the end of each
+      // generation calls invalidateCortexCache (see chats.service message
+      // writes), wiping the prime before the next turn can read it. So a normal
+      // turn always read a miss and cortex never injected. Query cortex inline
+      // on miss so it actually serves — via the cortex worker when available to
+      // keep the native LanceDB/embedding work off the WS event loop.
+      const inlineEmbCfg =
+        pf?.embeddingConfig ?? (await embeddingsSvc.getEmbeddingConfig(ctx.userId));
+      const inlineEffective = chatMemSettings
+        ? embeddingsSvc.resolveEffectiveChatMemorySettings(chatMemSettings, inlineEmbCfg)
+        : embeddingsSvc.DEFAULT_CHAT_MEMORY_SETTINGS;
+      const inlineQueryText = await buildQueryText(
         messages,
-        chatMemSettings,
-        perChatOverrides,
-        ctx.excludeMessageId,
+        inlineEffective,
+        buildMacroEnvForChat(ctx.userId, ctx.chatId),
+        getReasoningStripOptions(ctx.userId),
       );
+      const inlineParams = {
+        chatId: ctx.chatId,
+        userId: ctx.userId,
+        queryText: inlineQueryText,
+        emotionalContext: buildEmotionalContext(
+          messages.slice(-6).map((m) => m.content).join(" "),
+        ),
+        generationType: ctx.generationType,
+        topK: perChatOverrides?.retrievalTopK ?? inlineEffective.retrievalTopK,
+        includeConsolidations: cortexConfig.consolidation.enabled,
+        includeRelationships: cortexConfig.retrieval.relationshipInjection,
+        excludeMessageIds: buildMemoryExcludeMessageIds(
+          messages,
+          inlineEffective,
+          perChatOverrides,
+          ctx.excludeMessageId,
+        ),
+      };
+
+      let inlineResult: memoryCortex.CortexResult | null = null;
+      try {
+        if (canUseCortexWorker()) {
+          const { mainResult } = await warmCortexInWorker({
+            chatId: ctx.chatId,
+            userId: ctx.userId,
+            cortexConfig,
+            mainQuery: inlineParams,
+            linkedQueryText: inlineQueryText,
+          });
+          inlineResult = mainResult;
+        } else {
+          inlineResult = await memoryCortex.queryCortex(inlineParams, cortexConfig);
+        }
+      } catch (err) {
+        console.warn("[prompt-assembly] Inline cortex query failed:", err);
+      }
+      console.warn(`[cortex-debug] inline cortex chat=${ctx.chatId.slice(0, 8)} memories=${inlineResult?.memories.length ?? 0}`);
+
+      if (inlineResult && inlineResult.memories.length > 0) {
+        cortexResult = inlineResult;
+        memoryResult = formatCortexForAssembly(
+          inlineResult,
+          cortexConfig,
+          character,
+          macroEnv,
+          ctx.chatId,
+          chatMemSettings ?? embeddingsSvc.DEFAULT_CHAT_MEMORY_SETTINGS,
+        );
+      } else {
+        // Genuinely no memories (new chat, no chunks, etc.) — fall back to vector retrieval
+        memoryResult = await safeCollectChatVectorMemory(
+          ctx.userId,
+          ctx.chatId,
+          messages,
+          chatMemSettings,
+          perChatOverrides,
+          ctx.excludeMessageId,
+        );
+      }
     }
   } else {
     // Existing path: pure vector retrieval
