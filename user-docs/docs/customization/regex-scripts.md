@@ -1,3 +1,7 @@
+---
+title: Regex Scripts
+---
+
 # Regex Scripts
 
 Regex scripts are text transformation rules that automatically find and replace patterns in your messages. They can clean up formatting, enforce style rules, or transform content at various stages of the pipeline.

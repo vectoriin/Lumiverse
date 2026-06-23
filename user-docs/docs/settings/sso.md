@@ -1,4 +1,8 @@
-# Single Sign-On (OIDC SSO)
+---
+title: Single Sign-On
+---
+
+# Single Sign-On
 
 Owners can connect Lumiverse to an OpenID Connect identity provider so users can sign in with SSO. Lumiverse currently supports provider templates for **authentik**, **Authelia**, and **Keycloak**.
 

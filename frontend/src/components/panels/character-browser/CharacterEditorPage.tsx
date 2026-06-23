@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useVirtualizer } from '@tanstack/react-virtual'
 
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
@@ -67,6 +68,9 @@ import type { AlternateAvatarEntry } from './AlternateAvatarManager'
 
 const DEBOUNCE_MS = 2000
 const MAX_PERSPECTIVE_LAYERS = 5
+const GALLERY_MIN_ITEM_WIDTH = 120
+const GALLERY_GAP = 8
+const GALLERY_OVERSCAN = 3
 
 type TabId = 'core' | 'system' | 'greetings' | 'identity' | 'gallery' | 'expressions' | 'voice' | 'imageLora' | 'advanced'
 
@@ -252,6 +256,8 @@ export default function CharacterEditorPage() {
   const fileRef = useRef<HTMLInputElement>(null)
   const perspectiveLayerFileRef = useRef<HTMLInputElement>(null)
   const galleryFileRef = useRef<HTMLInputElement>(null)
+  const galleryScrollRef = useRef<HTMLDivElement>(null)
+  const [galleryGridWidth, setGalleryGridWidth] = useState(0)
   const savingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const lastSyncedId = useRef<string | null>(null)
 
@@ -327,6 +333,75 @@ export default function CharacterEditorPage() {
   useEffect(() => {
     fetchGallery()
   }, [fetchGallery])
+
+  // Gallery virtualization: the grid can grow very large for image-heavy
+  // characters, so render only the viewport rows via TanStack Virtual.
+  const galleryColumns = useMemo(() => {
+    if (galleryGridWidth <= 0) return 3
+    return Math.max(1, Math.floor((galleryGridWidth + GALLERY_GAP) / (GALLERY_MIN_ITEM_WIDTH + GALLERY_GAP)))
+  }, [galleryGridWidth])
+
+  const galleryRowCount = useMemo(() => {
+    const totalCells = galleryItems.length + 1 // +1 for the add button
+    return Math.max(1, Math.ceil(totalCells / galleryColumns))
+  }, [galleryItems.length, galleryColumns])
+
+  const galleryItemWidth = useMemo(() => {
+    if (galleryGridWidth <= 0) return GALLERY_MIN_ITEM_WIDTH
+    return Math.max(1, (galleryGridWidth - GALLERY_GAP * (galleryColumns - 1)) / galleryColumns)
+  }, [galleryGridWidth, galleryColumns])
+
+  const galleryRowEstimate = useMemo(() => galleryItemWidth + GALLERY_GAP, [galleryItemWidth])
+
+  const galleryVirtualizer = useVirtualizer({
+    count: galleryRowCount,
+    getScrollElement: () => galleryScrollRef.current,
+    estimateSize: () => galleryRowEstimate,
+    overscan: GALLERY_OVERSCAN,
+    anchorTo: 'start',
+    directDomUpdates: true,
+    directDomUpdatesMode: 'position',
+    useAnimationFrameWithResizeObserver: true,
+    getItemKey: (index) => {
+      const start = index * galleryColumns
+      const end = Math.min(start + galleryColumns, galleryItems.length)
+      const keys = galleryItems.slice(start, end).map((item) => item.id)
+      if (index === galleryRowCount - 1) keys.push('__add__')
+      return keys.join('|') || `row-${index}`
+    },
+  })
+
+  useEffect(() => {
+    if (activeTab !== 'gallery') return
+    const el = galleryScrollRef.current
+    if (!el) return
+
+    let frame = 0
+    const update = () => {
+      frame = 0
+      setGalleryGridWidth(el.clientWidth)
+    }
+
+    const schedule = () => {
+      if (frame) return
+      frame = requestAnimationFrame(update)
+    }
+
+    update()
+    const observer = new ResizeObserver(schedule)
+    observer.observe(el)
+    window.addEventListener('resize', schedule)
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', schedule)
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    galleryVirtualizer.measure()
+  }, [galleryVirtualizer, galleryColumns, galleryRowEstimate])
 
   const boundRegexScripts = useMemo(
     () => regexScripts.filter((s) => s.scope === 'character' && s.scope_id === editingCharacterId),
@@ -1460,25 +1535,63 @@ export default function CharacterEditorPage() {
                         </span>
                       </div>
 
-                      <div className={styles.galleryGrid}>
-                        {galleryItems.map((item) => (
-                          <GalleryGridItem
-                            key={item.id}
-                            item={item}
-                            onRemove={handleGalleryRemove}
-                            onOpenMenu={(menuItem, pos) => setGalleryContextMenu({ item: menuItem, pos })}
-                          />
-                        ))}
-
-                        <button
-                          type="button"
-                          className={styles.galleryAddBtn}
-                          onClick={() => galleryFileRef.current?.click()}
-                          disabled={galleryUploading}
+                      <div className={styles.galleryScrollArea} ref={galleryScrollRef}>
+                        <div
+                          ref={galleryVirtualizer.containerRef}
+                          className={styles.galleryVirtualContainer}
                         >
-                          <ImagePlus size={20} />
-                          <span>{galleryUploading ? t('characterEditor.uploading') : t('characterEditor.addImages')}</span>
-                        </button>
+                          {galleryVirtualizer.getVirtualItems().map((virtualRow) => {
+                            const rowStart = virtualRow.index * galleryColumns
+                            const rowEnd = rowStart + galleryColumns
+                            const cells: Array<{ type: 'item'; item: CharacterGalleryItem } | { type: 'add' }> = []
+                            for (let g = rowStart; g < rowEnd; g++) {
+                              if (g < galleryItems.length) {
+                                cells.push({ type: 'item', item: galleryItems[g] })
+                              } else if (g === galleryItems.length) {
+                                cells.push({ type: 'add' })
+                              }
+                            }
+
+                            return (
+                              <div
+                                key={virtualRow.key}
+                                ref={galleryVirtualizer.measureElement}
+                                data-index={virtualRow.index}
+                                className={styles.galleryGridRow}
+                                style={{
+                                  gridTemplateColumns: `repeat(${galleryColumns}, minmax(0, 1fr))`,
+                                  gap: GALLERY_GAP,
+                                  paddingBottom: GALLERY_GAP,
+                                }}
+                              >
+                                {cells.map((cell) => {
+                                  if (cell.type === 'add') {
+                                    return (
+                                      <button
+                                        key="__add__"
+                                        type="button"
+                                        className={styles.galleryAddBtn}
+                                        onClick={() => galleryFileRef.current?.click()}
+                                        disabled={galleryUploading}
+                                      >
+                                        <ImagePlus size={20} />
+                                        <span>{galleryUploading ? t('characterEditor.uploading') : t('characterEditor.addImages')}</span>
+                                      </button>
+                                    )
+                                  }
+                                  return (
+                                    <GalleryGridItem
+                                      key={cell.item.id}
+                                      item={cell.item}
+                                      onRemove={handleGalleryRemove}
+                                      onOpenMenu={(menuItem, pos) => setGalleryContextMenu({ item: menuItem, pos })}
+                                    />
+                                  )
+                                })}
+                              </div>
+                            )
+                          })}
+                        </div>
                       </div>
 
                       <input

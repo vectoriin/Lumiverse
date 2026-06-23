@@ -1,3 +1,7 @@
+---
+title: Macros Reference
+---
+
 # Macros Reference
 
 Macros are template variables written as `{{macro_name}}` that get replaced with dynamic content when your preset is assembled into a prompt. This is the complete reference of the built-in macros available in Lumiverse.

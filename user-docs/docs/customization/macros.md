@@ -1,3 +1,7 @@
+---
+title: Macros
+---
+
 # Macros
 
 Macros are template variables written as `{{macro_name}}` that get replaced with dynamic content during prompt assembly. They can be used in preset blocks, prompt text fields, chat messages, and included world book content.
