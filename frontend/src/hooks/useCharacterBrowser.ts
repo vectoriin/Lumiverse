@@ -161,6 +161,8 @@ export function useCharacterBrowser() {
 
   // Debounced search
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const prevSummaryParamsRef = useRef<Record<string, any> | null>(null)
+  const summaryInitialFetchDoneRef = useRef(false)
   useEffect(() => {
     debounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(debounceRef.current)
@@ -233,12 +235,18 @@ export function useCharacterBrowser() {
   useEffect(() => {
     if (!settingsLoaded) return
 
+    const params = buildSummaryParams()
+    const paramsChanged = JSON.stringify(params) !== JSON.stringify(prevSummaryParamsRef.current)
+    prevSummaryParamsRef.current = params
+
     let cancelled = false
     favoriteMutationSeqRef.current += 1
-    setLoading(true)
+    if (paramsChanged || !summaryInitialFetchDoneRef.current) {
+      setLoading(true)
+    }
 
     charactersApi
-      .listSummaries(buildSummaryParams())
+      .listSummaries(params)
       .then((result) => {
         if (cancelled) return
         setBrowserItems(result.data)
@@ -249,7 +257,10 @@ export function useCharacterBrowser() {
         console.error('[CharacterBrowser] Failed to load summaries:', err)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          summaryInitialFetchDoneRef.current = true
+        }
       })
 
     return () => { cancelled = true }

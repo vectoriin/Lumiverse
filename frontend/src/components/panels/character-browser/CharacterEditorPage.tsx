@@ -247,7 +247,7 @@ export default function CharacterEditorPage() {
   const [localPerspectiveLayers, setLocalPerspectiveLayers] = useState<CharacterPerspectiveLayerInput[]>([])
   const pendingLayersRef = useRef<CharacterPerspectiveLayerInput[]>([])
   const layersSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const layersSaveInFlightRef = useRef(false)
+  const layerSaveLockRef = useRef<Promise<void> | null>(null)
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const fileRef = useRef<HTMLInputElement>(null)
   const perspectiveLayerFileRef = useRef<HTMLInputElement>(null)
@@ -848,32 +848,72 @@ export default function CharacterEditorPage() {
     return []
   }, [character?.extensions?.landing_perspective_layers])
 
-  const savePerspectiveLayers = useCallback(
-    async (layers: CharacterPerspectiveLayerInput[]) => {
-      if (!editingCharacterId) return
-      const updated = await charactersApi.updatePerspectiveLayers(editingCharacterId, layers)
-      updateCharInStore(editingCharacterId, updated)
-    },
-    [editingCharacterId, updateCharInStore]
-  )
+  // Keep the in-editor perspective layer list in sync with the store character
+  // when the edited character changes, without clobbering local in-flight edits.
+  useEffect(() => {
+    if (!character) return
+    setLocalPerspectiveLayers(perspectiveLayers)
+    pendingLayersRef.current = perspectiveLayers
+  }, [character?.id])
+
+  const flushPerspectiveLayersSave = useCallback(async () => {
+    if (!editingCharacterId) return
+    // Chain saves so rapid edits never race or overwrite each other.
+    const run = async () => {
+      const toSave = pendingLayersRef.current
+      layersSaveTimerRef.current = null
+      try {
+        showSaving()
+        const updated = await charactersApi.updatePerspectiveLayers(editingCharacterId, toSave)
+        // Only adopt the server response if local state hasn't moved on since the save started.
+        if (JSON.stringify(pendingLayersRef.current) === JSON.stringify(toSave)) {
+          updateCharInStore(editingCharacterId, updated)
+        }
+      } catch (err) {
+        console.error('[Editor] Perspective layer save failed:', err)
+        toast.error('Could not save perspective layers')
+      }
+    }
+    layerSaveLockRef.current = (layerSaveLockRef.current ?? Promise.resolve()).then(run, run)
+    await layerSaveLockRef.current
+  }, [editingCharacterId, updateCharInStore, showSaving])
+
+  const requestPerspectiveLayersSave = useCallback(() => {
+    if (layersSaveTimerRef.current) clearTimeout(layersSaveTimerRef.current)
+    layersSaveTimerRef.current = setTimeout(() => {
+      void flushPerspectiveLayersSave()
+    }, 400)
+  }, [flushPerspectiveLayersSave])
+
+  // Flush any pending layer edits when the editor closes or the character changes.
+  useEffect(() => () => {
+    if (layersSaveTimerRef.current) clearTimeout(layersSaveTimerRef.current)
+    void flushPerspectiveLayersSave()
+  }, [flushPerspectiveLayersSave])
 
   const handlePerspectiveLayerSelected = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       e.target.value = ''
       if (!file || !editingCharacterId) return
-      if (perspectiveLayers.length >= MAX_PERSPECTIVE_LAYERS) {
+      if (localPerspectiveLayers.length >= MAX_PERSPECTIVE_LAYERS) {
         toast.error(`Maximum ${MAX_PERSPECTIVE_LAYERS} landing layers`)
         return
       }
+      // Persist any pending layer edits before uploading so the new layer is appended to the latest stack.
+      if (layersSaveTimerRef.current) clearTimeout(layersSaveTimerRef.current)
+      await flushPerspectiveLayersSave()
       setPerspectiveLayerProgress(0)
       try {
         const updated = await charactersApi.addPerspectiveLayer(
           editingCharacterId,
           file,
-          { label: `Layer ${perspectiveLayers.length + 1}`, intensity: perspectiveLayers.length === 0 ? 0.2 : 0.7 },
+          { label: `Layer ${localPerspectiveLayers.length + 1}`, intensity: localPerspectiveLayers.length === 0 ? 0.2 : 0.7 },
           setPerspectiveLayerProgress,
         )
+        const next = (updated.extensions?.landing_perspective_layers ?? []) as CharacterPerspectiveLayerInput[]
+        setLocalPerspectiveLayers(next)
+        pendingLayersRef.current = next
         updateCharInStore(editingCharacterId, updated)
       } catch (err) {
         console.error('[Editor] Perspective layer upload failed:', err)
@@ -882,47 +922,52 @@ export default function CharacterEditorPage() {
         setPerspectiveLayerProgress(null)
       }
     },
-    [editingCharacterId, perspectiveLayers.length, updateCharInStore]
+    [editingCharacterId, localPerspectiveLayers.length, updateCharInStore, flushPerspectiveLayersSave]
   )
 
   const handleRemovePerspectiveLayer = useCallback(
-    async (layerId: string) => {
-      if (!editingCharacterId) return
-      try {
-        const updated = await charactersApi.removePerspectiveLayer(editingCharacterId, layerId)
-        updateCharInStore(editingCharacterId, updated)
-      } catch (err) {
-        console.error('[Editor] Perspective layer remove failed:', err)
-        toast.error('Could not remove perspective layer')
-      }
+    (layerId: string) => {
+      const next = localPerspectiveLayers.filter((layer) => layer.id !== layerId)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
     },
-    [editingCharacterId, updateCharInStore]
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
   )
 
   const handlePerspectiveLayerDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event
       if (!over || active.id === over.id) return
-      const oldIndex = perspectiveLayers.findIndex((layer) => layer.id === active.id)
-      const newIndex = perspectiveLayers.findIndex((layer) => layer.id === over.id)
+      const oldIndex = localPerspectiveLayers.findIndex((layer) => layer.id === active.id)
+      const newIndex = localPerspectiveLayers.findIndex((layer) => layer.id === over.id)
       if (oldIndex < 0 || newIndex < 0) return
-      void savePerspectiveLayers(arrayMove(perspectiveLayers, oldIndex, newIndex))
+      const next = arrayMove(localPerspectiveLayers, oldIndex, newIndex)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
     },
-    [perspectiveLayers, savePerspectiveLayers]
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
   )
 
   const handlePerspectiveLayerLabelChange = useCallback(
     (layerId: string, label: string) => {
-      void savePerspectiveLayers(perspectiveLayers.map((layer) => layer.id === layerId ? { ...layer, label } : layer))
+      const next = localPerspectiveLayers.map((layer) => layer.id === layerId ? { ...layer, label } : layer)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
     },
-    [perspectiveLayers, savePerspectiveLayers]
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
   )
 
   const handlePerspectiveLayerIntensityChange = useCallback(
     (layerId: string, intensity: number) => {
-      void savePerspectiveLayers(perspectiveLayers.map((layer) => layer.id === layerId ? { ...layer, intensity } : layer))
+      const next = localPerspectiveLayers.map((layer) => layer.id === layerId ? { ...layer, intensity } : layer)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
     },
-    [perspectiveLayers, savePerspectiveLayers]
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
   )
 
   // Actions
@@ -1309,16 +1354,16 @@ export default function CharacterEditorPage() {
                           Add up to five WebP-optimized layers. Drag to reorder from back to front; each layer controls its own parallax strength on landing-page cards only.
                         </span>
                         <div className={styles.perspectiveStackEditor}>
-                          {perspectiveLayers.length > 0 ? (
+                          {localPerspectiveLayers.length > 0 ? (
                             <DndContext sensors={perspectiveLayerSensors} collisionDetection={closestCenter} onDragEnd={handlePerspectiveLayerDragEnd}>
-                              <SortableContext items={perspectiveLayers.map((layer) => layer.id)} strategy={verticalListSortingStrategy}>
+                              <SortableContext items={localPerspectiveLayers.map((layer) => layer.id)} strategy={verticalListSortingStrategy}>
                                 <div className={styles.perspectiveLayerList}>
-                                  {perspectiveLayers.map((layer, index) => (
+                                  {localPerspectiveLayers.map((layer, index) => (
                                     <SortablePerspectiveLayer
                                       key={layer.id}
                                       layer={layer}
                                       index={index}
-                                      disabled={perspectiveLayers.length < 2}
+                                      disabled={localPerspectiveLayers.length < 2}
                                       onLabelChange={handlePerspectiveLayerLabelChange}
                                       onIntensityChange={handlePerspectiveLayerIntensityChange}
                                       onRemove={handleRemovePerspectiveLayer}
@@ -1337,7 +1382,7 @@ export default function CharacterEditorPage() {
                           <button
                             type="button"
                             className={styles.perspectiveLayerAdd}
-                            disabled={perspectiveLayers.length >= MAX_PERSPECTIVE_LAYERS || perspectiveLayerProgress !== null}
+                            disabled={localPerspectiveLayers.length >= MAX_PERSPECTIVE_LAYERS || perspectiveLayerProgress !== null}
                             onClick={() => perspectiveLayerFileRef.current?.click()}
                           >
                             {perspectiveLayerProgress !== null ? (
@@ -1345,7 +1390,7 @@ export default function CharacterEditorPage() {
                             ) : (
                               <>
                                 <Upload size={13} />
-                                Add layer ({perspectiveLayers.length}/{MAX_PERSPECTIVE_LAYERS})
+                                Add layer ({localPerspectiveLayers.length}/{MAX_PERSPECTIVE_LAYERS})
                               </>
                             )}
                           </button>
