@@ -83,18 +83,42 @@ function getPerspectiveLayers(value: unknown): CharacterPerspectiveLayer[] {
 function getPerspectiveLayerStyle(index: number, total: number, intensity: number): CSSProperties {
   const frontness = total <= 1 ? 1 : index / (total - 1)
   const clampedIntensity = Math.max(0, Math.min(1.5, intensity))
-  const baseScale = 1.015 + frontness * 0.06
-  const hoverScale = baseScale + clampedIntensity * (0.012 + frontness * 0.03)
+
+  // Motion, tilt, and Z-depth still depend on frontness — that's what creates
+  // the parallax depth effect between layers.
+  const motionX = clampedIntensity * (2 + frontness * 11)
+  const motionY = clampedIntensity * (1.5 + frontness * 8.5)
+  const motionDepth = clampedIntensity * (-1 + frontness * 4)
+  const tiltAmount = clampedIntensity * (0.15 + frontness * 0.85)
+  const originDepth = -12 + frontness * 58
+  const hoverDepthTarget = clampedIntensity * (1 + frontness * 18)
+
+  // Scale is derived from this layer's own motion amplitude, not directly from
+  // its position in the parent stack. The layer is rendered at 116% size, giving
+  // an intrinsic 16% overscan on each half-axis. Compute the minimum scale
+  // needed to cover the worst-case translation + rotation for the smallest
+  // supported card (CARD_MOBILE_MIN_WIDTH).
+  const INTRINSIC_OVERSCAN = 0.16 // (116% - 100%) / 2 / 50%
+  const halfCard = CARD_MOBILE_MIN_WIDTH / 2
+  const halfDiagonal = halfCard * Math.sqrt(2)
+  const maxTranslate = Math.hypot(motionX, motionY)
+  const maxRotationOffset = (Math.abs(tiltAmount) * Math.PI / 180) * halfDiagonal
+  const totalDisplacement = maxTranslate + maxRotationOffset
+  const requiredOverscan = totalDisplacement / halfCard
+  const functionalScale = (1 + requiredOverscan) / (1 + INTRINSIC_OVERSCAN)
+  const baseScale = 1.015
+  const hoverScale = Math.max(baseScale, Math.min(1.18, functionalScale))
+
   return {
-    '--layer-origin-depth': `${-12 + frontness * 58}px`,
+    '--layer-origin-depth': `${originDepth}px`,
     '--layer-scale': baseScale.toFixed(3),
-    '--layer-hover-depth-target': `${clampedIntensity * (1 + frontness * 18)}px`,
+    '--layer-hover-depth-target': `${hoverDepthTarget}px`,
     '--layer-hover-scale': hoverScale.toFixed(3),
-    '--layer-motion-x': `${clampedIntensity * (2 + frontness * 11)}px`,
-    '--layer-motion-y': `${clampedIntensity * (1.5 + frontness * 8.5)}px`,
-    '--layer-motion-depth': `${clampedIntensity * (-1 + frontness * 4)}px`,
-    '--layer-tilt-amount': `${clampedIntensity * (0.15 + frontness * 0.85)}deg`,
-    '--layer-tilt-amount-neg': `${clampedIntensity * (-0.15 - frontness * 0.85)}deg`,
+    '--layer-motion-x': `${motionX}px`,
+    '--layer-motion-y': `${motionY}px`,
+    '--layer-motion-depth': `${motionDepth}px`,
+    '--layer-tilt-amount': `${tiltAmount}deg`,
+    '--layer-tilt-amount-neg': `${-tiltAmount}deg`,
   } as CSSProperties
 }
 
