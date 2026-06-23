@@ -182,6 +182,9 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   // the per-message render pipeline doesn't block the first visible frame.
   const [initialRangeWarm, setInitialRangeWarm] = useState(false)
   const initialWarmTimerRef = useRef<number | null>(null)
+  // Fade the message list in once TanStack has populated virtual rows on
+  // chat load. Reset on every chat switch so the next chat can fade in too.
+  const [listVisible, setListVisible] = useState(false)
   const interceptorRegistryVersion = useSyncExternalStore(
     subscribeTagInterceptorRegistry,
     getTagInterceptorRegistryVersion,
@@ -217,6 +220,12 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       cancelAnimationFrame(initialScrollRafRef.current)
       initialScrollRafRef.current = null
     }
+  }, [chatId])
+
+  // Reset the fade-in state synchronously on chat switch so the next chat
+  // starts hidden instead of flashing the new content for one frame.
+  useLayoutEffect(() => {
+    setListVisible(false)
   }, [chatId])
 
   // Record a programmatic scrollTop write so handleScroll can identify the
@@ -615,6 +624,15 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   }, [measureMountedRows])
 
   const virtualItems = rowVirtualizer.getVirtualItems()
+
+  // Trigger the chat-load fade-in as soon as the virtualizer has real rows.
+  // Rows are still measured/painted while opacity is 0, so the user sees the
+  // list only after it has been positioned.
+  useEffect(() => {
+    if (!listVisible && virtualItems.length > 0) {
+      setListVisible(true)
+    }
+  }, [listVisible, virtualItems])
 
   // Gate that keeps the keyboard/safe-zone repin from fighting the unified
   // scroll guard while streaming is active.
@@ -1016,6 +1034,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       data-component="MessageList"
       className={styles.list}
       ref={scrollRef}
+      style={{ opacity: listVisible ? 1 : 0 }}
       onScroll={handleScroll}
       onWheel={handleWheel}
       onTouchStart={handleTouchStart}
