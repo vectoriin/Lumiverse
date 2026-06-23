@@ -485,6 +485,8 @@
   inset: -8%;
   width: 116%;
   height: 116%;
+  max-width: none;
+  max-height: none;
   object-fit: cover;
   transform-origin: 50% 50%;
   user-select: none;
@@ -569,6 +571,7 @@
   cursor: pointer;
   background: none;
   border: none;
+  padding: 0;
   text-align: left;
   color: inherit;
 }
