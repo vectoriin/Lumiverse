@@ -30,7 +30,6 @@ interface MessageContentProps {
   isUser: boolean
   userName: string
   isStreaming?: boolean
-  lockStreamingHeight?: boolean
   messageId?: string
   chatId?: string
   depth?: number
@@ -1097,9 +1096,8 @@ function extractTrustedYouTubeEmbeds(raw: string): { content: string; embeds: Tr
 
 // While streaming, an unclosed <details>/<summary> tag makes the markdown +
 // sanitize pipeline emit a structure where the in-progress block briefly takes
-// up real vertical space. That spike gets locked in by the streamingMinHeight
-// ratchet below, so the bubble stays inflated until the stream ends and then
-// snaps back. Pre-closing any unbalanced tags keeps the rendered tree stable.
+// up real vertical space. Pre-closing any unbalanced tags keeps the rendered
+// tree stable and avoids a visible height spike followed by a snap back.
 const STREAMING_DETAILS_TAG_RE = /<\/?(details|summary)\b[^>]*>/gi
 
 function balanceStreamingDetails(raw: string): string {
@@ -1391,7 +1389,6 @@ export default function MessageContent({
   isUser,
   userName,
   isStreaming = false,
-  lockStreamingHeight = true,
   messageId,
   chatId,
   depth = 0,
@@ -1471,9 +1468,7 @@ export default function MessageContent({
   const lumiaOOCStyle = useStore((s) => s.lumiaOOCStyle)
   const containerRef = useRef<HTMLDivElement>(null)
   const prevTextLenRef = useRef(0)
-  const maxStreamingHeightRef = useRef(0)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
-  const [streamingMinHeight, setStreamingMinHeight] = useState<number | null>(null)
 
   const handleLightboxClose = useCallback(() => setLightboxSrc(null), [])
 
@@ -1545,42 +1540,6 @@ export default function MessageContent({
       for (const timer of settleTimers) window.clearTimeout(timer)
     }
   }, [renderContent])
-
-  useLayoutEffect(() => {
-    if (!isStreaming || !lockStreamingHeight) {
-      maxStreamingHeightRef.current = 0
-      setStreamingMinHeight(null)
-      return
-    }
-
-    const container = containerRef.current
-    if (!container) return
-
-    const updateMinHeight = () => {
-      // Measure in layout (unscaled) pixels via offsetHeight, NOT
-      // getBoundingClientRect. Under the standardized CSS `zoom` model used by
-      // --lumiverse-ui-scale (`body > * { zoom }` in reset.css), getBoundingClientRect
-      // returns zoom-*scaled* px, but this container lives inside that zoomed
-      // subtree — so a min-height written from a scaled measurement gets multiplied
-      // by zoom a second time and balloons the bubble. offsetHeight is zoom-invariant
-      // (and font-scale aware, since font scale is plain CSS font-size with no
-      // transform), keeping the ratchet in the virtualizer's own coordinate space.
-      const nextHeight = container.offsetHeight
-      if (nextHeight <= maxStreamingHeightRef.current) return
-      maxStreamingHeightRef.current = nextHeight
-      setStreamingMinHeight(nextHeight)
-    }
-
-    updateMinHeight()
-
-    const observer = new ResizeObserver(() => {
-      updateMinHeight()
-    })
-
-    observer.observe(container)
-    return () => observer.disconnect()
-  }, [isStreaming, lockStreamingHeight])
-
 
   const renderedBlocks = useMemo(() => {
     const elements: React.ReactNode[] = []
@@ -1708,15 +1667,12 @@ export default function MessageContent({
     prevTextLenRef.current = currentLen
   }, [content, isStreaming])
 
-  const minHeight = streamingMinHeight ?? 0
-
   return (
     <>
       <div
         data-component="MessageContent"
         ref={containerRef}
         className={clsx(styles.content, isUser ? styles.contentUser : styles.contentChar)}
-        style={minHeight > 0 ? { minHeight: `${minHeight}px` } : undefined}
       >
         {renderedBlocks}
         <SpindleMessageWidgets messageId={messageId} />
