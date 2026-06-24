@@ -73,6 +73,7 @@ export default function WorldBookEditorModal() {
     selectedBookId,
     setBooks,
     onSelectedBookDeleted: () => setSelectedBookId(null),
+    refreshBooks: loadBooks,
   })
 
   const loadVectorSummary = useCallback(async (bookId: string) => {

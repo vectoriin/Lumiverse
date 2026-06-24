@@ -29,6 +29,9 @@ export default function WorldBookPanel() {
   const openModal = useStore((s) => s.openModal)
   const isMobile = useIsMobile()
   const activeChatId = useStore((s) => s.activeChatId)
+  const drawerOpen = useStore((s) => s.drawerOpen)
+  const drawerTab = useStore((s) => s.drawerTab)
+  const activeModal = useStore((s) => s.activeModal)
   const globalWorldBooks = useStore((s) => s.globalWorldBooks)
   const worldInfoSettings = useStore((s) => s.worldInfoSettings)
   const worldBookListSortDir = useStore((s) => s.worldBookListSortDir)
@@ -91,16 +94,28 @@ export default function WorldBookPanel() {
     } catch {}
   }, [])
 
-  useEffect(() => {
-    loadBooks()
-  }, [loadBooks])
-
   // Live-sync the book list with changes from other tabs/devices or Spindle.
   const { markLocalBookEdit } = useWorldBookListLiveSync({
     selectedBookId,
     setBooks,
     onSelectedBookDeleted: () => setSelectedBookId(null),
+    refreshBooks: loadBooks,
   })
+
+  const isVisible = drawerOpen && drawerTab === 'lorebook'
+  const wasVisibleRef = useRef(false)
+  const prevModalRef = useRef<string | null>(activeModal)
+  useEffect(() => {
+    const becameVisible = isVisible && !wasVisibleRef.current
+    const worldBookEditorClosed = isVisible
+      && prevModalRef.current === 'worldBookEditor'
+      && activeModal !== 'worldBookEditor'
+    if (becameVisible || worldBookEditorClosed) {
+      void loadBooks()
+    }
+    wasVisibleRef.current = isVisible
+    prevModalRef.current = activeModal
+  }, [activeModal, isVisible, loadBooks])
 
   const loadVectorSummary = useCallback(async (bookId: string) => {
     try {

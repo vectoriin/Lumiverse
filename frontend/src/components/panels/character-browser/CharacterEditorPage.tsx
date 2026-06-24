@@ -42,7 +42,7 @@ import LazyImage from '@/components/shared/LazyImage'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import { useLongPress } from '@/hooks/useLongPress'
-import type { Character, CharacterGalleryItem } from '@/types/api'
+import type { Character, CharacterGalleryItem, WorldBook } from '@/types/api'
 import type { WallpaperRef } from '@/types/store'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/shared/FormComponents'
@@ -240,7 +240,7 @@ export default function CharacterEditorPage() {
   const [lorebookResult, setLorebookResult] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [galleryItems, setGalleryItems] = useState<CharacterGalleryItem[]>([])
-  const [worldBooks, setWorldBooks] = useState<Array<{ id: string; name: string; folder: string }>>([])
+  const [worldBooks, setWorldBooks] = useState<Array<Pick<WorldBook, 'id' | 'name' | 'folder' | 'metadata'>>>([])
   const [galleryUploading, setGalleryUploading] = useState(false)
   const [extracting, setExtracting] = useState(false)
   const [creatingPersona, setCreatingPersona] = useState(false)
@@ -411,8 +411,8 @@ export default function CharacterEditorPage() {
     loadRegexScripts().catch(() => {})
   }, [editingCharacterId, loadRegexScripts])
 
-  const upsertWorldBookOption = useCallback((book: { id: string; name: string; folder?: string }) => {
-    const normalized = { id: book.id, name: book.name, folder: book.folder ?? '' }
+  const upsertWorldBookOption = useCallback((book: { id: string; name: string; folder?: string; metadata?: Record<string, any> }) => {
+    const normalized = { id: book.id, name: book.name, folder: book.folder ?? '', metadata: book.metadata ?? {} }
     setWorldBooks((prev) => {
       const existingIndex = prev.findIndex((item) => item.id === book.id)
       if (existingIndex === -1) return [normalized, ...prev]
@@ -429,7 +429,7 @@ export default function CharacterEditorPage() {
       if (!editingCharacterId) return
       try {
         const res = await worldBooksApi.list({ limit: 1000 })
-        if (!cancelled) setWorldBooks(res.data.map((b) => ({ id: b.id, name: b.name, folder: b.folder || '' })))
+        if (!cancelled) setWorldBooks(res.data.map((b) => ({ id: b.id, name: b.name, folder: b.folder || '', metadata: b.metadata || {} })))
       } catch {
         // no-op
       }
@@ -787,9 +787,19 @@ export default function CharacterEditorPage() {
   const clearActivatedWorldInfo = useStore((s) => s.clearActivatedWorldInfo)
 
   const attachedWorldBookIds = useMemo(
-    () => getCharacterWorldBookIds(character?.extensions),
-    [character?.extensions]
+    () => getCharacterWorldBookIds(workingExtensions),
+    [workingExtensions]
   )
+
+  const embeddedWorldBook = useMemo(() => {
+    if (!editingCharacterId) return null
+    const attachedIdSet = new Set(attachedWorldBookIds)
+    return worldBooks.find((book) =>
+      attachedIdSet.has(book.id)
+      && book.metadata?.source === 'character'
+      && book.metadata?.source_character_id === editingCharacterId,
+    ) ?? null
+  }, [attachedWorldBookIds, editingCharacterId, worldBooks])
 
   const handleRemoveWorldBook = useCallback(
     (worldBookId: string) => {
@@ -1718,6 +1728,18 @@ export default function CharacterEditorPage() {
                           </div>
                           {lorebookResult ? (
                             <span className={styles.lorebookSuccess}>{lorebookResult}</span>
+                          ) : embeddedWorldBook ? (
+                            <button
+                              type="button"
+                              className={styles.addBtn}
+                              onClick={() => {
+                                setPendingWorldBookEditId(embeddedWorldBook.id)
+                                close()
+                                openDrawer('lorebook')
+                              }}
+                            >
+                              {t('characterEditor.openInLorebook')}
+                            </button>
                           ) : (
                             <button
                               type="button"
@@ -1728,10 +1750,17 @@ export default function CharacterEditorPage() {
                                 setLorebookImporting(true)
                                 try {
                                   const res = await worldBooksApi.importCharacterBook(editingCharacterId)
-                                  upsertWorldBookOption({ id: res.world_book.id, name: res.world_book.name, folder: res.world_book.folder })
+                                  upsertWorldBookOption({
+                                    id: res.world_book.id,
+                                    name: res.world_book.name,
+                                    folder: res.world_book.folder,
+                                    metadata: res.world_book.metadata,
+                                  })
                                   mutateExtensions((ext) => {
                                     const currentIds = getCharacterWorldBookIds(ext)
-                                    return setCharacterWorldBookIds(ext, [...currentIds, res.world_book.id])
+                                    return currentIds.includes(res.world_book.id)
+                                      ? setCharacterWorldBookIds(ext, currentIds)
+                                      : setCharacterWorldBookIds(ext, [...currentIds, res.world_book.id])
                                   }, true)
                                   setLorebookResult(t('characterEditor.lorebookImported', { count: res.entry_count, name: res.world_book.name }))
                                 } catch {

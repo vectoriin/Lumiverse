@@ -445,6 +445,42 @@ export function getWorldBook(userId: string, id: string): WorldBook | null {
 }
 
 /**
+ * Resolve the standalone world book that already represents a character's
+ * embedded `character_book`, if one exists. Prefer a currently-attached book
+ * ID first, then fall back to the auto-managed import, then the newest manual
+ * import for that character so repeated "import lorebook" clicks do not spawn
+ * duplicates.
+ */
+export function findImportedCharacterBookWorldBook(
+  userId: string,
+  characterId: string,
+  preferredIds: string[] = [],
+): WorldBook | null {
+  const preferred = preferredIds.filter((id) => typeof id === "string" && id);
+  const preferredPlaceholders = preferred.map(() => "?").join(", ");
+  const preferredOrder = preferred.length > 0
+    ? `CASE WHEN id IN (${preferredPlaceholders}) THEN 0 ELSE 1 END,`
+    : "";
+
+  const row = getDb().query(
+    `SELECT *
+       FROM world_books
+      WHERE user_id = ?
+        AND json_extract(metadata, '$.source') = 'character'
+        AND json_extract(metadata, '$.source_character_id') = ?
+      ORDER BY
+        ${preferredOrder}
+        CASE WHEN json_extract(metadata, '$.auto_managed_by_character') = 1 THEN 0 ELSE 1 END,
+        updated_at DESC,
+        created_at DESC,
+        id ASC
+      LIMIT 1`
+  ).get(userId, characterId, ...preferred) as any;
+
+  return row ? rowToBook(row) : null;
+}
+
+/**
  * Cheap signature of a user's world-book list for ETag generation: count +
  * max(updated_at). Creating/deleting a book changes the count; editing a book
  * OR any of its entries bumps updated_at (entry mutations call touchWorldBook),

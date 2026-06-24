@@ -852,10 +852,22 @@ app.post("/import-character-book", async (c) => {
     return c.json({ error: "No embedded character book found" }, 400);
   }
 
+  const currentIds = getCharacterWorldBookIds(character.extensions);
+  const existing = svc.findImportedCharacterBookWorldBook(userId, characterId, currentIds);
+  if (existing) {
+    if (!currentIds.includes(existing.id)) {
+      const nextExtensions = setCharacterWorldBookIds(
+        { ...(character.extensions || {}) },
+        [...currentIds, existing.id],
+      );
+      await charSvc.updateCharacter(userId, characterId, { extensions: nextExtensions });
+    }
+    return c.json({ world_book: existing, entry_count: svc.listEntries(userId, existing.id).length });
+  }
+
   const result = svc.importCharacterBook(userId, characterId, character.name, characterBook, {
     signal: c.req.raw.signal,
   });
-  const currentIds = getCharacterWorldBookIds(character.extensions);
   const nextExtensions = setCharacterWorldBookIds(
     { ...(character.extensions || {}) },
     [...currentIds, result.worldBook.id],

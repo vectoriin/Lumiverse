@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { wsClient } from '@/ws/client'
+import { wsClient, WS_OPEN } from '@/ws/client'
 import { EventType } from '@/ws/events'
 import type { WorldBookChangedPayload, WorldBookDeletedPayload } from '@/types/ws-events'
 import type { WorldBook } from '@/types/api'
@@ -18,6 +18,8 @@ interface Options {
   setBooks: Dispatch<SetStateAction<WorldBook[]>>
   /** Called when the currently-selected book is deleted elsewhere. */
   onSelectedBookDeleted: () => void
+  /** Optional hard refresh used to recover from missed WS events after reconnect. */
+  refreshBooks?: () => void | Promise<void>
 }
 
 /**
@@ -34,14 +36,17 @@ export function useWorldBookListLiveSync({
   selectedBookId,
   setBooks,
   onSelectedBookDeleted,
+  refreshBooks,
 }: Options): { markLocalBookEdit: () => void } {
   // Mirror inputs into refs so the subscription binds once and never goes stale.
   const selectedRef = useRef(selectedBookId)
   const setBooksRef = useRef(setBooks)
   const onDeletedRef = useRef(onSelectedBookDeleted)
+  const refreshRef = useRef(refreshBooks)
   selectedRef.current = selectedBookId
   setBooksRef.current = setBooks
   onDeletedRef.current = onSelectedBookDeleted
+  refreshRef.current = refreshBooks
 
   const lastLocalEditAt = useRef(0)
   const markLocalBookEdit = useCallback(() => {
@@ -69,6 +74,13 @@ export function useWorldBookListLiveSync({
       offChanged()
       offDeleted()
     }
+  }, [])
+
+  useEffect(() => {
+    if (!refreshRef.current) return
+    return wsClient.on(WS_OPEN, () => {
+      void refreshRef.current?.()
+    })
   }, [])
 
   return { markLocalBookEdit }
