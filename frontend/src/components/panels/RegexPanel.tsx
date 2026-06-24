@@ -111,7 +111,7 @@ export default function RegexPanel() {
   const [creatingFolderName, setCreatingFolderName] = useState('')
   const [creatingFolderMode, setCreatingFolderMode] = useState(false)
   const [deleteScriptTarget, setDeleteScriptTarget] = useState<RegexScript | null>(null)
-  const [deleteFolderTarget, setDeleteFolderTarget] = useState<{ scripts: RegexScript[]; folder: string } | null>(null)
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState<{ scripts: RegexScript[]; folder: string } | null>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
 
@@ -164,10 +164,10 @@ export default function RegexPanel() {
     return true
   })
 
-  const hasAnyFolders = folders.length > 0 || filteredScripts.some((s) => s.folder)
-
   const groupedScripts = useMemo(() => {
-    if (!hasAnyFolders) return null
+    if (filteredScripts.length === 0) return null
+    // Keep the uncategorized bucket under a folder-style header too, so it can
+    // expose the same bulk actions as named folders.
     const groups: Array<{ folder: string; scripts: RegexScript[] }> = []
     const folderMap = new Map<string, RegexScript[]>()
     for (const s of filteredScripts) {
@@ -185,7 +185,7 @@ export default function RegexPanel() {
       return a.folder.localeCompare(b.folder)
     })
     return groups
-  }, [filteredScripts, hasAnyFolders])
+  }, [filteredScripts])
 
   const toggleFolder = useCallback((folder: string) => {
     setCollapsedFolders((prev) => {
@@ -315,8 +315,8 @@ export default function RegexPanel() {
     }
   }, [removeRegexScript, expandedId])
 
-  const handleDeleteFolder = useCallback(async (scripts: RegexScript[]) => {
-    setDeleteFolderTarget(null)
+  const handleDeleteGroup = useCallback(async (scripts: RegexScript[]) => {
+    setDeleteGroupTarget(null)
     if (scripts.length === 0) return
     const ids = scripts.map((s) => s.id)
     try {
@@ -540,6 +540,7 @@ export default function RegexPanel() {
                   const folderKey = group.folder || UNCATEGORIZED_KEY
                   const isCollapsed = collapsedFolders.has(folderKey)
                   const folderLabel = group.folder || t('regexPanel.uncategorized')
+                  const isNamedFolder = Boolean(group.folder)
                   return (
                     <div key={folderKey}>
                       <DroppableFolderHeader folderKey={folderKey} dropDisabled={!isCollapsed} onToggle={() => toggleFolder(folderKey)}>
@@ -551,40 +552,43 @@ export default function RegexPanel() {
                           {folderLabel}
                         </span>
                         <span className={styles.folderCount}>{group.scripts.length}</span>
-                        {group.folder && (
-                          <>
-                            {activeLoomPresetId && (
-                              <button
-                                className={styles.folderDeleteBtn}
-                                onClick={(e) => handleBindFolderToPreset(group.scripts, folderLabel, e)}
-                                title={group.scripts.every((s) => s.preset_id === activeLoomPresetId)
-                                  ? t('regexPanel.unbindFolderFromPreset', { folder: folderLabel })
-                                  : t('regexPanel.bindFolderToPreset', { folder: folderLabel })}
-                                aria-label={group.scripts.every((s) => s.preset_id === activeLoomPresetId)
-                                  ? t('regexPanel.unbindFolderFromPresetAria', { folder: folderLabel })
-                                  : t('regexPanel.bindFolderToPresetAria', { folder: folderLabel })}
-                              >
-                                {group.scripts.every((s) => s.preset_id === activeLoomPresetId) ? <Unlink size={12} /> : <Link size={12} />}
-                              </button>
-                            )}
+                        <div className={styles.folderActions}>
+                          {isNamedFolder && activeLoomPresetId && (
                             <button
-                              className={styles.folderDeleteBtn}
+                              className={styles.folderActionBtn}
+                              onClick={(e) => handleBindFolderToPreset(group.scripts, folderLabel, e)}
+                              title={group.scripts.every((s) => s.preset_id === activeLoomPresetId)
+                                ? t('regexPanel.unbindFolderFromPreset', { folder: folderLabel })
+                                : t('regexPanel.bindFolderToPreset', { folder: folderLabel })}
+                              aria-label={group.scripts.every((s) => s.preset_id === activeLoomPresetId)
+                                ? t('regexPanel.unbindFolderFromPresetAria', { folder: folderLabel })
+                                : t('regexPanel.bindFolderToPresetAria', { folder: folderLabel })}
+                            >
+                              {group.scripts.every((s) => s.preset_id === activeLoomPresetId) ? <Unlink size={12} /> : <Link size={12} />}
+                            </button>
+                          )}
+                          {isNamedFolder && (
+                            <button
+                              className={styles.folderActionBtn}
                               onClick={(e) => handleExportFolder(group.folder, e)}
                               title={t('regexPanel.exportFolder', { folder: folderLabel })}
                               aria-label={t('regexPanel.exportFolderAria', { folder: folderLabel })}
                             >
                               <Download size={12} />
                             </button>
-                            <button
-                              className={styles.folderDeleteBtn}
-                              onClick={(e) => { e.stopPropagation(); setDeleteFolderTarget({ scripts: group.scripts, folder: folderLabel }) }}
-                              title={t('regexPanel.deleteFolderScripts', { folder: folderLabel })}
-                              aria-label={t('regexPanel.deleteFolderScriptsAria', { folder: folderLabel })}
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </>
-                        )}
+                          )}
+                          <button
+                            className={clsx(styles.folderActionBtn, styles.folderDeleteBtn)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDeleteGroupTarget({ scripts: group.scripts, folder: folderLabel })
+                            }}
+                            title={t('regexPanel.deleteFolderScripts', { folder: folderLabel })}
+                            aria-label={t('regexPanel.deleteFolderScriptsAria', { folder: folderLabel })}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </DroppableFolderHeader>
                       {!isCollapsed &&
                         group.scripts.map((script) => (
@@ -645,15 +649,15 @@ export default function RegexPanel() {
         />
       )}
 
-      {deleteFolderTarget && (
+      {deleteGroupTarget && (
         <ConfirmationModal
           isOpen={true}
           title={t('regexPanel.deleteFolderTitle')}
-          message={t('regexPanel.deleteFolderConfirm', { count: deleteFolderTarget.scripts.length, folder: deleteFolderTarget.folder })}
+          message={t('regexPanel.deleteFolderConfirm', { count: deleteGroupTarget.scripts.length, folder: deleteGroupTarget.folder })}
           variant="danger"
           confirmText={tc('actions.delete')}
-          onConfirm={() => { void handleDeleteFolder(deleteFolderTarget.scripts) }}
-          onCancel={() => setDeleteFolderTarget(null)}
+          onConfirm={() => { void handleDeleteGroup(deleteGroupTarget.scripts) }}
+          onCancel={() => setDeleteGroupTarget(null)}
         />
       )}
     </div>
