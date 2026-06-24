@@ -2,7 +2,7 @@
  * Default BubbleMessage renderer — the original implementation extracted
  * so it can be used as a fallback when a user override crashes or is disabled.
  */
-import { useRef, useCallback, useState, useMemo, useLayoutEffect } from 'react'
+import { useRef, useCallback, useState, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { Copy, Pencil, Trash2, EyeOff, Eye, BarChart3, Volume2, Square } from 'lucide-react'
@@ -24,7 +24,7 @@ import useSwipeGesture from '@/hooks/useSwipeGesture'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useMessagePlayback } from '@/hooks/useMessagePlayback'
 import { copyTextToClipboard, getSelectionTextWithin } from '@/lib/clipboard'
-import { replay as replaySpindleInjections } from '@/lib/spindle/dom-injection-registry'
+import { scheduleReplay as scheduleSpindleInjectionReplay } from '@/lib/spindle/dom-injection-registry'
 import { useStore } from '@/store'
 import type { Message } from '@/types/api'
 import type { GenerationMetrics } from '@/types/ws-events'
@@ -208,18 +208,13 @@ export default function BubbleMessageDefault({
   const isHighlighted = useStore((s) => s.highlightedMessageId === message.id)
   const cardRef = useRef<HTMLDivElement>(null)
 
-  // Re-inject any Spindle extension DOM that was registered for this
-  // message id but lost when the virtualizer unmounted the row (or this
-  // is the first mount and an extension injected before the row existed).
-  // useLayoutEffect — not useEffect — so the injection lands in the same
-  // paint as the bubble's mount, avoiding a flash of "no extension DOM".
-  // The dep is just message.id, so it only fires when this row genuinely
-  // hosts a different message; it won't re-replay on every re-render
-  // (which is what we want — replay is idempotent but still pointless
-  // work to do on every prop change).
-  useLayoutEffect(() => {
+  // Replay extension-owned DOM after paint through the cooperative
+  // Spindle queue. That avoids doing wrapper re-attachment inside the
+  // bubble's synchronous commit path, which is where chat-switch hitching
+  // becomes noticeable for large injected subtrees.
+  useEffect(() => {
     if (!cardRef.current) return
-    replaySpindleInjections(message.id, cardRef.current)
+    return scheduleSpindleInjectionReplay(message.id, cardRef.current)
   }, [message.id])
 
   const [contextMenuPos, setContextMenuPos] = useState<ContextMenuPos | null>(null)

@@ -55,6 +55,7 @@ export default function ReasoningBlock({ reasoning, reasoningDuration, reasoning
   const timerRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
   const shouldPreferPlainText = reasoning.length >= LARGE_REASONING_RENDER_THRESHOLD
+  const wasLargeReasoningRef = useRef(shouldPreferPlainText)
   const deferredReasoning = useDeferredValue(reasoning)
 
   const toggle = useCallback(() => {
@@ -104,7 +105,10 @@ export default function ReasoningBlock({ reasoning, reasoningDuration, reasoning
   }, [isStreaming, reasoningDuration, reasoningStartedAt])
 
   useEffect(() => {
-    if (shouldPreferPlainText && isStreaming && renderMode === 'markdown') {
+    const crossedLargeThreshold = shouldPreferPlainText && !wasLargeReasoningRef.current
+    wasLargeReasoningRef.current = shouldPreferPlainText
+
+    if (crossedLargeThreshold && isStreaming && renderMode === 'markdown') {
       setRenderMode('text')
     }
   }, [shouldPreferPlainText, isStreaming, renderMode])

@@ -1,7 +1,7 @@
 {
   "name": "lumiverse-frontend",
   "private": true,
-  "version": "1.0.4",
+  "version": "1.0.6",
   "type": "module",
   "scripts": {
     "dev": "bun run extract-props && bun run extract-css-vars && vite",
@@ -28,7 +28,7 @@
     "@dnd-kit/sortable": "^9.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@tabler/icons-react": "^3.41.0",
-    "@tanstack/react-virtual": "^3.11.2",
+    "@tanstack/react-virtual": "^3.14.3",
     "better-auth": "^1.5.3",
     "clsx": "^2.1.1",
     "dompurify": "^3.2.4",
@@ -38,7 +38,7 @@
     "i18next": "^26.2.0",
     "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^0.468.0",
-    "lumiverse-spindle-types": "^0.5.24",
+    "lumiverse-spindle-types": "0.5.26",
     "marked": "^15.0.4",
     "motion": "^12.0.0",
     "react": "^19.2.6",
@@ -65,7 +65,7 @@
     "workbox-strategies": "^7.4.0"
   },
   "optionalDependencies": {
-    "@rolldown/binding-android-arm64": "1.0.0-rc.12",
+    "@rolldown/binding-android-arm64": "1.0.2",
     "lightningcss-android-arm64": "1.32.0"
   }
 }

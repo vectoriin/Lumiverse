@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useCallback, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { useNavigate, useParams } from 'react-router'
 import { UserRound, ListChecks } from 'lucide-react'
 import { useStore } from '@/store'
 import { toast } from '@/lib/toast'
@@ -11,10 +11,10 @@ import { loadoutsApi } from '@/api/loadouts'
 import { recoverPooledGeneration } from '@/lib/generation-recovery'
 import { charactersApi } from '@/api/characters'
 import { packsApi } from '@/api/packs'
-import { imagesApi } from '@/api/images'
 import { expressionsApi } from '@/api/expressions'
 import { personaToastName, resolveAutoPersonaBinding } from '@/store/slices/personas'
 import type { WallpaperRef } from '@/types/store'
+import WallpaperLayer from '@/components/shared/WallpaperLayer'
 import useSwipeKeyboard from '@/hooks/useSwipeKeyboard'
 import useEditKeyboard from '@/hooks/useEditKeyboard'
 import useIsMobile from '@/hooks/useIsMobile'
@@ -49,6 +49,14 @@ interface SpindleNotice {
 const SPINDLE_NOTICE_SHOW_DELAY_MS = 180
 const SPINDLE_NOTICE_HIDE_DELAY_MS = 280
 const SPINDLE_NOTICE_MIN_VISIBLE_MS = 700
+const WALLPAPER_TRANSITION_HALF_MS = 260
+const WALLPAPER_READY_FALLBACK_MS = 5000
+const CHAT_CHROME_ENTER_MS = 90
+const CHAT_CHROME_LEAVE_MS = 220
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
 
 interface CortexRebuildStatus {
   chatId?: string
@@ -172,6 +180,7 @@ function buildSpindleNotice(payload: SpindlePreGenerationActivityPayload, t: (ke
 export default function ChatView() {
   const { t } = useTranslation('chat')
   const { chatId } = useParams<{ chatId: string }>()
+  const navigate = useNavigate()
   const autoSwitchedPersonaIdRef = useRef<string | null>(null)
   const spindleActiveRef = useRef(new Map<string, SpindlePreGenerationActivityPayload>())
   const spindleLatestRef = useRef<SpindlePreGenerationActivityPayload | null>(null)
@@ -198,6 +207,11 @@ export default function ChatView() {
   const chatWidthMode = useStore((s) => s.chatWidthMode)
   const chatContentMaxWidth = useStore((s) => s.chatContentMaxWidth)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const wallpaperTransitionTimeouts = useRef<number[]>([])
+  const chromeEnterTimerRef = useRef<number | null>(null)
+  const chromeLeaveTimerRef = useRef<number | null>(null)
+  const [chatChromeEntering, setChatChromeEntering] = useState(() => !prefersReducedMotion())
+  const [chatChromeLeaving, setChatChromeLeaving] = useState(false)
   const messageSelectMode = useStore((s) => s.messageSelectMode)
   const setMessageSelectMode = useStore((s) => s.setMessageSelectMode)
   const toggleSelectMode = useCallback(() => {
@@ -206,6 +220,73 @@ export default function ChatView() {
 
   useSwipeKeyboard()
   useEditKeyboard()
+
+  useLayoutEffect(() => {
+    if (!chatId) return
+
+    if (chromeEnterTimerRef.current !== null) {
+      window.clearTimeout(chromeEnterTimerRef.current)
+      chromeEnterTimerRef.current = null
+    }
+
+    if (prefersReducedMotion()) {
+      setChatChromeEntering(false)
+      document.body.removeAttribute('data-chat-chrome-entering')
+      return
+    }
+
+    setChatChromeEntering(true)
+    document.body.setAttribute('data-chat-chrome-entering', 'true')
+    const handlePopulated = () => {
+      setChatChromeEntering(false)
+      document.body.removeAttribute('data-chat-chrome-entering')
+      if (chromeEnterTimerRef.current !== null) {
+        window.clearTimeout(chromeEnterTimerRef.current)
+        chromeEnterTimerRef.current = null
+      }
+    }
+    window.addEventListener('lumiverse:chat-items-populated', handlePopulated, { once: true })
+
+    // Fallback if virtualizer fails or is completely empty
+    chromeEnterTimerRef.current = window.setTimeout(() => {
+      chromeEnterTimerRef.current = null
+      setChatChromeEntering(false)
+      document.body.removeAttribute('data-chat-chrome-entering')
+    }, Math.max(CHAT_CHROME_ENTER_MS, 400))
+
+    return () => {
+      window.removeEventListener('lumiverse:chat-items-populated', handlePopulated)
+      if (chromeEnterTimerRef.current !== null) {
+        window.clearTimeout(chromeEnterTimerRef.current)
+        chromeEnterTimerRef.current = null
+      }
+      document.body.removeAttribute('data-chat-chrome-entering')
+    }
+  }, [chatId])
+
+  useEffect(() => {
+    return () => {
+      if (chromeLeaveTimerRef.current !== null) {
+        window.clearTimeout(chromeLeaveTimerRef.current)
+        chromeLeaveTimerRef.current = null
+      }
+    }
+  }, [])
+
+  const handleNavigateHome = useCallback(() => {
+    if (chromeLeaveTimerRef.current !== null) return
+
+    if (prefersReducedMotion()) {
+      navigate('/')
+      return
+    }
+
+    setChatChromeLeaving(true)
+    chromeLeaveTimerRef.current = window.setTimeout(() => {
+      chromeLeaveTimerRef.current = null
+      navigate('/')
+    }, CHAT_CHROME_LEAVE_MS)
+  }, [navigate])
 
   const cortexNotice = useMemo(() => buildCortexNotice(ingestionStatus, rebuildStatus, t), [ingestionStatus, rebuildStatus, t])
 
@@ -400,6 +481,14 @@ export default function ChatView() {
         useStore.getState().setActiveChatDisplayOwner(chat.character_display_owner ?? null)
         useStore.getState().setActiveChatName(chat.name ?? null)
         setMessages(msgPage.data, msgPage.total)
+
+        if (msgPage.data.length === 0) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated'))
+            })
+          })
+        }
 
         // Chat-derived store state, applied synchronously with setMessages so
         // it lands in the same render batch. Each of these used to trickle in
@@ -665,13 +754,60 @@ export default function ChatView() {
     return { image_id: imageId, type: 'image' }
   }, [useCharacterBackground, activeCharacterId, characters, activeChatMetadata])
 
-  // Resolve effective wallpaper: per-chat > global > character avatar
-  const effectiveWallpaper = activeChatWallpaper ?? wallpaper.global ?? characterBackground
-  const wallpaperUrl = effectiveWallpaper?.image_id ? imagesApi.url(effectiveWallpaper.image_id) : null
-  const wallpaperIsVideo = effectiveWallpaper?.type === 'video'
-  const wallpaperOpacity = wallpaper.opacity ?? 0.3
-  const wallpaperFit = wallpaper.fit ?? 'cover'
-  const hasAnyBackground = !!(sceneBackground || wallpaperUrl)
+  // Global wallpaper is persistent in App so video playback survives route
+  // changes. ChatView only renders overrides above it.
+  const effectiveWallpaper = activeChatWallpaper ?? (wallpaper.global ? null : characterBackground)
+  const effectiveWallpaperKey = effectiveWallpaper ? `${effectiveWallpaper.type}:${effectiveWallpaper.image_id}` : 'none'
+  const [displayedWallpaper, setDisplayedWallpaper] = useState<WallpaperRef | null>(effectiveWallpaper)
+  const displayedWallpaperKeyRef = useRef(effectiveWallpaperKey)
+  const pendingWallpaperReadyKeyRef = useRef<string | null>(null)
+  const [wallpaperTransitioning, setWallpaperTransitioning] = useState(false)
+  const hasAnyBackground = !!(sceneBackground || displayedWallpaper?.image_id || wallpaper.global?.image_id)
+
+  useEffect(() => {
+    if (displayedWallpaperKeyRef.current === effectiveWallpaperKey) return
+
+    wallpaperTransitionTimeouts.current.forEach(window.clearTimeout)
+    wallpaperTransitionTimeouts.current = []
+    setWallpaperTransitioning(true)
+
+    const swapTimer = window.setTimeout(() => {
+      displayedWallpaperKeyRef.current = effectiveWallpaperKey
+      setDisplayedWallpaper(effectiveWallpaper)
+      if (!effectiveWallpaper) {
+        pendingWallpaperReadyKeyRef.current = null
+        const revealTimer = window.setTimeout(() => setWallpaperTransitioning(false), 40)
+        wallpaperTransitionTimeouts.current.push(revealTimer)
+        return
+      }
+
+      pendingWallpaperReadyKeyRef.current = effectiveWallpaperKey
+      const fallbackTimer = window.setTimeout(() => {
+        if (pendingWallpaperReadyKeyRef.current !== effectiveWallpaperKey) return
+        pendingWallpaperReadyKeyRef.current = null
+        setWallpaperTransitioning(false)
+      }, WALLPAPER_READY_FALLBACK_MS)
+      wallpaperTransitionTimeouts.current.push(fallbackTimer)
+    }, WALLPAPER_TRANSITION_HALF_MS)
+
+    wallpaperTransitionTimeouts.current.push(swapTimer)
+  }, [effectiveWallpaper, effectiveWallpaperKey])
+
+  useEffect(() => {
+    return () => {
+      wallpaperTransitionTimeouts.current.forEach(window.clearTimeout)
+      wallpaperTransitionTimeouts.current = []
+    }
+  }, [])
+
+  const handleWallpaperVisualReady = (wallpaperKey: string) => {
+    if (pendingWallpaperReadyKeyRef.current !== wallpaperKey) return
+    pendingWallpaperReadyKeyRef.current = null
+    wallpaperTransitionTimeouts.current.forEach(window.clearTimeout)
+    wallpaperTransitionTimeouts.current = []
+    const revealTimer = window.setTimeout(() => setWallpaperTransitioning(false), 40)
+    wallpaperTransitionTimeouts.current.push(revealTimer)
+  }
 
   // Sync data-chat-bg on the root so message card CSS can skip backdrop-filter
   // when the background is a solid color (blur on solid = pure GPU waste).
@@ -712,38 +848,19 @@ export default function ChatView() {
       className={clsx(
         styles.container,
         isStreaming && styles.streaming,
-        (sceneBackground || wallpaperUrl) && styles.hasSceneBackground
+        hasAnyBackground && styles.hasSceneBackground
       )}
+      data-streaming={isStreaming || undefined}
     >
       {/* Wallpaper layer (z-index 0) — lowest background, overridden by scene */}
-      {wallpaperUrl && !wallpaperIsVideo && (
-        <div
-          className={styles.wallpaperLayer}
-          style={{
-            backgroundImage: `url("${wallpaperUrl}")`,
-            opacity: sceneBackground ? 0 : wallpaperOpacity,
-            objectFit: wallpaperFit,
-            backgroundSize: wallpaperFit === 'fill' ? '100% 100%' : wallpaperFit,
-            filter: (wallpaper.blur ?? 0) > 0 ? `blur(${wallpaper.blur}px)` : undefined,
-          }}
-        />
-      )}
-      {wallpaperUrl && wallpaperIsVideo && (
-        <video
-          ref={videoRef}
-          className={styles.wallpaperVideoLayer}
-          src={wallpaperUrl}
-          autoPlay
-          muted
-          loop
-          playsInline
-          style={{
-            opacity: sceneBackground ? 0 : wallpaperOpacity,
-            objectFit: wallpaperFit === 'fill' ? 'fill' : wallpaperFit,
-            filter: (wallpaper.blur ?? 0) > 0 ? `blur(${wallpaper.blur}px)` : undefined,
-          }}
-        />
-      )}
+      <WallpaperLayer
+        wallpaper={displayedWallpaper}
+        settings={wallpaper}
+        hidden={!!sceneBackground}
+        videoRef={videoRef}
+        fadeInOnMount
+        onVisualReady={handleWallpaperVisualReady}
+      />
 
       {/* Scene background layer — overrides wallpaper when active */}
       <div
@@ -761,6 +878,7 @@ export default function ChatView() {
           transitionDuration: `${Math.max(100, imageGeneration.fadeTransitionMs ?? 800)}ms`,
         }}
       />
+      <div className={clsx(styles.wallpaperTransitionLayer, wallpaperTransitioning && !sceneBackground && styles.wallpaperTransitionLayerActive)} />
       <div className={styles.body} {...(chatWidthMode !== 'full' ? { 'data-chat-constrained': '' } : {})}>
         {portraitPanelSide !== 'none' && portraitPanelSide === 'left' && (
           <div className={clsx(styles.portraitSide, styles.portraitSideLeft, portraitPanelOpen && styles.portraitSideOpen)}>
@@ -807,7 +925,13 @@ export default function ChatView() {
               )}
             </div>
           )}
-          <div className={styles.chatColumnInner} style={innerStyle} data-select-mode={messageSelectMode || undefined}>
+          <div
+            className={styles.chatColumnInner}
+            style={innerStyle}
+            data-select-mode={messageSelectMode || undefined}
+            data-chat-chrome-entering={chatChromeEntering || undefined}
+            data-chat-chrome-leaving={(wallpaperTransitioning || chatChromeLeaving) || undefined}
+          >
             <div className={styles.chatToolbar}>
               <button
                 type="button"
@@ -822,7 +946,7 @@ export default function ChatView() {
             <ScrollToBottom />
             <CouncilPill />
             {messageSelectMode && <MessageSelectBar chatId={chatId} />}
-            <InputArea chatId={chatId} />
+            <InputArea chatId={chatId} onNavigateHome={handleNavigateHome} />
           </div>
         </div>
 

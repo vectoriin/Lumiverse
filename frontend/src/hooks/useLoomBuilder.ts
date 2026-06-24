@@ -25,6 +25,7 @@ import {
   detectSupportedParamsFromProviders,
   getAvailableMacros,
   exportToSTPreset,
+  sanitizeLumiHubSealedBlocksForExport,
   normalizeCategoryBlockState,
   toggleBlockWithCategoryRules,
   coerceImportedLoomPreset,
@@ -544,12 +545,13 @@ export function useLoomBuilder() {
   // Export internal JSON
   const exportInternal = useCallback(async () => {
     if (!activePreset) return null
+    const exportPreset = sanitizeLumiHubSealedBlocksForExport(activePreset)
     const regexExport = await regexApi.exportScripts(undefined, { preset_id: activePreset.id })
-    if (regexExport.scripts.length === 0) return activePreset
+    if (regexExport.scripts.length === 0) return exportPreset
     return {
-      ...activePreset,
+      ...exportPreset,
       extensions: {
-        ...((activePreset as any).extensions || {}),
+        ...((exportPreset as any).extensions || {}),
         regex_scripts: regexExport.scripts,
       },
     }
@@ -558,7 +560,7 @@ export function useLoomBuilder() {
   // Export as legacy (SillyTavern) JSON
   const exportLegacy = useCallback(() => {
     if (!activePreset) return null
-    return exportToSTPreset(activePreset)
+    return exportToSTPreset(sanitizeLumiHubSealedBlocksForExport(activePreset))
   }, [activePreset])
 
   // Available macros for the inserter — fetched from API, with local fallback

@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, BookOpen, Maximize2, ChevronDown, Upload, Download, Globe, X, User, FileUp, Settings, Search, MessageSquare, ArrowUpDown, ArrowUp, ArrowDown, ArrowDownAZ, ArrowDownZA } from 'lucide-react'
+import { Plus, Trash2, BookOpen, Maximize2, ChevronDown, Upload, Download, Globe, X, User, FileUp, Settings, Search, MessageSquare, ArrowDownAZ, ArrowDownZA } from 'lucide-react'
 import { useStore } from '@/store'
 import useIsMobile from '@/hooks/useIsMobile'
 import { worldBooksApi } from '@/api/world-books'
 import { chatsApi } from '@/api/chats'
-import WorldBookEntryEditor from '@/components/shared/WorldBookEntryEditor'
 import WorldBookEntriesSection from '@/components/shared/WorldBookEntriesSection'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import ImportWorldBookModal, { type WorldBookImportResult } from '@/components/modals/ImportWorldBookModal'
@@ -19,13 +18,10 @@ import { Button } from '@/components/shared/FormComponents'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import FolderDropdown from '@/components/shared/FolderDropdown'
 import { useFolders } from '@/hooks/useFolders'
-import Pagination from '@/components/shared/Pagination'
-import type { WorldBook, WorldBookEntry, WorldBookVectorSummary, WorldInfoSettings } from '@/types/api'
+import { useWorldBookListLiveSync } from '@/hooks/useWorldBookListLiveSync'
+import type { WorldBook, WorldBookVectorSummary, WorldInfoSettings } from '@/types/api'
 
-type EntrySortBy = 'order' | 'priority' | 'created' | 'updated' | 'name'
-type EntrySortDir = 'asc' | 'desc'
 import styles from './WorldBookPanel.module.css'
-import PanelFadeIn from '@/components/shared/PanelFadeIn'
 import clsx from 'clsx'
 
 export default function WorldBookPanel() {
@@ -33,6 +29,9 @@ export default function WorldBookPanel() {
   const openModal = useStore((s) => s.openModal)
   const isMobile = useIsMobile()
   const activeChatId = useStore((s) => s.activeChatId)
+  const drawerOpen = useStore((s) => s.drawerOpen)
+  const drawerTab = useStore((s) => s.drawerTab)
+  const activeModal = useStore((s) => s.activeModal)
   const globalWorldBooks = useStore((s) => s.globalWorldBooks)
   const worldInfoSettings = useStore((s) => s.worldInfoSettings)
   const worldBookListSortDir = useStore((s) => s.worldBookListSortDir)
@@ -63,16 +62,6 @@ export default function WorldBookPanel() {
     setSetting('worldBookListSortDir', worldBookListSortDir === 'asc' ? 'desc' : 'asc')
   }, [setSetting, worldBookListSortDir])
 
-  // Entry state
-  const [entries, setEntries] = useState<WorldBookEntry[]>([])
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
-  const [entryTotal, setEntryTotal] = useState(0)
-  const [entryPage, setEntryPage] = useState(1)
-  const [loadingEntries, setLoadingEntries] = useState(false)
-  const [entrySearchFilter, setEntrySearchFilter] = useState('')
-  const [entrySortBy, setEntrySortBy] = useState<EntrySortBy>('order')
-  const [entrySortDir, setEntrySortDir] = useState<EntrySortDir>('asc')
-
   // Book editing state
   const [bookFieldsOpen, setBookFieldsOpen] = useState(false)
   const [bookName, setBookName] = useState('')
@@ -87,25 +76,15 @@ export default function WorldBookPanel() {
 
   // Confirmation modals
   const [deleteBookConfirm, setDeleteBookConfirm] = useState<string | null>(null)
-  const [deleteEntryConfirm, setDeleteEntryConfirm] = useState<string | null>(null)
   const [showImport, setShowImport] = useState(false)
   const [convertPreview, setConvertPreview] = useState<{
-    total: number; eligible: number; keys_to_clear: number; constant_skipped: number
+    total: number; eligible: number; keys_to_clear: number; keys_retained: number; constant_skipped: number
     already_vectorized: number; empty_skipped: number; disabled_skipped: number
   } | null>(null)
 
   // Debounce refs
   const bookNameTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const bookDescTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const entryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-
-  // Debounced search term for FTS query
-  const [debouncedEntrySearch, setDebouncedEntrySearch] = useState('')
-  useEffect(() => {
-    const trimmed = entrySearchFilter.trim()
-    const handle = setTimeout(() => setDebouncedEntrySearch(trimmed), 200)
-    return () => clearTimeout(handle)
-  }, [entrySearchFilter])
 
   // Load books
   const loadBooks = useCallback(async () => {
@@ -115,39 +94,28 @@ export default function WorldBookPanel() {
     } catch {}
   }, [])
 
+  // Live-sync the book list with changes from other tabs/devices or Spindle.
+  const { markLocalBookEdit } = useWorldBookListLiveSync({
+    selectedBookId,
+    setBooks,
+    onSelectedBookDeleted: () => setSelectedBookId(null),
+    refreshBooks: loadBooks,
+  })
+
+  const isVisible = drawerOpen && drawerTab === 'lorebook'
+  const wasVisibleRef = useRef(false)
+  const prevModalRef = useRef<string | null>(activeModal)
   useEffect(() => {
-    loadBooks()
-  }, [loadBooks])
-
-  const ENTRIES_PAGE_SIZE = 50
-  const entryTotalPages = Math.max(1, Math.ceil(entryTotal / ENTRIES_PAGE_SIZE))
-
-  // Load entries for a specific page
-  const loadEntries = useCallback(async (
-    bookId: string,
-    page: number,
-    sortBy: EntrySortBy,
-    sortDir: EntrySortDir,
-    search: string,
-  ) => {
-    setLoadingEntries(true)
-    try {
-      const res = await worldBooksApi.listEntries(bookId, {
-        limit: ENTRIES_PAGE_SIZE,
-        offset: (page - 1) * ENTRIES_PAGE_SIZE,
-        sort_by: sortBy,
-        sort_dir: sortDir,
-        search: search || undefined,
-      })
-      setEntries(res.data)
-      setEntryTotal(res.total)
-      const lastPage = Math.max(1, Math.ceil(res.total / ENTRIES_PAGE_SIZE))
-      if (page > lastPage) {
-        setEntryPage(lastPage)
-      }
-    } catch {}
-    setLoadingEntries(false)
-  }, [])
+    const becameVisible = isVisible && !wasVisibleRef.current
+    const worldBookEditorClosed = isVisible
+      && prevModalRef.current === 'worldBookEditor'
+      && activeModal !== 'worldBookEditor'
+    if (becameVisible || worldBookEditorClosed) {
+      void loadBooks()
+    }
+    wasVisibleRef.current = isVisible
+    prevModalRef.current = activeModal
+  }, [activeModal, isVisible, loadBooks])
 
   const loadVectorSummary = useCallback(async (bookId: string) => {
     try {
@@ -157,18 +125,6 @@ export default function WorldBookPanel() {
       setVectorSummary(null)
     }
   }, [])
-
-  // Reset to page 1 whenever the search term changes
-  useEffect(() => {
-    setEntryPage(1)
-    setSelectedEntryId(null)
-  }, [debouncedEntrySearch])
-
-  // Refetch whenever book / page / sort / search state changes
-  useEffect(() => {
-    if (!selectedBookId) return
-    loadEntries(selectedBookId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch)
-  }, [selectedBookId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch, loadEntries])
 
   // Side effects on book selection change (book fields, vector summary, reset UI state)
   useEffect(() => {
@@ -180,31 +136,12 @@ export default function WorldBookPanel() {
         setBookDescription(book.description)
         setBookFolder(book.folder || '')
       }
-      setEntrySearchFilter('')
-      setSelectedEntryId(null)
       setShowDiagnosticsModal(false)
-      setEntryPage(1)
     } else {
-      setEntries([])
-      setEntryTotal(0)
-      setEntryPage(1)
-      setEntrySearchFilter('')
-      setSelectedEntryId(null)
       setVectorSummary(null)
       setShowDiagnosticsModal(false)
     }
   }, [selectedBookId, books, loadVectorSummary])
-
-  // Reset to page 1 when sort changes
-  const handleSortByChange = useCallback((value: EntrySortBy) => {
-    setEntrySortBy(value)
-    setEntryPage(1)
-  }, [])
-
-  const toggleSortDir = useCallback(() => {
-    setEntrySortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
-    setEntryPage(1)
-  }, [])
 
   // Book CRUD
   const handleCreateBook = useCallback(async () => {
@@ -230,6 +167,7 @@ export default function WorldBookPanel() {
 
   const handleBookNameChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       setBookName(value)
       clearTimeout(bookNameTimer.current)
       bookNameTimer.current = setTimeout(() => {
@@ -241,11 +179,12 @@ export default function WorldBookPanel() {
         }
       }, 2000)
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   const handleBookDescChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       setBookDescription(value)
       clearTimeout(bookDescTimer.current)
       bookDescTimer.current = setTimeout(() => {
@@ -254,11 +193,12 @@ export default function WorldBookPanel() {
         }
       }, 2000)
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
 
   const handleBookFolderChange = useCallback(
     (value: string) => {
+      markLocalBookEdit()
       const trimmed = value.trim()
       setBookFolder(trimmed)
       if (selectedBookId) {
@@ -268,28 +208,8 @@ export default function WorldBookPanel() {
         )
       }
     },
-    [selectedBookId]
+    [selectedBookId, markLocalBookEdit]
   )
-
-  const refetchCurrentPage = useCallback(() => {
-    if (!selectedBookId) return
-    loadEntries(selectedBookId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch)
-  }, [selectedBookId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch, loadEntries])
-
-  // Entry CRUD
-  const handleCreateEntry = useCallback(async () => {
-    if (!selectedBookId) return
-    try {
-      const entry = await worldBooksApi.createEntry(selectedBookId, {
-        comment: t('worldBookPanel.defaultEntryComment'),
-        key: [],
-        content: '',
-      })
-      setSelectedEntryId(entry.id)
-      // Refetch current page so sort ordering is respected
-      await loadEntries(selectedBookId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch)
-    } catch {}
-  }, [selectedBookId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch, loadEntries])
 
   const [reindexing, setReindexing] = useState(false)
 
@@ -305,14 +225,13 @@ export default function WorldBookPanel() {
       })
       const finalStatus = formatWorldBookReindexStatus(result)
       setVectorStatus(t('worldBookPanel.doneStatus', { status: finalStatus }))
-      refetchCurrentPage()
       await loadVectorSummary(selectedBookId)
     } catch {
       setVectorStatus(t('worldBookPanel.vectorReindexFailed'))
     } finally {
       setReindexing(false)
     }
-  }, [selectedBookId, reindexing, refetchCurrentPage, loadVectorSummary, t])
+  }, [selectedBookId, reindexing, loadVectorSummary, t])
 
   const handleConvertToVectorizedPreview = useCallback(async () => {
     if (!selectedBookId) return
@@ -332,7 +251,6 @@ export default function WorldBookPanel() {
       const result = await worldBooksApi.convertToVectorized(selectedBookId)
       setVectorSummary(result.summary)
       setVectorStatus(t('worldBookPanel.convertedReindexing', { count: result.converted }))
-      refetchCurrentPage()
       const reindexResult = await worldBooksApi.reindexVectors(selectedBookId, {
         onProgress: (p) => {
           setVectorStatus(t('worldBookPanel.reindexProgress', { status: formatWorldBookReindexStatus(p) }))
@@ -340,57 +258,18 @@ export default function WorldBookPanel() {
       })
       const finalStatus = formatWorldBookReindexStatus(reindexResult)
       setVectorStatus(t('worldBookPanel.doneStatus', { status: finalStatus }))
-      refetchCurrentPage()
       await loadVectorSummary(selectedBookId)
     } catch {
       setVectorStatus(t('worldBookPanel.vectorConvertFailed'))
     } finally {
       setReindexing(false)
     }
-  }, [selectedBookId, refetchCurrentPage, loadVectorSummary, t])
+  }, [selectedBookId, loadVectorSummary, t])
 
   const handleDiagnostics = useCallback(async () => {
     if (!selectedBookId || !activeChatId) return
     setShowDiagnosticsModal(true)
   }, [selectedBookId, activeChatId])
-
-  const handleDeleteEntry = useCallback(
-    async (entryId: string) => {
-      if (!selectedBookId) return
-      try {
-        await worldBooksApi.deleteEntry(selectedBookId, entryId)
-        if (selectedEntryId === entryId) setSelectedEntryId(null)
-        await loadEntries(selectedBookId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch)
-      } catch {}
-    },
-    [selectedBookId, selectedEntryId, entryPage, entrySortBy, entrySortDir, debouncedEntrySearch, loadEntries]
-  )
-
-  const updateEntry = useCallback(
-    (entryId: string, updates: Record<string, any>) => {
-      if (!selectedBookId) return
-      setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, ...updates } : e)))
-      void worldBooksApi.updateEntry(selectedBookId, entryId, updates)
-        .then(() => loadVectorSummary(selectedBookId))
-        .catch(() => {})
-    },
-    [selectedBookId, loadVectorSummary]
-  )
-
-  const debouncedUpdateEntry = useCallback(
-    (entryId: string, updates: Record<string, any>) => {
-      if (!selectedBookId) return
-      setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, ...updates } : e)))
-      const key = `${entryId}-${Object.keys(updates).join(',')}`
-      clearTimeout(entryTimers.current[key])
-      entryTimers.current[key] = setTimeout(() => {
-        void worldBooksApi.updateEntry(selectedBookId, entryId, updates)
-          .then(() => loadVectorSummary(selectedBookId))
-          .catch(() => {})
-      }, 2000)
-    },
-    [selectedBookId, loadVectorSummary]
-  )
 
   const handleImport = useCallback((result: WorldBookImportResult) => {
     setBooks((prev) => [result.world_book, ...prev])
@@ -477,6 +356,7 @@ export default function WorldBookPanel() {
   const [exportPopoverOpen, setExportPopoverOpen] = useState(false)
   const exportBtnRef = useRef<HTMLDivElement>(null)
   const exportPopoverRef = useRef<HTMLDivElement>(null)
+  const panelBodyRef = useRef<HTMLDivElement>(null)
   const [exportPopoverPos, setExportPopoverPos] = useState<{ top: number; left: number } | null>(null)
 
   useEffect(() => {
@@ -717,94 +597,97 @@ export default function WorldBookPanel() {
         )}
       </div>
 
-      {selectedBookId ? (
-        <>
-          {/* Book fields (collapsible) */}
-          <button
-            type="button"
-            className={styles.bookFieldsToggle}
-            onClick={() => setBookFieldsOpen((o) => !o)}
-          >
-            <BookOpen size={12} />
-            <span className={styles.bookFieldsLabel}>{bookName || t('worldBookPanel.bookDetails')}</span>
-            <ChevronDown
-              size={12}
-              className={clsx(styles.chevron, bookFieldsOpen && styles.chevronOpen)}
-            />
-          </button>
+      <div ref={panelBodyRef} className={styles.panelBody}>
+        {selectedBookId ? (
+          <>
+            {/* Book fields (collapsible) */}
+            <button
+              type="button"
+              className={styles.bookFieldsToggle}
+              onClick={() => setBookFieldsOpen((o) => !o)}
+            >
+              <BookOpen size={12} />
+              <span className={styles.bookFieldsLabel}>{bookName || t('worldBookPanel.bookDetails')}</span>
+              <ChevronDown
+                size={12}
+                className={clsx(styles.chevron, bookFieldsOpen && styles.chevronOpen)}
+              />
+            </button>
 
-          {bookFieldsOpen && (
-            <div className={styles.bookFields}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>{t('worldBookPanel.name')}</label>
-                <input
-                  type="text"
-                  className={styles.fieldInput}
-                  value={bookName}
-                  onChange={(e) => handleBookNameChange(e.target.value)}
-                />
-              </div>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>{t('worldBookPanel.description')}</label>
-                <input
-                  type="text"
-                  className={styles.fieldInput}
-                  value={bookDescription}
-                  onChange={(e) => handleBookDescChange(e.target.value)}
-                  placeholder={t('worldBookPanel.optionalDescription')}
-                />
-              </div>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>{t('worldBookPanel.folder')}</label>
-                <FolderDropdown
-                  folders={folders}
-                  selectedFolder={bookFolder}
-                  onSelect={handleBookFolderChange}
-                  onCreateFolder={createFolder}
-                />
-              </div>
-              <Button variant="danger-ghost" size="sm" icon={<Trash2 size={11} />} onClick={() => setDeleteBookConfirm(selectedBookId)}>
-                {t('worldBookPanel.deleteBook')}
-              </Button>
-              {vectorSummary && (
-                <div className={styles.vectorSummary}>
-                  <div className={styles.vectorSummaryTitle}>{t('worldBookPanel.vectorStatusTitle')}</div>
-                  <div className={styles.vectorSummaryGrid}>
-                    <span>{t('worldBookPanel.vectorEnabled', { count: vectorSummary.enabled })}</span>
-                    <span>{t('worldBookPanel.vectorNonEmpty', { enabled: vectorSummary.enabled_non_empty, total: vectorSummary.non_empty })}</span>
-                    <span>{t('worldBookPanel.vectorIndexed', { count: vectorSummary.indexed })}</span>
-                    <span>{t('worldBookPanel.vectorPending', { count: vectorSummary.pending })}</span>
-                    <span>{t('worldBookPanel.vectorErrors', { count: vectorSummary.error })}</span>
-                  </div>
+            {bookFieldsOpen && (
+              <div className={styles.bookFields}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>{t('worldBookPanel.name')}</label>
+                  <input
+                    type="text"
+                    className={styles.fieldInput}
+                    value={bookName}
+                    onChange={(e) => handleBookNameChange(e.target.value)}
+                  />
                 </div>
-              )}
-              <div className={styles.bookActionRow}>
-                <Button variant="primary" size="sm" onClick={handleReindexVectors} disabled={reindexing}>
-                  {reindexing ? t('worldBookPanel.reindexing') : t('worldBookPanel.reindexVectorSearch')}
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>{t('worldBookPanel.description')}</label>
+                  <input
+                    type="text"
+                    className={styles.fieldInput}
+                    value={bookDescription}
+                    onChange={(e) => handleBookDescChange(e.target.value)}
+                    placeholder={t('worldBookPanel.optionalDescription')}
+                  />
+                </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>{t('worldBookPanel.folder')}</label>
+                  <FolderDropdown
+                    folders={folders}
+                    selectedFolder={bookFolder}
+                    onSelect={handleBookFolderChange}
+                    onCreateFolder={createFolder}
+                  />
+                </div>
+                <Button variant="danger-ghost" size="sm" icon={<Trash2 size={11} />} onClick={() => setDeleteBookConfirm(selectedBookId)}>
+                  {t('worldBookPanel.deleteBook')}
                 </Button>
-                <Button variant="secondary" size="sm" onClick={handleConvertToVectorizedPreview} disabled={reindexing}>
-                  {t('worldBookPanel.convertToVectorized')}
-                </Button>
-                <Button variant="secondary" size="sm" icon={<Search size={12} />} onClick={handleDiagnostics} disabled={!activeChatId}>
-                  {t('worldBookPanel.diagnoseCurrentChat')}
-                </Button>
+                {vectorSummary && (
+                  <div className={styles.vectorSummary}>
+                    <div className={styles.vectorSummaryTitle}>{t('worldBookPanel.vectorStatusTitle')}</div>
+                    <div className={styles.vectorSummaryGrid}>
+                      <span>{t('worldBookPanel.vectorEnabled', { count: vectorSummary.enabled })}</span>
+                      <span>{t('worldBookPanel.vectorNonEmpty', { enabled: vectorSummary.enabled_non_empty, total: vectorSummary.non_empty })}</span>
+                      <span>{t('worldBookPanel.vectorIndexed', { count: vectorSummary.indexed })}</span>
+                      <span>{t('worldBookPanel.vectorPending', { count: vectorSummary.pending })}</span>
+                      <span>{t('worldBookPanel.vectorErrors', { count: vectorSummary.error })}</span>
+                    </div>
+                  </div>
+                )}
+                <div className={styles.bookActionRow}>
+                  <Button variant="primary" size="sm" onClick={handleReindexVectors} disabled={reindexing}>
+                    {reindexing ? t('worldBookPanel.reindexing') : t('worldBookPanel.reindexVectorSearch')}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={handleConvertToVectorizedPreview} disabled={reindexing}>
+                    {t('worldBookPanel.convertToVectorized')}
+                  </Button>
+                  <Button variant="secondary" size="sm" icon={<Search size={12} />} onClick={handleDiagnostics} disabled={!activeChatId}>
+                    {t('worldBookPanel.diagnoseCurrentChat')}
+                  </Button>
+                </div>
+                {vectorStatus && <span className={styles.vectorStatusText}>{vectorStatus}</span>}
               </div>
-              {vectorStatus && <span className={styles.vectorStatusText}>{vectorStatus}</span>}
-            </div>
-          )}
+            )}
 
-          <WorldBookEntriesSection
-            books={books}
-            selectedBookId={selectedBookId}
-            onRefreshVectorSummary={loadVectorSummary}
-          />
+            <WorldBookEntriesSection
+              books={books}
+              selectedBookId={selectedBookId}
+              onRefreshVectorSummary={loadVectorSummary}
+              scrollElementRef={panelBodyRef}
+            />
 
-        </>
-      ) : (
-        <div className={styles.emptyState}>
-          {t('worldBookPanel.selectOrCreate')}
-        </div>
-      )}
+          </>
+        ) : (
+          <div className={styles.emptyState}>
+            {t('worldBookPanel.selectOrCreate')}
+          </div>
+        )}
+      </div>
 
       {/* Delete book confirmation */}
       {deleteBookConfirm && (
@@ -822,22 +705,6 @@ export default function WorldBookPanel() {
         />
       )}
 
-      {/* Delete entry confirmation */}
-      {deleteEntryConfirm && (
-        <ConfirmationModal
-          isOpen={true}
-          title={t('worldBookPanel.deleteEntryTitle')}
-          message={t('worldBookPanel.deleteEntryMessage')}
-          variant="danger"
-          confirmText={t('worldBookPanel.delete')}
-          onConfirm={async () => {
-            await handleDeleteEntry(deleteEntryConfirm)
-            setDeleteEntryConfirm(null)
-          }}
-          onCancel={() => setDeleteEntryConfirm(null)}
-        />
-      )}
-
       {/* Convert to vectorized confirmation */}
       {convertPreview && (
         <ConfirmationModal
@@ -849,7 +716,7 @@ export default function WorldBookPanel() {
               : <>
                   <p>{t('worldBookPanel.convertIntro', { count: convertPreview.eligible })}</p>
                   <ul style={{ textAlign: 'left', margin: '8px 0', paddingLeft: '20px', fontSize: 'calc(12px * var(--lumiverse-font-scale, 1))', opacity: 0.8 }}>
-                    {convertPreview.keys_to_clear > 0 && <li>{t('worldBookPanel.convertKeysCleared', { count: convertPreview.keys_to_clear })}</li>}
+                    {convertPreview.keys_retained > 0 && <li>{t('worldBookPanel.convertKeysRetained', { count: convertPreview.keys_retained })}</li>}
                     {convertPreview.constant_skipped > 0 && <li>{t('worldBookPanel.convertConstantSkipped', { count: convertPreview.constant_skipped })}</li>}
                     {convertPreview.already_vectorized > 0 && <li>{t('worldBookPanel.convertAlreadyVectorized', { count: convertPreview.already_vectorized })}</li>}
                     {convertPreview.empty_skipped > 0 && <li>{t('worldBookPanel.convertEmptySkipped', { count: convertPreview.empty_skipped })}</li>}

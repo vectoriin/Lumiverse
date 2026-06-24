@@ -228,7 +228,7 @@ export function DreamStage({ session, onAdvance }: { session: WeaverSession; onA
           </div>
         </div>
         {readbackError && <p className={styles.errorText}>{readbackError}</p>}
-        <div className={styles.scroll} style={{ display: 'flex' }}>
+        <div className={`${styles.scroll} ${styles.dreamScroll}`}>
           <div className={styles.dreamWrap}>
             <div className={styles.dreamGrid}>
               <div className={styles.dreamEdit}>

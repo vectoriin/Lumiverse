@@ -1,4 +1,8 @@
-# Themes
+---
+title: Theme
+---
+
+# Theme
 
 Lumiverse's theme system lets you customize the entire visual appearance — colors, fonts, glass effects, and more.
 

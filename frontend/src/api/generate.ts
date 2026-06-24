@@ -102,6 +102,7 @@ export interface SummarizationPromptDefaults {
 export interface DryRunMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  __chatHistorySource?: boolean
 }
 
 export interface AssemblyBreakdownEntry {
@@ -142,6 +143,7 @@ export interface DryRunResponse {
     tokenizer_id: string | null
     tokenizer_name: string | null
   }
+  chatHistoryTokens?: number
   worldInfoStats?: {
     totalCandidates: number
     activatedBeforeBudget: number
@@ -229,6 +231,7 @@ export interface BreakdownResponse {
   }[]
   messages?: DryRunMessage[]
   totalTokens: number
+  chatHistoryTokens?: number
   maxContext: number
   model: string
   provider: string

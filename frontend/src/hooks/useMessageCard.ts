@@ -66,13 +66,45 @@ export function useMessageCard(message: Message, chatId: string) {
   const activeChatAvatarId = useStore((s) => s.activeChatAvatarId)
   const isBubbleMode = useStore((s) => s.chatSheldDisplayMode) === 'bubble'
 
-  const streamingContent = useStore((s) => s.streamingContent)
-  const streamingReasoning = useStore((s) => s.streamingReasoning)
-  const streamingReasoningDuration = useStore((s) => s.streamingReasoningDuration)
-  const streamingReasoningStartedAt = useStore((s) => s.streamingReasoningStartedAt)
   const regeneratingMessageId = useStore((s) => s.regeneratingMessageId)
   const streamingSwipeId = useStore((s) => s.streamingSwipeId)
   const streamingGenerationType = useStore((s) => s.streamingGenerationType)
+  const streamingContent = useStore((s) => {
+    if (!s.isStreaming) return ''
+    const onSwipe = s.streamingSwipeId == null || message.swipe_id === s.streamingSwipeId
+    if (!onSwipe) return ''
+    const isTailMessage = s.messages.length > 0 && s.messages[s.messages.length - 1].id === message.id
+    if (s.regeneratingMessageId === message.id) return s.streamingContent
+    if (s.streamingGenerationType === 'continue' && isTailMessage && !message.is_user) return s.streamingContent
+    return ''
+  })
+  const streamingReasoning = useStore((s) => {
+    if (!s.isStreaming) return ''
+    const onSwipe = s.streamingSwipeId == null || message.swipe_id === s.streamingSwipeId
+    if (!onSwipe) return ''
+    const isTailMessage = s.messages.length > 0 && s.messages[s.messages.length - 1].id === message.id
+    const isStreamingMessage = s.regeneratingMessageId === message.id
+      || (isTailMessage && !message.is_user && (!s.regeneratingMessageId || s.streamingGenerationType === 'continue'))
+    return isStreamingMessage ? s.streamingReasoning : ''
+  })
+  const streamingReasoningDuration = useStore((s) => {
+    if (!s.isStreaming) return null
+    const onSwipe = s.streamingSwipeId == null || message.swipe_id === s.streamingSwipeId
+    if (!onSwipe) return null
+    const isTailMessage = s.messages.length > 0 && s.messages[s.messages.length - 1].id === message.id
+    const isStreamingMessage = s.regeneratingMessageId === message.id
+      || (isTailMessage && !message.is_user && (!s.regeneratingMessageId || s.streamingGenerationType === 'continue'))
+    return isStreamingMessage ? s.streamingReasoningDuration : null
+  })
+  const streamingReasoningStartedAt = useStore((s) => {
+    if (!s.isStreaming) return null
+    const onSwipe = s.streamingSwipeId == null || message.swipe_id === s.streamingSwipeId
+    if (!onSwipe) return null
+    const isTailMessage = s.messages.length > 0 && s.messages[s.messages.length - 1].id === message.id
+    const isStreamingMessage = s.regeneratingMessageId === message.id
+      || (isTailMessage && !message.is_user && (!s.regeneratingMessageId || s.streamingGenerationType === 'continue'))
+    return isStreamingMessage ? s.streamingReasoningStartedAt : null
+  })
 
   const isUser = message.is_user
   const isLastMessage = messages.length > 0 && messages[messages.length - 1].id === message.id
@@ -397,7 +429,7 @@ export function useMessageCard(message: Message, chatId: string) {
   // avoids re-rendering every card on typing/presence churn.
   const mpStore = useStore.getState()
   const mpStamp = isUser && message.extra?.mp && typeof message.extra.mp === 'object'
-    ? (message.extra.mp as { participantId?: string; displayName?: string; personaName?: string })
+    ? (message.extra.mp as { participantId?: string; displayName?: string; personaName?: string; avatarUrl?: string | null })
     : null
   const mpParticipant = mpStore.mpRoomId && isUser
     ? mpStamp?.participantId
@@ -405,7 +437,7 @@ export function useMessageCard(message: Message, chatId: string) {
       : mpStore.mpParticipants.find((p) => !!p.persona?.name && p.persona.name === (message.name || '').trim())
     : undefined
   const isMpAuthor = !!mpStamp || !!mpParticipant
-  const mpAvatarData = mpParticipant?.persona?.avatarUrl || ''
+  const mpAvatarData = mpParticipant?.persona?.avatarUrl || mpStamp?.avatarUrl || ''
   const mpDisplayName = isMpAuthor
     ? (mpParticipant?.persona?.name || mpStamp?.personaName || mpStamp?.displayName || displayName)
     : displayName

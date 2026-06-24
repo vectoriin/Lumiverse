@@ -30,7 +30,6 @@ interface MessageContentProps {
   isUser: boolean
   userName: string
   isStreaming?: boolean
-  lockStreamingHeight?: boolean
   messageId?: string
   chatId?: string
   depth?: number
@@ -1097,9 +1096,8 @@ function extractTrustedYouTubeEmbeds(raw: string): { content: string; embeds: Tr
 
 // While streaming, an unclosed <details>/<summary> tag makes the markdown +
 // sanitize pipeline emit a structure where the in-progress block briefly takes
-// up real vertical space. That spike gets locked in by the streamingMinHeight
-// ratchet below, so the bubble stays inflated until the stream ends and then
-// snaps back. Pre-closing any unbalanced tags keeps the rendered tree stable.
+// up real vertical space. Pre-closing any unbalanced tags keeps the rendered
+// tree stable and avoids a visible height spike followed by a snap back.
 const STREAMING_DETAILS_TAG_RE = /<\/?(details|summary)\b[^>]*>/gi
 
 function balanceStreamingDetails(raw: string): string {
@@ -1197,18 +1195,14 @@ function attachCodeCopyHandler(root: HTMLElement | ShadowRoot): () => void {
 }
 
 function notifyMessageContentLayout(el: HTMLElement): void {
-  const dispatch = () => {
-    el.dispatchEvent(new CustomEvent(MESSAGE_CONTENT_LAYOUT_EVENT, { bubbles: true }))
-  }
-
-  dispatch()
-  requestAnimationFrame(() => {
-    dispatch()
-    requestAnimationFrame(dispatch)
-  })
+  // One dispatch is enough. TanStack's ResizeObserver (on the row) plus the
+  // load/error listeners below already catch later size changes. The previous
+  // immediate + 2x rAF triple dispatch fired ~3 events for every shadow-DOM
+  // mutation/row mount and caused a measurement storm during scroll/streaming.
+  el.dispatchEvent(new CustomEvent(MESSAGE_CONTENT_LAYOUT_EVENT, { bubbles: true }))
 }
 
-function IsolatedHtml({ html }: { html: string }) {
+function IsolatedHtml({ html, isStreaming }: { html: string; isStreaming: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
@@ -1234,11 +1228,15 @@ function IsolatedHtml({ html }: { html: string }) {
       })
     }
 
-    const resizeObserver = new ResizeObserver(scheduleLayoutNotify)
-    resizeObserver.observe(el)
+    let resizeObserver: ResizeObserver | null = null
+    let mutationObserver: MutationObserver | null = null
+    if (isStreaming) {
+      resizeObserver = new ResizeObserver(scheduleLayoutNotify)
+      resizeObserver.observe(el)
 
-    const mutationObserver = new MutationObserver(scheduleLayoutNotify)
-    mutationObserver.observe(shadow, { childList: true, subtree: true, attributes: true, characterData: true })
+      mutationObserver = new MutationObserver(scheduleLayoutNotify)
+      mutationObserver.observe(shadow, { childList: true, subtree: true, attributes: true, characterData: true })
+    }
 
     shadow.addEventListener('load', scheduleLayoutNotify, true)
     shadow.addEventListener('error', scheduleLayoutNotify, true)
@@ -1246,8 +1244,8 @@ function IsolatedHtml({ html }: { html: string }) {
     const cleanupCodeCopy = attachCodeCopyHandler(shadow)
     return () => {
       cleanupCodeCopy()
-      resizeObserver.disconnect()
-      mutationObserver.disconnect()
+      resizeObserver?.disconnect()
+      mutationObserver?.disconnect()
       shadow.removeEventListener('load', scheduleLayoutNotify, true)
       shadow.removeEventListener('error', scheduleLayoutNotify, true)
       if (pendingRaf) cancelAnimationFrame(pendingRaf)
@@ -1391,7 +1389,6 @@ export default function MessageContent({
   isUser,
   userName,
   isStreaming = false,
-  lockStreamingHeight = true,
   messageId,
   chatId,
   depth = 0,
@@ -1471,9 +1468,7 @@ export default function MessageContent({
   const lumiaOOCStyle = useStore((s) => s.lumiaOOCStyle)
   const containerRef = useRef<HTMLDivElement>(null)
   const prevTextLenRef = useRef(0)
-  const maxStreamingHeightRef = useRef(0)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
-  const [streamingMinHeight, setStreamingMinHeight] = useState<number | null>(null)
 
   const handleLightboxClose = useCallback(() => setLightboxSrc(null), [])
 
@@ -1518,11 +1513,20 @@ export default function MessageContent({
       scheduleLayoutNotify()
     }
 
-    const observer = new ResizeObserver(scheduleLayoutNotify)
-    observer.observe(container)
+    // MutationObserver and ResizeObserver are only needed while the message
+    // content is actively changing (streaming). For finalized messages they
+    // fire on incidental DOM mutations (hover states, lazy image decode
+    // attribute flips, etc.) and cascade into measureElement calls that are
+    // pure overhead during scroll.
+    let mutationObserver: MutationObserver | null = null
+    let observer: ResizeObserver | null = null
+    if (isStreaming) {
+      observer = new ResizeObserver(scheduleLayoutNotify)
+      observer.observe(container)
 
-    const mutationObserver = new MutationObserver(scheduleLayoutNotify)
-    mutationObserver.observe(container, { childList: true, subtree: true, attributes: true, characterData: true })
+      mutationObserver = new MutationObserver(scheduleLayoutNotify)
+      mutationObserver.observe(container, { childList: true, subtree: true, attributes: true, characterData: true })
+    }
 
     container.addEventListener(MESSAGE_CONTENT_LAYOUT_EVENT, handleChildLayoutNotify)
     container.addEventListener('load', scheduleLayoutNotify, true)
@@ -1536,51 +1540,53 @@ export default function MessageContent({
 
     return () => {
       cancelled = true
-      observer.disconnect()
-      mutationObserver.disconnect()
+      observer?.disconnect()
+      mutationObserver?.disconnect()
       container.removeEventListener(MESSAGE_CONTENT_LAYOUT_EVENT, handleChildLayoutNotify)
       container.removeEventListener('load', scheduleLayoutNotify, true)
       container.removeEventListener('error', scheduleLayoutNotify, true)
       if (pendingRaf) window.cancelAnimationFrame(pendingRaf)
       for (const timer of settleTimers) window.clearTimeout(timer)
     }
-  }, [renderContent])
+    // Observers are set up once per mount. DOM mutations, resizes, and child
+    // layout events already notify MessageList via scheduleLayoutNotify(), so
+    // re-creating observers on every renderContent change is unnecessary and
+    // causes observer churn during fast streaming.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
+  // While streaming, ratchet the content container's min-height upward so that
+  // transient DOM shrinkage (unclosed tags snapping shut, image placeholders
+  // collapsing, etc.) cannot make the virtualized row height oscillate. The
+  // lock is applied directly to the DOM to avoid React re-render thrash.
   useLayoutEffect(() => {
-    if (!isStreaming || !lockStreamingHeight) {
-      maxStreamingHeightRef.current = 0
-      setStreamingMinHeight(null)
-      return
-    }
-
     const container = containerRef.current
     if (!container) return
 
-    const updateMinHeight = () => {
-      // Measure in layout (unscaled) pixels via offsetHeight, NOT
-      // getBoundingClientRect. Under the standardized CSS `zoom` model used by
-      // --lumiverse-ui-scale (`body > * { zoom }` in reset.css), getBoundingClientRect
-      // returns zoom-*scaled* px, but this container lives inside that zoomed
-      // subtree — so a min-height written from a scaled measurement gets multiplied
-      // by zoom a second time and balloons the bubble. offsetHeight is zoom-invariant
-      // (and font-scale aware, since font scale is plain CSS font-size with no
-      // transform), keeping the ratchet in the virtualizer's own coordinate space.
-      const nextHeight = container.offsetHeight
-      if (nextHeight <= maxStreamingHeightRef.current) return
-      maxStreamingHeightRef.current = nextHeight
-      setStreamingMinHeight(nextHeight)
+    if (!isStreaming) {
+      container.style.minHeight = ''
+      return
     }
 
-    updateMinHeight()
+    // offsetHeight is zoom-invariant under Lumiverse's body-level CSS zoom,
+    // whereas getBoundingClientRect() would return scaled pixels and the lock
+    // would be applied twice.
+    let maxHeight = container.offsetHeight
+    container.style.minHeight = `${maxHeight}px`
 
-    const observer = new ResizeObserver(() => {
-      updateMinHeight()
-    })
+    const updateMinHeight = () => {
+      const h = container.offsetHeight
+      if (h > maxHeight) {
+        maxHeight = h
+        container.style.minHeight = `${h}px`
+      }
+    }
 
+    const observer = new ResizeObserver(updateMinHeight)
     observer.observe(container)
-    return () => observer.disconnect()
-  }, [isStreaming, lockStreamingHeight])
 
+    return () => observer.disconnect()
+  }, [isStreaming])
 
   const renderedBlocks = useMemo(() => {
     const elements: React.ReactNode[] = []
@@ -1617,7 +1623,7 @@ export default function MessageContent({
             const piece = pieces[p]
             elements.push(
               piece.type === 'island'
-                ? <IsolatedHtml key={`${i}-island-${p}`} html={piece.content} />
+                ? <IsolatedHtml key={`${i}-island-${p}`} html={piece.content} isStreaming={isStreaming} />
                 : piece.type === 'youtubeEmbed'
                   ? <TrustedYouTubeEmbed key={`${i}-youtube-${p}`} embed={piece.embed} />
                 : <ProseHtml key={`${i}-${p}`} className={styles.prose} html={piece.content} />
@@ -1640,7 +1646,7 @@ export default function MessageContent({
             const piece = pieces[p]
             elements.push(
               piece.type === 'island'
-                ? <IsolatedHtml key={`${i}-island-${p}`} html={piece.content} />
+                ? <IsolatedHtml key={`${i}-island-${p}`} html={piece.content} isStreaming={isStreaming} />
                 : piece.type === 'youtubeEmbed'
                   ? <TrustedYouTubeEmbed key={`${i}-youtube-${p}`} embed={piece.embed} />
                 : <ProseHtml key={`${i}-${p}`} className={styles.prose} html={piece.content} />
@@ -1708,15 +1714,12 @@ export default function MessageContent({
     prevTextLenRef.current = currentLen
   }, [content, isStreaming])
 
-  const minHeight = streamingMinHeight ?? 0
-
   return (
     <>
       <div
         data-component="MessageContent"
         ref={containerRef}
         className={clsx(styles.content, isUser ? styles.contentUser : styles.contentChar)}
-        style={minHeight > 0 ? { minHeight: `${minHeight}px` } : undefined}
       >
         {renderedBlocks}
         <SpindleMessageWidgets messageId={messageId} />

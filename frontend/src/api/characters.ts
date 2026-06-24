@@ -2,6 +2,7 @@ import { get, post, put, del, upload, uploadWithProgress, getBlob, BASE_URL } fr
 import { triggerBlobDownload } from '@/lib/downloads'
 import type {
   Character,
+  CharacterPerspectiveLayer,
   CharacterSummary,
   TagCount,
   CreateCharacterInput,
@@ -25,6 +26,9 @@ export interface SummaryParams {
   favorite_ids?: string
   seed?: number
 }
+
+export type CharacterPerspectiveLayerKind = 'background' | 'framing' | 'subject'
+export type CharacterPerspectiveLayerInput = Pick<CharacterPerspectiveLayer, 'id' | 'image_id' | 'intensity'> & { label?: string }
 
 export const charactersApi = {
   list(params?: { limit?: number; offset?: number; search?: string; sort?: string; seed?: number }) {
@@ -69,8 +73,41 @@ export const charactersApi = {
     return upload<Character>(`/characters/${id}/avatar`, form)
   },
 
+  uploadPerspectiveLayer(id: string, layer: CharacterPerspectiveLayerKind, file: File, onProgress?: (percent: number) => void) {
+    const form = new FormData()
+    form.append('image', file)
+    const path = `/characters/${id}/perspective-layers/${layer}`
+    if (onProgress) return uploadWithProgress<Character>(path, form, onProgress)
+    return upload<Character>(path, form)
+  },
+
+  deletePerspectiveLayer(id: string, layer: CharacterPerspectiveLayerKind) {
+    return del<Character>(`/characters/${id}/perspective-layers/${layer}`)
+  },
+
+  addPerspectiveLayer(id: string, file: File, input?: { label?: string; intensity?: number }, onProgress?: (percent: number) => void) {
+    const form = new FormData()
+    form.append('image', file)
+    if (input?.label) form.append('label', input.label)
+    if (typeof input?.intensity === 'number') form.append('intensity', String(input.intensity))
+    if (onProgress) return uploadWithProgress<Character>(`/characters/${id}/perspective-layers`, form, onProgress)
+    return upload<Character>(`/characters/${id}/perspective-layers`, form)
+  },
+
+  updatePerspectiveLayers(id: string, layers: CharacterPerspectiveLayerInput[]) {
+    return put<Character>(`/characters/${id}/perspective-layers`, { layers })
+  },
+
+  removePerspectiveLayer(id: string, layerId: string) {
+    return del<Character>(`/characters/${id}/perspective-layers/${layerId}`)
+  },
+
   avatarUrl(id: string) {
     return `${BASE_URL}/characters/${id}/avatar`
+  },
+
+  getAvatarBlob(id: string) {
+    return getBlob(`/characters/${id}/avatar`)
   },
 
   /** Direct image URL — bypasses character DB lookup when image_id is known */

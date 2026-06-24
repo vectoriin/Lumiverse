@@ -163,11 +163,21 @@
   color: var(--lumiverse-error);
 }
 
+.section {
+  padding: 0 12px;
+}
+
 .entryList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  position: relative;
   margin-top: 10px;
+}
+
+.entryPagination {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  padding: 8px 0 12px;
+  background: var(--lumiverse-bg-deep);
 }
 
 .rowDragging {
@@ -347,6 +357,17 @@
 .entryMetaItem {
   background: var(--lumiverse-fill-medium, var(--lumiverse-fill-strong));
   color: var(--lumiverse-text-muted);
+}
+
+.orderBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.orderBadge svg {
+  flex-shrink: 0;
 }
 
 .entryActions {

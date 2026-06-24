@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand'
 import type { AppStore, SettingsSlice, StartupSettings, ThemeConfig, ReasoningSettings } from '@/types/store'
 import { settingsApi } from '@/api/settings'
+import { themeAssetsApi } from '@/api/theme-assets'
 import { BASE_URL } from '@/api/client'
 import { generateUUID } from '@/lib/uuid'
 import { DEFAULT_THEME, normalizeTheme } from '@/theme/presets'
@@ -56,6 +57,7 @@ const DATA_KEYS: ReadonlySet<string> = new Set([
   'sortField',
   'sortDirection',
   'filterTab',
+  'favoritesBarCollapsed',
   // Persona browser preferences
   'personaViewMode',
   'personaSortField',
@@ -280,7 +282,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     tabSize: 'large',
     panelWidthMode: 'default',
     customPanelWidth: 35,
-    showTabLabels: false,
+    showTabLabels: true,
     hiddenTabIds: [],
     tabOrder: [],
   },
@@ -309,6 +311,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
   swipeGesturesEnabled: true,
   showMessageTokenCount: true,
   messageContextMenuEnabled: true,
+  favoritesBarCollapsed: false,
   globalWorldBooks: [],
   worldInfoSettings: {
     globalScanDepth: null,
@@ -376,12 +379,19 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     if (settings.sortDirection) patch.sortDirection = settings.sortDirection
     if (settings.viewMode) patch.viewMode = settings.viewMode
     if (typeof settings.charactersPerPage === 'number') patch.charactersPerPage = settings.charactersPerPage
+    if (typeof settings.favoritesBarCollapsed === 'boolean') patch.favoritesBarCollapsed = settings.favoritesBarCollapsed
     if ('theme' in settings) patch.theme = normalizeTheme(settings.theme)
     if (typeof settings.landingPageChatsDisplayed === 'number' && Number.isFinite(settings.landingPageChatsDisplayed)) {
       patch.landingPageChatsDisplayed = settings.landingPageChatsDisplayed
     }
     if (settings.landingPageLayoutMode === 'cards' || settings.landingPageLayoutMode === 'compact') {
       patch.landingPageLayoutMode = settings.landingPageLayoutMode
+    }
+    if (settings.wallpaper && typeof settings.wallpaper === 'object') {
+      patch.wallpaper = { ...settings.wallpaper }
+    }
+    if (settings.drawerSettings && typeof settings.drawerSettings === 'object') {
+      patch.drawerSettings = { ...get().drawerSettings, ...settings.drawerSettings }
     }
 
     set(patch as any)
@@ -559,7 +569,6 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
       const packBundleId = entry.pack.bundleId
       if (packBundleId && packBundleId !== activeBundleId) {
         try {
-          const { themeAssetsApi } = await import('@/api/theme-assets')
           const assets = await themeAssetsApi.list(packBundleId)
           await Promise.all(assets.map((a) => themeAssetsApi.delete(a.id).catch(() => {})))
         } catch {

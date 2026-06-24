@@ -1,3 +1,7 @@
+---
+title: Group Chats
+---
+
 # Group Chats
 
 Group chats let you have conversations with **multiple AI characters at once**. Characters interact with you and with each other, creating dynamic multi-character scenes.

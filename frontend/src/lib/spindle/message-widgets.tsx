@@ -1,5 +1,6 @@
-import { useLayoutEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
+import { useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
 import { createSandboxFrame } from './sandbox-frame'
+import { scheduleSpindleDomTask } from './browser-scheduler'
 
 export interface SpindleMessageWidgetRenderOptions {
   messageId: string
@@ -84,32 +85,44 @@ function MessageWidgetFrame({ widget }: { widget: MessageWidgetRecord }): ReactE
   const hostRef = useRef<HTMLDivElement | null>(null)
   const widgetKey = `${widget.extensionId}:${widget.messageId}:${widget.widgetId}:${hashWidgetHtml(widget.html)}`
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const cachedHeight = widgetHeightCache.get(widgetKey)
-    const frame = createSandboxFrame(widget.extensionId, {
-      html: widget.html,
-      autoResize: true,
-      minHeight: widget.minHeight ?? 40,
-      maxHeight: widget.maxHeight ?? 4000,
-      ...(cachedHeight ? { initialHeight: cachedHeight } : {}),
-    }, widget.corsProxy)
-    frame.element.setAttribute('data-spindle-message-widget', widget.widgetId)
-    frame.element.setAttribute('data-spindle-extension-id', widget.extensionId)
-    frame.element.style.margin = '12px 0'
-    const unsubscribe = frame.onMessage((payload) => widget.onMessage?.(payload))
-    const resizeObserver = new ResizeObserver(() => {
-      const height = Math.round(frame.element.getBoundingClientRect().height)
-      if (height > 0) widgetHeightCache.set(widgetKey, height)
+
+    let dispose: (() => void) | null = null
+    const cancel = scheduleSpindleDomTask(() => {
+      if (!host.isConnected) return
+
+      const cachedHeight = widgetHeightCache.get(widgetKey)
+      const frame = createSandboxFrame(widget.extensionId, {
+        html: widget.html,
+        autoResize: true,
+        minHeight: widget.minHeight ?? 40,
+        maxHeight: widget.maxHeight ?? 4000,
+        ...(cachedHeight ? { initialHeight: cachedHeight } : {}),
+      }, widget.corsProxy)
+      frame.element.setAttribute('data-spindle-message-widget', widget.widgetId)
+      frame.element.setAttribute('data-spindle-extension-id', widget.extensionId)
+      frame.element.style.margin = '12px 0'
+      const unsubscribe = frame.onMessage((payload) => widget.onMessage?.(payload))
+      const resizeObserver = new ResizeObserver(() => {
+        const height = Math.round(frame.element.getBoundingClientRect().height)
+        if (height > 0) widgetHeightCache.set(widgetKey, height)
+      })
+      resizeObserver.observe(frame.element)
+      host.replaceChildren(frame.element)
+
+      dispose = () => {
+        unsubscribe()
+        resizeObserver.disconnect()
+        frame.destroy()
+        host.replaceChildren()
+      }
     })
-    resizeObserver.observe(frame.element)
-    host.replaceChildren(frame.element)
+
     return () => {
-      unsubscribe()
-      resizeObserver.disconnect()
-      frame.destroy()
-      host.replaceChildren()
+      cancel()
+      dispose?.()
     }
   }, [widget, widgetKey])
 

@@ -2,7 +2,7 @@ import { getDatabasePath, getDb } from "../db/connection";
 import { healCorruptDatabase } from "../db/maintenance";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
-import { getCharacter } from "./characters.service";
+import { getCharacter, LANDING_PERSPECTIVE_LAYERS_KEY, normalizeLandingPerspectiveLayers } from "./characters.service";
 import { getEffectiveCharacterName, makeAssistantCharacter } from "../types/character";
 import type { Chat, CreateChatInput, CreateGroupChatInput, UpdateChatInput, RecentChat, GroupedRecentChat, ChatSummary } from "../types/chat";
 import { isTemporaryChatMetadata } from "../types/chat";
@@ -597,32 +597,90 @@ export interface GroupedRecentChatOptions {
   direction?: 'asc' | 'desc';
 }
 
+interface RecentChatCharacterInfo {
+  name: string;
+  avatar_path: string | null;
+  image_id: string | null;
+  perspective_layers?: GroupedRecentChat["character_perspective_layers"];
+}
+
+function readPerspectiveLayers(extensions: unknown): GroupedRecentChat["character_perspective_layers"] | undefined {
+  let parsed = extensions;
+  if (typeof extensions === "string") {
+    try {
+      parsed = JSON.parse(extensions || "{}");
+    } catch {
+      parsed = {};
+    }
+  }
+  const ext = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
+  const layers = normalizeLandingPerspectiveLayers(ext[LANDING_PERSPECTIVE_LAYERS_KEY]);
+  return layers.length >= 2 ? layers : undefined;
+}
+
+function loadRecentChatCharacterInfo(db: any, rows: any[]): Map<string, RecentChatCharacterInfo> {
+  const ids = Array.from(new Set(
+    rows
+      .map((row) => row.character_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+  ));
+  if (ids.length === 0) return new Map();
+
+  const placeholders = ids.map(() => "?").join(",");
+  const characterRows = db.query(`
+    SELECT id, name, avatar_path, image_id, extensions
+    FROM characters
+    WHERE id IN (${placeholders})
+  `).all(...ids) as any[];
+
+  return new Map(characterRows.map((row) => [row.id, {
+    name: row.name || '',
+    avatar_path: row.avatar_path || null,
+    image_id: row.image_id || null,
+    perspective_layers: readPerspectiveLayers(row.extensions),
+  }]));
+}
+
 export function listRecentChatsGrouped(
   userId: string,
   pagination: PaginationParams,
   options: GroupedRecentChatOptions = {},
 ): PaginatedResult<GroupedRecentChat> {
   const db = getDb();
+  const searchTerm = options.search?.trim().toLowerCase() ?? '';
+  const sort: GroupedRecentChatSort = options.sort ?? 'recent';
+  const direction = options.direction ?? (sort === 'name' ? 'asc' : 'desc');
+  const isDefaultRecentSort = !searchTerm && sort === 'recent' && direction === 'desc';
 
   // Parse metadata in JS so a single malformed row cannot make SQLite abort
   // the landing-page recent-chat query while evaluating json_extract().
   const rows = withRecentChatRecovery("loading grouped recent chats", () =>
-    db.query(`
-      SELECT
-        c.id,
-        c.character_id,
-        c.name,
-        c.metadata,
-        c.created_at,
-        c.updated_at,
-        ch.name AS character_name,
-        ch.avatar_path AS character_avatar_path,
-        ch.image_id AS character_image_id
-      FROM chats c
-      LEFT JOIN characters ch ON ch.id = c.character_id
-      WHERE c.user_id = ? AND c.character_id IS NOT NULL
-      ORDER BY c.updated_at DESC
-    `).all(userId) as any[]
+    isDefaultRecentSort
+      ? db.query(`
+          SELECT id, character_id, name, metadata, updated_at
+          FROM chats
+          WHERE user_id = ? AND character_id IS NOT NULL
+          ORDER BY updated_at DESC
+        `).all(userId) as any[]
+      : db.query(`
+          SELECT
+            c.id,
+            c.character_id,
+            c.name,
+            c.metadata,
+            c.created_at,
+            c.updated_at,
+            ch.name AS character_name,
+            ch.avatar_path AS character_avatar_path,
+            ch.image_id AS character_image_id,
+            ch.extensions AS character_extensions
+          FROM chats c
+          LEFT JOIN characters ch ON ch.id = c.character_id
+          WHERE c.user_id = ? AND c.character_id IS NOT NULL
+          ORDER BY c.updated_at DESC
+        `).all(userId) as any[]
   );
 
   const soloCounts = new Map<string, number>();
@@ -684,7 +742,6 @@ export function listRecentChatsGrouped(
     return (row.character_name || row.name || '').toString();
   };
 
-  const searchTerm = options.search?.trim().toLowerCase() ?? '';
   const filteredRows = searchTerm
     ? dedupedRows.filter((row) => {
         const chatName = (row.name || '').toLowerCase();
@@ -693,10 +750,8 @@ export function listRecentChatsGrouped(
       })
     : dedupedRows;
 
-  const sort: GroupedRecentChatSort = options.sort ?? 'recent';
-  const direction = options.direction ?? (sort === 'name' ? 'asc' : 'desc');
   const sign = direction === 'asc' ? 1 : -1;
-  const sortedRows = [...filteredRows].sort((a, b) => {
+  const sortedRows = isDefaultRecentSort ? filteredRows : [...filteredRows].sort((a, b) => {
     if (sort === 'name') {
       return sign * displayName(a).localeCompare(displayName(b), undefined, { sensitivity: 'base' });
     }
@@ -704,16 +759,20 @@ export function listRecentChatsGrouped(
     const bVal = sort === 'created' ? (b.created_at ?? 0) : (b.updated_at ?? 0);
     return sign * (aVal - bVal);
   });
+  const pageRows = sortedRows.slice(pagination.offset, pagination.offset + pagination.limit);
+  const characterInfoById = isDefaultRecentSort ? loadRecentChatCharacterInfo(db, pageRows) : null;
 
   return {
-    data: sortedRows.slice(pagination.offset, pagination.offset + pagination.limit).map((row: any) => {
+    data: pageRows.map((row: any) => {
       const metadata = row.metadata;
       const isGroup = row.isGroup;
+      const characterInfo = characterInfoById?.get(row.character_id);
       return {
         character_id: row.character_id,
-        character_name: row.character_name || '',
-        character_avatar_path: row.character_avatar_path || null,
-        character_image_id: row.character_image_id || null,
+        character_name: characterInfo?.name ?? row.character_name ?? '',
+        character_avatar_path: characterInfo?.avatar_path ?? row.character_avatar_path ?? null,
+        character_image_id: characterInfo?.image_id ?? row.character_image_id ?? null,
+        character_perspective_layers: characterInfo?.perspective_layers ?? readPerspectiveLayers(row.character_extensions),
         latest_chat_id: row.id,
         latest_chat_name: row.name || '',
         updated_at: row.updated_at,
@@ -1987,6 +2046,25 @@ export function deleteMessage(userId: string, id: string): boolean {
   return result.changes > 0;
 }
 
+function scheduleMemoryRebuildForActiveMessageChange(userId: string, chatId: string, messageId: string, reason: string): void {
+  try {
+    invalidateChatMemoryCache(chatId);
+  } catch { /* test/minimal schemas may omit runtime cache tables */ }
+  try {
+    memoryCortex.invalidateCortexCache(chatId);
+    memoryCortex.invalidateLinkedCortexCache(chatId);
+  } catch { /* ignore if not loaded */ }
+
+  const hasChatChunksTable = !!getDb()
+    .query("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = 'chat_chunks'")
+    .get();
+  if (!hasChatChunksTable) return;
+
+  rebuildChatChunksFromMessages(userId, chatId, [messageId]).catch(err => {
+    console.warn(`[chats] Failed to rebuild chunks after ${reason}:`, err);
+  });
+}
+
 // --- Swipes ---
 
 export function addSwipe(userId: string, messageId: string, content: string): Message | null {
@@ -2026,6 +2104,9 @@ export function addSwipe(userId: string, messageId: string, content: string): Me
     },
     userId,
   );
+  if (content !== msg.content) {
+    scheduleMemoryRebuildForActiveMessageChange(userId, updated.chat_id, messageId, "swipe add");
+  }
   return updated;
 }
 
@@ -2060,6 +2141,10 @@ export function updateSwipe(userId: string, messageId: string, swipeIdx: number,
     },
     userId,
   );
+
+  if (swipeIdx === msg.swipe_id && content !== msg.content) {
+    scheduleMemoryRebuildForActiveMessageChange(userId, updated.chat_id, messageId, "swipe update");
+  }
 
   return updated;
 }
@@ -2117,6 +2202,9 @@ export function deleteSwipe(userId: string, messageId: string, swipeIdx: number)
     },
     userId,
   );
+  if (newContent !== msg.content) {
+    scheduleMemoryRebuildForActiveMessageChange(userId, updated.chat_id, messageId, "swipe delete");
+  }
   return updated;
 }
 
@@ -2151,6 +2239,9 @@ export function cycleSwipe(userId: string, messageId: string, direction: "left" 
     },
     userId,
   );
+  if (nextContent !== msg.content) {
+    scheduleMemoryRebuildForActiveMessageChange(userId, updated.chat_id, messageId, "swipe navigation");
+  }
   return updated;
 }
 

@@ -22,6 +22,7 @@ import { getEffectiveCharacterName } from "../types/character";
 import { isNoPresetChatMetadata, isTemporaryChatMetadata } from "../types/chat";
 import {
   getTextContent,
+  flattenContentForDisplay,
   type LlmMessage,
   type GenerationParameters,
   type GenerationRequest,
@@ -78,6 +79,7 @@ import {
   detectExpression,
   detectMultiCharacterExpression,
   getExpressionDetectionSettings,
+  resolveDetectedExpressionLabel,
 } from "./expression-detection.service";
 import {
   hasExpressions,
@@ -244,8 +246,36 @@ function injectConnectionMetadataFlags(
   }
 }
 
+function omitChatHistoryBreakdownEntries<
+  T extends { type: string },
+>(entries: T[]): T[] {
+  return entries.filter((entry) => entry.type !== "chat_history");
+}
+
+function sumChatHistoryBreakdownTokens(
+  entries: Array<{ type: string; tokens: number }>,
+): number {
+  return entries.reduce(
+    (sum, entry) => sum + (entry.type === "chat_history" ? entry.tokens : 0),
+    0,
+  );
+}
+
+function omitChatHistoryTokenBreakdown(
+  tokenCount: DryRunResult["tokenCount"],
+): DryRunResult["tokenCount"] {
+  if (!tokenCount) return tokenCount;
+  return {
+    ...tokenCount,
+    breakdown: omitChatHistoryBreakdownEntries(tokenCount.breakdown),
+  };
+}
+
 export const __test__ = {
   injectConnectionMetadataFlags,
+  omitChatHistoryBreakdownEntries,
+  omitChatHistoryTokenBreakdown,
+  sumChatHistoryBreakdownTokens,
 };
 
 export interface RawGenerateInput {
@@ -332,6 +362,7 @@ export interface DryRunResult {
     tokenizer_id: string | null;
     tokenizer_name: string | null;
   };
+  chatHistoryTokens?: number;
   worldInfoStats?: {
     totalCandidates: number;
     activatedBeforeBudget: number;
@@ -1055,6 +1086,7 @@ async function runPromptPipeline(opts: {
   inputMessages?: LlmMessage[];
   inputParameters?: GenerationParameters;
   excludeMessageId?: string;
+  rejectedSwipe?: string;
   targetCharacterId?: string;
   councilToolResults?: any[];
   councilNamedResults?: Record<string, string>;
@@ -1122,6 +1154,7 @@ async function runPromptPipeline(opts: {
       impersonateMode: opts.impersonateMode,
       impersonateInput: opts.impersonateInput,
       excludeMessageId: opts.excludeMessageId,
+      rejectedSwipe: opts.rejectedSwipe,
       targetCharacterId: opts.targetCharacterId,
       councilToolResults: opts.councilToolResults,
       councilNamedResults: opts.councilNamedResults,
@@ -1441,7 +1474,7 @@ export async function startGeneration(
   // Skip this check when an explicit message_id is provided — the frontend
   // already validated the target.
   if (
-    (genType === "regenerate" || genType === "continue") &&
+    (genType === "regenerate" || genType === "swipe" || genType === "continue") &&
     !input.message_id
   ) {
     const lastMessage = chatsSvc.getLastMessage(input.userId, input.chat_id);
@@ -1570,7 +1603,7 @@ export async function startGeneration(
         ? (chat.metadata.character_ids as string[])
         : [];
     let targetAssistantMessage: Message | null = null;
-    if (genType === "regenerate") {
+    if (genType === "regenerate" || genType === "swipe") {
       targetAssistantMessage = input.message_id
         ? chatsSvc.getMessage(input.userId, input.message_id)
         : chatsSvc.getLastAssistantMessage(input.userId, input.chat_id);
@@ -1612,7 +1645,7 @@ export async function startGeneration(
         ? messageTargetCharId
         : undefined;
     const targetExistingAssistant =
-      genType === "regenerate" || genType === "continue";
+      genType === "regenerate" || genType === "swipe" || genType === "continue";
     const resolvedTargetCharId = targetExistingAssistant
       ? inferredGroupTargetCharId || requestedTargetCharId
       : requestedTargetCharId || inferredGroupTargetCharId;
@@ -1674,6 +1707,7 @@ export async function startGeneration(
     }
 
     let excludeMessageId: string | undefined;
+    let rejectedSwipe: string | undefined;
     // Index of the swipe this generation streams into. Sent to the frontend so
     // it can gate the streaming buffer to the correct swipe — letting the user
     // navigate to other (already-saved) swipes mid-generation without smearing
@@ -1681,11 +1715,12 @@ export async function startGeneration(
     // routes the completion write) so we don't perturb normal/continue saving.
     let targetSwipeId: number | undefined;
 
-    if (genType === "regenerate") {
+    if (genType === "regenerate" || genType === "swipe") {
       const targetMsg = targetAssistantMessage;
       if (targetMsg) {
         lifecycle.targetMessageId = targetMsg.id;
         excludeMessageId = targetMsg.id;
+        rejectedSwipe = targetMsg.content;
         // Add a blank swipe immediately so the frontend shows cleared content
         // before council/assembly begins (MESSAGE_SWIPED event fires now).
         const withBlank = chatsSvc.addSwipe(input.userId, targetMsg.id, "");
@@ -1971,11 +2006,12 @@ export async function startGeneration(
               // so the frontend has a real message bubble to stream tokens into. Without
               // this, the HTTP response (and thus startStreaming) arrives after council
               // completes, racing with WS events that may have already finished.
-              // Guard: normal sends are already staged above; only stage here for swipe
-              // or for sidecar council paths that bypassed the early staging.
+              // Guard: normal sends are already staged above. A swipe/regenerate
+              // already has a blank target swipe, so do not create a duplicate
+              // assistant message here.
               if (
                 !stagedMessageId &&
-                (genType === "normal" || genType === "swipe")
+                genType === "normal"
               ) {
                 const extra: Record<string, any> = {};
                 if (targetCharId) extra.character_id = targetCharId;
@@ -2422,6 +2458,7 @@ export async function startGeneration(
             inputMessages: input.messages,
             inputParameters: input.parameters,
             excludeMessageId,
+            rejectedSwipe,
             targetCharacterId: pipelineTargetCharId,
             councilToolResults,
             councilNamedResults,
@@ -2729,6 +2766,7 @@ export async function dryRunGeneration(
 
   // Compute token counts for the breakdown
   let tokenCount: DryRunResult["tokenCount"];
+  let chatHistoryTokens: number | undefined;
   if (pipeline.breakdown && pipeline.breakdown.length > 0) {
     try {
       tokenCount = await tokenizerSvc.countBreakdown(
@@ -2736,6 +2774,7 @@ export async function dryRunGeneration(
         pipeline.breakdown,
         pipeline.chatHistoryMessages,
       );
+      chatHistoryTokens = sumChatHistoryBreakdownTokens(tokenCount.breakdown);
     } catch {
       // non-fatal: skip token count if tokenizer fails
     }
@@ -2757,13 +2796,22 @@ export async function dryRunGeneration(
   }
 
   return {
-    messages: pipeline.messages,
-    breakdown: pipeline.breakdown || [],
+    // The dry-run viewer is display-only and assumes string content. Flatten
+    // multimodal parts (image/audio/tool) to placeholder-annotated strings so
+    // multipart turns don't crash the frontend (TypeError: e.replace is not a
+    // function) when a chat message carries an attachment. Token counts come
+    // from the breakdown above, which is already computed from the real parts.
+    messages: pipeline.messages.map((m) => ({
+      ...m,
+      content: flattenContentForDisplay(m.content),
+    })),
+    breakdown: omitChatHistoryBreakdownEntries(pipeline.breakdown || []),
     parameters: outboundParams,
     assistantPrefill: pipeline.assistantPrefill,
     model: connection.model,
     provider: provider.name,
-    tokenCount,
+    tokenCount: omitChatHistoryTokenBreakdown(tokenCount),
+    chatHistoryTokens,
     worldInfoStats: pipeline.worldInfoStats,
     memoryStats: pipeline.memoryStats,
     databankStats: pipeline.databankStats,
@@ -3688,11 +3736,14 @@ async function runGeneration(
               lifecycle.breakdown,
               lifecycle.chatHistoryMessages,
             );
+            const entries = tokenResult.breakdown.map((entry, index) => ({
+              ...entry,
+              content: lifecycle.breakdown?.[index]?.content,
+            }));
+            const chatHistoryTokens = sumChatHistoryBreakdownTokens(entries);
             const breakdownPayload = {
-              entries: tokenResult.breakdown.map((entry, index) => ({
-                ...entry,
-                content: lifecycle.breakdown?.[index]?.content,
-              })),
+              entries: omitChatHistoryBreakdownEntries(entries),
+              chatHistoryTokens,
               messages: (lifecycle.messages || []).map((message) => ({
                 role: message.role,
                 content:
@@ -3894,10 +3945,7 @@ async function fireExpressionDetection(
 
   // Check if council already produced an expression result
   if (lifecycle.councilNamedResults?.["expression_data"]) {
-    const councilLabel = lifecycle.councilNamedResults["expression_data"]
-      .trim()
-      .toLowerCase();
-    const matched = labels.find((l) => l.toLowerCase() === councilLabel);
+    const matched = resolveDetectedExpressionLabel(lifecycle.councilNamedResults["expression_data"], labels);
     if (matched) {
       emitExpressionChanged(
         userId,

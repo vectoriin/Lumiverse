@@ -584,6 +584,13 @@ type RuntimeHostToWorker =
       requestId: string;
       ctx: WorldInfoInterceptorCtxDTO;
     }
+  | {
+      type: "permission_changed";
+      extensionId?: string;
+      permission: string;
+      granted: boolean;
+      allGranted: string[];
+    }
   | { type: "frontend_process_lifecycle"; event: FrontendProcessLifecycleEvent }
   | { type: "frontend_process_message"; processId: string; payload: unknown; userId: string }
   | { type: "backend_process_lifecycle"; event: BackendProcessLifecycleEvent }
@@ -1899,7 +1906,13 @@ export class WorkerHost {
    * no restart needed.
    */
   notifyPermissionChanged(permission: string, granted: boolean, allGranted: string[]): void {
-    this.postToWorker({ type: "permission_changed", permission, granted, allGranted });
+    this.postToWorker({
+      type: "permission_changed",
+      extensionId: this.manifest.identifier,
+      permission,
+      granted,
+      allGranted,
+    });
   }
 
   /**
@@ -3114,6 +3127,12 @@ export class WorkerHost {
     const unsub = eventBus.on(eventType, (msg) => {
       if (scopedUserId && msg.userId !== scopedUserId) {
         return;
+      }
+      if (eventType === EventType.SPINDLE_PERMISSION_CHANGED) {
+        const payload = (msg.payload ?? {}) as { extensionId?: string; identifier?: string };
+        if (payload.extensionId !== this.extensionId && payload.identifier !== this.manifest.identifier) {
+          return;
+        }
       }
       this.postToWorker({
         type: "event",
@@ -7750,7 +7769,11 @@ export class WorkerHost {
         source: e.source,
         score: e.score,
         bookId: e.bookId,
-        bookSource: e.bookSource,
+        // The published Spindle SDK's WorldBookSourceDTO has no "peer" variant
+        // (a relayed multiplayer participant's persona lorebook). Surface it to
+        // extensions as its closest valid kind — "persona" — rather than bumping
+        // the SDK contract; the host's own Prompt Breakdown keeps the distinction.
+        bookSource: e.bookSource === "peer" ? "persona" : e.bookSource,
       }));
 
       this.postToWorker({ type: "response", requestId, result });
@@ -10461,7 +10484,7 @@ export class WorkerHost {
           },
           chat: {
             id: "", messageCount: 0, lastMessage: "", lastMessageName: "", lastUserMessage: "",
-            lastCharMessage: "", lastMessageId: -1, firstIncludedMessageId: -1, lastSwipeId: 0, currentSwipeId: 0,
+            lastCharMessage: "", lastMessageId: -1, firstIncludedMessageId: -1, lastSwipeId: 0, currentSwipeId: 0, rejectedSwipe: "",
           },
           system: {
             model: connection?.model || "", maxPrompt: 0, maxContext: 0, maxResponse: 0,

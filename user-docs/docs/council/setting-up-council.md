@@ -1,3 +1,7 @@
+---
+title: Setting Up Council
+---
+
 # Setting Up Council
 
 This guide walks you through configuring the council for AI-assisted deliberation.

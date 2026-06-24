@@ -16,7 +16,16 @@ function makeEnv(opts: {
   messages?: { content: string; name: string; is_user: boolean }[];
   characterTags?: string[];
   chatCreatedAt?: number;
+  lastMessageTime?: number;
   worldInfoOutlets?: Record<string, string>;
+  rejectedSwipe?: string;
+  multiplayer?: {
+    playerCount: number;
+    playerNames: string[];
+    hostName: string;
+    currentTurnName: string;
+    turnStrategy: string;
+  };
 } = {}): MacroEnv {
   const env: MacroEnv = {
     commit: true,
@@ -64,6 +73,7 @@ function makeEnv(opts: {
       firstIncludedMessageId: 0,
       lastSwipeId: 0,
       currentSwipeId: 0,
+      rejectedSwipe: opts.rejectedSwipe ?? "",
     },
     system: {
       model: "gpt-4",
@@ -88,8 +98,10 @@ function makeEnv(opts: {
         { content: "I draw my sword.", name: "Alice", is_user: true },
       ],
       chatCreatedAt: opts.chatCreatedAt ?? Math.floor(Date.now() / 1000) - 3600,
+      lastMessageTime: opts.lastMessageTime,
       characterTags: opts.characterTags ?? ["fantasy", "warrior", "male"],
       worldInfoOutlets: opts.worldInfoOutlets ?? {},
+      ...(opts.multiplayer ? { multiplayer: opts.multiplayer } : {}),
     },
   };
   return env;
@@ -588,6 +600,13 @@ describe("Chat macros", () => {
 
   test("chatId", async () => {
     expect(await ev("{{chatId}}")).toBe("chat-123");
+  });
+
+  test("rejectedSwipe exposes the regenerate target content", async () => {
+    const env = makeEnv({ rejectedSwipe: "Yes I am!" });
+    expect(await ev("{{rejectedSwipe}}", env)).toBe("Yes I am!");
+    expect(await ev("{{rejectedGeneration}}", env)).toBe("Yes I am!");
+    expect(await ev("{{regeneratedMessage}}", env)).toBe("Yes I am!");
   });
 });
 
@@ -1854,5 +1873,497 @@ describe("Edge cases", () => {
     const env = makeEnv();
     env.character.description = "Friend of {{user}}";
     expect(await ev("{{if::{{description}} == Friend of Alice}}match{{else}}nomatch{{/if}}", env)).toBe("match");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — foreach (iteration)
+// ===========================================================================
+
+describe("foreach macro", () => {
+  test("iterates an inline comma list", async () => {
+    expect(await ev("{{foreach::a,b,c}}[{{.item}}]{{/foreach}}")).toBe("[a][b][c]");
+  });
+
+  test("trims items and drops blanks", async () => {
+    expect(await ev("{{foreach::a, b , ,c}}[{{.item}}]{{/foreach}}")).toBe("[a][b][c]");
+  });
+
+  test("exposes 0-based index and 1-based number", async () => {
+    expect(await ev("{{foreach::x,y,z}}{{.item_index}}:{{.item_number}} {{/foreach}}")).toBe(
+      "0:1 1:2 2:3 ",
+    );
+  });
+
+  test("exposes total count", async () => {
+    expect(await ev("{{foreach::a,b,c}}{{.item_count}}{{/foreach}}")).toBe("333");
+  });
+
+  test("exposes first / last flags", async () => {
+    expect(await ev("{{foreach::a,b,c}}{{.item}}={{.item_first}}/{{.item_last}} {{/foreach}}")).toBe(
+      "a=true/ b=/ c=/true ",
+    );
+  });
+
+  test("first/last enable clean separators via if/else", async () => {
+    expect(
+      await ev("{{foreach::a,b,c::x}}{{if::{{.x_last}}}}{{.x}}{{else}}{{.x}}, {{/if}}{{/foreach}}"),
+    ).toBe("a, b, c");
+  });
+
+  test("first/last enable clean separators via negated last flag", async () => {
+    expect(await ev("{{foreach::a,b,c::x}}{{.x}}{{if::!{{.x_last}}}}, {{/if}}{{/foreach}}")).toBe(
+      "a, b, c",
+    );
+  });
+
+  test("supports a custom loop variable name", async () => {
+    expect(await ev("{{foreach::a,b::letter}}{{.letter}}!{{/foreach}}")).toBe("a!b!");
+  });
+
+  test("supports a custom delimiter", async () => {
+    expect(await ev("{{foreach::a|b|c::item::|}}{{.item}}-{{/foreach}}")).toBe("a-b-c-");
+  });
+
+  test("empty delimiter treats the whole string as one item", async () => {
+    expect(await ev("{{foreach::hello world::w::}}[{{.w}}]{{/foreach}}")).toBe("[hello world]");
+  });
+
+  test("iterates the value of a variable", async () => {
+    const env = makeEnv({ localVars: { fruits: "apple,banana" } });
+    expect(await ev("{{foreach::{{.fruits}}::f}}{{.f}};{{/foreach}}", env)).toBe("apple;banana;");
+  });
+
+  test("resolves nested macros in the body", async () => {
+    expect(await ev("{{foreach::a,b}}{{upper::{{.item}}}}{{/foreach}}")).toBe("AB");
+  });
+
+  test("nests cleanly with distinct variable names", async () => {
+    expect(
+      await ev("{{foreach::1,2::n}}{{foreach::a,b::l}}{{.n}}{{.l}} {{/foreach}}{{/foreach}}"),
+    ).toBe("1a 1b 2a 2b ");
+  });
+
+  test("empty list resolves to nothing", async () => {
+    expect(await ev("{{foreach::}}body{{/foreach}}")).toBe("");
+  });
+
+  test("non-scoped usage resolves to nothing", async () => {
+    expect(await ev("before{{foreach::a,b,c}}after")).toBe("beforeafter");
+  });
+
+  test("restores a pre-existing loop variable after the loop (hygiene)", async () => {
+    const env = makeEnv({ localVars: { item: "ORIGINAL" } });
+    expect(await ev("{{foreach::x,y}}{{.item}}{{/foreach}}|{{.item}}", env)).toBe("xy|ORIGINAL");
+    expect(env.variables.local.get("item")).toBe("ORIGINAL");
+  });
+
+  test("does not leak the loop variable when none existed before (hygiene)", async () => {
+    const env = makeEnv();
+    expect(await ev("{{foreach::x,y}}{{.item}}{{/foreach}}|{{.item}}", env)).toBe("xy|");
+    expect(env.variables.local.has("item")).toBe(false);
+    expect(env.variables.local.has("item_index")).toBe(false);
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — Multiplayer
+// ===========================================================================
+
+describe("Multiplayer macros", () => {
+  const mpEnv = () =>
+    makeEnv({
+      multiplayer: {
+        playerCount: 3,
+        playerNames: ["Alice", "Bob", "Charlie"],
+        hostName: "Alice",
+        currentTurnName: "Bob",
+        turnStrategy: "round_robin",
+      },
+    });
+
+  test("isMultiplayer is 'no' outside a room", async () => {
+    expect(await ev("{{isMultiplayer}}")).toBe("no");
+  });
+
+  test("isMultiplayer is 'yes' inside a room", async () => {
+    expect(await ev("{{isMultiplayer}}", mpEnv())).toBe("yes");
+  });
+
+  test("playerCount", async () => {
+    expect(await ev("{{playerCount}}", mpEnv())).toBe("3");
+    expect(await ev("{{playerCount}}")).toBe("0");
+  });
+
+  test("players is a comma-separated roster", async () => {
+    expect(await ev("{{players}}", mpEnv())).toBe("Alice, Bob, Charlie");
+    expect(await ev("{{players}}")).toBe("");
+  });
+
+  test("hostName", async () => {
+    expect(await ev("{{hostName}}", mpEnv())).toBe("Alice");
+    expect(await ev("{{hostName}}")).toBe("");
+  });
+
+  test("currentPlayer", async () => {
+    expect(await ev("{{currentPlayer}}", mpEnv())).toBe("Bob");
+    expect(await ev("{{currentPlayer}}")).toBe("");
+  });
+
+  test("gates content with {{if}}", async () => {
+    expect(
+      await ev("{{if::{{isMultiplayer}}}}room of {{playerCount}}{{else}}solo{{/if}}", mpEnv()),
+    ).toBe("room of 3");
+    expect(await ev("{{if::{{isMultiplayer}}}}room{{else}}solo{{/if}}")).toBe("solo");
+  });
+
+  test("aliases resolve", async () => {
+    const env = mpEnv();
+    expect(await ev("{{is_multiplayer}}", env)).toBe("yes");
+    expect(await ev("{{player_count}}", env)).toBe("3");
+    expect(await ev("{{player_names}}", env)).toBe("Alice, Bob, Charlie");
+    expect(await ev("{{host_name}}", env)).toBe("Alice");
+    expect(await ev("{{current_player}}", env)).toBe("Bob");
+  });
+
+  test("pairs with foreach to enumerate the roster", async () => {
+    expect(await ev("{{foreach::{{players}}}}- {{.item}}\n{{/foreach}}", mpEnv())).toBe(
+      "- Alice\n- Bob\n- Charlie\n",
+    );
+  });
+
+  test("foreach numbers the roster for a turn order", async () => {
+    expect(await ev("{{foreach::{{players}}::p}}{{.p_number}}. {{.p}}\n{{/foreach}}", mpEnv())).toBe(
+      "1. Alice\n2. Bob\n3. Charlie\n",
+    );
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — range (A)
+// ===========================================================================
+
+describe("range macro", () => {
+  test("single arg counts 1..n inclusive", async () => {
+    expect(await ev("{{range::5}}")).toBe("1, 2, 3, 4, 5");
+  });
+
+  test("start..end inclusive", async () => {
+    expect(await ev("{{range::3::6}}")).toBe("3, 4, 5, 6");
+  });
+
+  test("custom step", async () => {
+    expect(await ev("{{range::1::10::2}}")).toBe("1, 3, 5, 7, 9");
+  });
+
+  test("counts down when start > end", async () => {
+    expect(await ev("{{range::5::1}}")).toBe("5, 4, 3, 2, 1");
+    expect(await ev("{{range::10::0::-2}}")).toBe("10, 8, 6, 4, 2, 0");
+  });
+
+  test("step with the wrong sign yields an empty list (no infinite loop)", async () => {
+    expect(await ev("{{range::1::5::-1}}")).toBe("");
+  });
+
+  test("empty / non-numeric inputs yield nothing", async () => {
+    expect(await ev("{{range::0}}")).toBe("");
+    expect(await ev("{{range::abc}}")).toBe("");
+  });
+
+  test("feeds foreach for counted loops", async () => {
+    expect(await ev("{{foreach::{{range::1::3}}::n}}[{{.n}}]{{/foreach}}")).toBe("[1][2][3]");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — list algebra (B)
+// ===========================================================================
+
+describe("list macros", () => {
+  test("count", async () => {
+    expect(await ev("{{count::a,b,c}}")).toBe("3");
+    expect(await ev("{{count::}}")).toBe("0");
+    expect(await ev("{{count::a,,b}}")).toBe("2"); // blanks ignored
+  });
+
+  test("includes (membership, condition-compatible)", async () => {
+    expect(await ev("{{includes::a,b,c::b}}")).toBe("true");
+    expect(await ev("{{includes::a,b,c::z}}")).toBe("");
+    expect(await ev("{{includes::a, b, c:: b }}")).toBe("true"); // trims
+    expect(await ev("{{includes::a,b::A}}")).toBe(""); // case-sensitive
+    expect(await ev("{{if::{{includes::a,b,c::b}}}}yes{{else}}no{{/if}}")).toBe("yes");
+  });
+
+  test("nth / at / first / last", async () => {
+    expect(await ev("{{nth::a,b,c::1}}")).toBe("b");
+    expect(await ev("{{nth::a,b,c::-1}}")).toBe("c");
+    expect(await ev("{{nth::a,b,c::9}}")).toBe("");
+    expect(await ev("{{at::a,b,c::0}}")).toBe("a");
+    expect(await ev("{{first::a,b,c}}")).toBe("a");
+    expect(await ev("{{last::a,b,c}}")).toBe("c");
+    expect(await ev("{{first::}}")).toBe("");
+  });
+
+  test("slice", async () => {
+    expect(await ev("{{slice::a,b,c,d::1::3}}")).toBe("b, c");
+    expect(await ev("{{slice::a,b,c,d::1}}")).toBe("b, c, d");
+    expect(await ev("{{slice::a,b,c,d::-2}}")).toBe("c, d");
+  });
+
+  test("take", async () => {
+    expect(await ev("{{take::a,b,c,d::2}}")).toBe("a, b");
+    expect(await ev("{{take::a,b,c,d::-2}}")).toBe("c, d");
+  });
+
+  test("sort (lexical and numeric-aware)", async () => {
+    expect(await ev("{{sort::banana,apple,cherry}}")).toBe("apple, banana, cherry");
+    expect(await ev("{{sort::10,2,1}}")).toBe("1, 2, 10"); // numeric, not "1, 10, 2"
+    expect(await ev("{{sort::1,3,2::desc}}")).toBe("3, 2, 1");
+  });
+
+  test("unique / dedupe", async () => {
+    expect(await ev("{{unique::a,b,a,c,b}}")).toBe("a, b, c");
+    expect(await ev("{{dedupe::x,x,y}}")).toBe("x, y");
+  });
+
+  test("reverseList", async () => {
+    expect(await ev("{{reverseList::a,b,c}}")).toBe("c, b, a");
+  });
+
+  test("shuffle is a permutation of the input", async () => {
+    // Deterministic check: sorting the shuffled output restores the original.
+    expect(await ev("{{sort::{{shuffle::c,a,b}}}}")).toBe("a, b, c");
+    expect(await ev("{{count::{{shuffle::a,b,c,d}}}}")).toBe("4");
+  });
+
+  test("compose: sort a deduped range", async () => {
+    expect(await ev("{{unique::{{sort::3,1,2,1,3}}}}")).toBe("1, 2, 3");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — predicate family (C)
+// ===========================================================================
+
+describe("filter / some / every macros", () => {
+  const mpEnv = () =>
+    makeEnv({
+      multiplayer: {
+        playerCount: 3,
+        playerNames: ["Alice", "Bob", "Charlie"],
+        hostName: "Alice",
+        currentTurnName: "Bob",
+        turnStrategy: "round_robin",
+      },
+    });
+
+  test("filter keeps items whose predicate is truthy", async () => {
+    expect(await ev("{{filter::1,2,3,4::n}}{{gt::{{.n}}::2}}{{/filter}}")).toBe("3, 4");
+  });
+
+  test("filter predicate supports bare comparison operators (if-parity)", async () => {
+    expect(await ev("{{filter::1,2,3::n}}{{.n}} >= 2{{/filter}}")).toBe("2, 3");
+  });
+
+  test("filter can use loop index", async () => {
+    expect(await ev("{{filter::a,b,c,d::x}}{{lt::{{.x_index}}::2}}{{/filter}}")).toBe("a, b");
+  });
+
+  test("filter with no matches is empty", async () => {
+    expect(await ev("{{filter::1,2::n}}{{gt::{{.n}}::5}}{{/filter}}")).toBe("");
+  });
+
+  test("filter restores its loop variable (hygiene)", async () => {
+    const env = makeEnv({ localVars: { x: "ORIG" } });
+    expect(await ev("{{filter::a,b::x}}true{{/filter}}|{{.x}}", env)).toBe("a, b|ORIG");
+  });
+
+  test("some short-circuits to true / false", async () => {
+    expect(await ev("{{some::1,2,3::n}}{{gt::{{.n}}::2}}{{/some}}")).toBe("true");
+    expect(await ev("{{some::1,2::n}}{{gt::{{.n}}::5}}{{/some}}")).toBe("");
+    expect(await ev("{{some::}}{{gt::1::0}}{{/some}}")).toBe(""); // empty list → false
+  });
+
+  test("every (vacuously true for empty list)", async () => {
+    expect(await ev("{{every::1,2,3::n}}{{gt::{{.n}}::0}}{{/every}}")).toBe("true");
+    expect(await ev("{{every::1,2,3::n}}{{gt::{{.n}}::1}}{{/every}}")).toBe("");
+    expect(await ev("{{every::}}{{gt::1::0}}{{/every}}")).toBe("true");
+  });
+
+  test("aliases: where / any / all", async () => {
+    expect(await ev("{{where::1,2,3::n}}{{gt::{{.n}}::1}}{{/where}}")).toBe("2, 3");
+    expect(await ev("{{any::1,2::n}}{{gt::{{.n}}::1}}{{/any}}")).toBe("true");
+    expect(await ev("{{all::2,4::n}}{{gt::{{.n}}::1}}{{/all}}")).toBe("true");
+  });
+
+  test("compose with multiplayer: peers (everyone but the host)", async () => {
+    expect(
+      await ev("{{filter::{{players}}::p}}{{ne::{{.p}}::{{hostName}}}}{{/filter}}", mpEnv()),
+    ).toBe("Bob, Charlie");
+    expect(
+      await ev("{{count::{{filter::{{players}}::p}}{{ne::{{.p}}::{{hostName}}}}{{/filter}}}}", mpEnv()),
+    ).toBe("2");
+  });
+
+  test("compose: gate on whether the roster includes a name", async () => {
+    expect(
+      await ev("{{if::{{some::{{players}}::p}}{{eq::{{.p}}::Bob}}{{/some}}}}has-bob{{else}}no{{/if}}", mpEnv()),
+    ).toBe("has-bob");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — numeric reductions (E)
+// ===========================================================================
+
+describe("numeric reduction macros", () => {
+  test("sum (ignores non-numbers, float-noise-safe)", async () => {
+    expect(await ev("{{sum::1,2,3,4}}")).toBe("10");
+    expect(await ev("{{sum::}}")).toBe("0");
+    expect(await ev("{{sum::1,x,2}}")).toBe("3");
+    expect(await ev("{{sum::0.1,0.2}}")).toBe("0.3");
+  });
+
+  test("avg / mean", async () => {
+    expect(await ev("{{avg::2,4,6}}")).toBe("4");
+    expect(await ev("{{avg::1,2}}")).toBe("1.5");
+    expect(await ev("{{mean::1,2,3}}")).toBe("2");
+    expect(await ev("{{avg::}}")).toBe(""); // no numbers → no average
+  });
+
+  test("listMax / listMin", async () => {
+    expect(await ev("{{listMax::3,9,2}}")).toBe("9");
+    expect(await ev("{{listMin::3,9,2}}")).toBe("2");
+    expect(await ev("{{listMax::}}")).toBe("");
+    expect(await ev("{{listMin::}}")).toBe("");
+  });
+
+  test("compose with range", async () => {
+    expect(await ev("{{sum::{{range::1::5}}}}")).toBe("15");
+    expect(await ev("{{avg::{{range::1::5}}}}")).toBe("3");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — foreachMessage (D1)
+// ===========================================================================
+
+describe("foreachMessage macro", () => {
+  test("iterates all messages with name + content", async () => {
+    expect(await ev("{{foreachMessage}}{{.msg_name}}: {{.msg}}\n{{/foreachMessage}}")).toBe(
+      "Alice: Hello, how are you?\n" +
+        "Bob: I'm fine, thanks!\n" +
+        "Alice: Let's go on an adventure.\n" +
+        "Bob: The forest is dark.\n" +
+        "Alice: I draw my sword.\n",
+    );
+  });
+
+  test("last N messages, in chronological order", async () => {
+    expect(await ev("{{foreachMessage::2}}[{{.msg_name}}]{{/foreachMessage}}")).toBe("[Bob][Alice]");
+    expect(await ev("{{foreachMessage::2::m}}{{.m}};{{/foreachMessage}}")).toBe(
+      "The forest is dark.;I draw my sword.;",
+    );
+  });
+
+  test("non-numeric first arg is the loop variable name", async () => {
+    expect(await ev("{{foreachMessage::m}}{{.m_number}}{{/foreachMessage}}")).toBe("12345");
+  });
+
+  test("is_user flag drives branching", async () => {
+    expect(
+      await ev("{{foreachMessage::m}}{{if::{{.m_is_user}}}}U{{else}}A{{/if}}{{/foreachMessage}}"),
+    ).toBe("UAUAU");
+  });
+
+  test("first / last bindings", async () => {
+    expect(
+      await ev(
+        "{{foreachMessage}}{{if::{{.msg_first}}}}<{{/if}}{{.msg_index}}{{if::{{.msg_last}}}}>{{/if}}{{/foreachMessage}}",
+      ),
+    ).toBe("<01234>");
+  });
+
+  test("empty history → nothing; non-scoped → nothing", async () => {
+    expect(await ev("{{foreachMessage}}x{{/foreachMessage}}", makeEnv({ messages: [] }))).toBe("");
+    expect(await ev("a{{foreachMessage}}b")).toBe("ab");
+  });
+});
+
+// ===========================================================================
+// NEW MACROS — foreachVar family (D2)
+// ===========================================================================
+
+describe("foreachVar family", () => {
+  test("foreachChatVar iterates a namespaced table in key order", async () => {
+    const env = makeEnv({ chatVars: { hp_Bob: "80", hp_Alice: "100", mood: "calm" } });
+    expect(await ev("{{foreachChatVar::hp_::p}}{{.p}}={{.p_value}};{{/foreachChatVar}}", env)).toBe(
+      "Alice=100;Bob=80;", // sorted by key; "mood" excluded by prefix
+    );
+  });
+
+  test("bindings: id vs full key vs value", async () => {
+    const env = makeEnv({ chatVars: { hp_Alice: "100" } });
+    expect(
+      await ev("{{foreachChatVar::hp_::p}}{{.p_key}}|{{.p}}|{{.p_value}}{{/foreachChatVar}}", env),
+    ).toBe("hp_Alice|Alice|100");
+  });
+
+  test("foreachVar (local) and foreachGlobalVar (global)", async () => {
+    const localEnv = makeEnv({ localVars: { item_sword: "1", item_shield: "1", gold: "5" } });
+    expect(await ev("{{foreachVar::item_::i}}[{{.i}}]{{/foreachVar}}", localEnv)).toBe(
+      "[shield][sword]",
+    );
+    const globalEnv = makeEnv({ globalVars: { theme_dark: "1", theme_light: "1" } });
+    expect(await ev("{{foreachGlobalVar::theme_::t}}{{.t}};{{/foreachGlobalVar}}", globalEnv)).toBe(
+      "dark;light;",
+    );
+  });
+
+  test("empty prefix iterates the whole scope", async () => {
+    const env = makeEnv({ chatVars: { a: "1", b: "2" } });
+    expect(await ev("{{foreachChatVar::::k}}{{.k}}={{.k_value}};{{/foreachChatVar}}", env)).toBe(
+      "a=1;b=2;",
+    );
+  });
+
+  test("no matches → nothing", async () => {
+    const env = makeEnv({ chatVars: { mood: "calm" } });
+    expect(await ev("{{foreachChatVar::hp_::p}}x{{/foreachChatVar}}", env)).toBe("");
+  });
+
+  test("foreachGvar alias", async () => {
+    const env = makeEnv({ globalVars: { g_x: "1" } });
+    expect(await ev("{{foreachGvar::g_::v}}{{.v}}{{/foreachGvar}}", env)).toBe("x");
+  });
+
+  test("compose: sum a stat table", async () => {
+    const env = makeEnv({ chatVars: { hp_Alice: "100", hp_Bob: "80", hp_Cara: "60" } });
+    expect(
+      await ev("{{sum::{{foreachChatVar::hp_::p}}{{.p_value}},{{/foreachChatVar}}}}", env),
+    ).toBe("240");
+  });
+
+  test("hygiene: loop variable restored after the loop", async () => {
+    const env = makeEnv({ chatVars: { n_a: "1" }, localVars: { p: "ORIG" } });
+    expect(await ev("{{foreachChatVar::n_::p}}{{.p}}{{/foreachChatVar}}|{{.p}}", env)).toBe("a|ORIG");
+  });
+});
+
+describe("Temporal macros", () => {
+  test("{{idleDuration}} returns 'unknown' when no last message time is available", async () => {
+    const env = makeEnv();
+    delete (env.extra as any).lastMessageTime;
+    expect(await ev("{{idleDuration}}", env)).toBe("unknown");
+  });
+
+  test("{{idleDuration}} formats time since the last message", async () => {
+    const env = makeEnv({ lastMessageTime: Date.now() - 90_000 });
+    expect(await ev("{{idleDuration}}", env)).toBe("1 minute");
+  });
+
+  test("{{idle_duration}} alias works", async () => {
+    const env = makeEnv({ lastMessageTime: Date.now() - 90_000 });
+    expect(await ev("{{idle_duration}}", env)).toBe("1 minute");
   });
 });

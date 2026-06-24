@@ -41,6 +41,7 @@ export default function ViewportDrawer() {
   const openSettings = useStore((s) => s.openSettings)
   const openModal = useStore((s) => s.openModal)
   const setSetting = useStore((s) => s.setSetting)
+  const settingsLoaded = useStore((s) => s.settingsLoaded)
   const drawerSettings = useStore((s) => s.drawerSettings)
   const drawerTabs = useStore((s) => s.drawerTabs)
   const isGroupChat = useStore((s) => s.isGroupChat)
@@ -74,7 +75,7 @@ export default function ViewportDrawer() {
     }
   }, [updateTabListScroll])
 
-  const showTabLabels = drawerSettings.showTabLabels ?? false
+  const showTabLabels = drawerSettings.showTabLabels ?? true
   const hiddenTabIds = sanitizeHiddenDrawerTabIds(drawerSettings.hiddenTabIds)
   const hiddenTabIdsSet = new Set(hiddenTabIds)
   const tabOrder = sanitizeDrawerTabOrder(drawerSettings.tabOrder)
@@ -168,6 +169,8 @@ export default function ViewportDrawer() {
       default: return 'min(420px, calc(100vw - 64px))'
     }
   })()
+
+  if (!settingsLoaded) return null
 
   return (
     <>
@@ -303,7 +306,7 @@ export default function ViewportDrawer() {
               </h2>
               <CloseButton onClick={closeDrawer} />
             </div>
-            <div className={clsx(styles.panelContent, (activeTab === 'loom' || activeTab === 'lumi' || activeTab === 'browser') && styles.panelContentFull)} ref={panelContentRef}>
+            <div className={clsx(styles.panelContent, (activeTab === 'loom' || activeTab === 'lumi' || activeTab === 'browser' || activeTab === 'lorebook') && styles.panelContentFull)} ref={panelContentRef}>
               <TabPanelContent tabId={activeTab} location={{ kind: 'main-drawer' }} />
             </div>
           </div>

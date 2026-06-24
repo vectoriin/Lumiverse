@@ -222,7 +222,12 @@ window.visualViewport?.addEventListener('scroll', () => {
 // since iOS PWA shells may not advertise display-mode: standalone via CSS.
 const isStandalone =
   window.matchMedia('(display-mode: standalone)').matches ||
+  window.matchMedia('(display-mode: window-controls-overlay)').matches ||
   (window.navigator as any).standalone === true
+
+if (/^Mac/.test(navigator.platform) && navigator.maxTouchPoints === 0) {
+  document.documentElement.setAttribute('data-platform', 'macos')
+}
 
 if (isStandalone) {
   document.documentElement.setAttribute('data-pwa', '')
@@ -364,6 +369,39 @@ if ((window.navigator as any).standalone === true && navigator.maxTouchPoints > 
       }
     }, 350)
   })
+}
+
+// ── Mobile layout recovery after native popups / backgrounding ──
+// iOS/Android can leave position:fixed/sticky elements shifted after system
+// file pickers, share sheets, or backgrounding. Blur any focused editable
+// control, reset every scroll path the browser may have panned, and re-sync
+// viewport measurements so the app shell snaps back to the viewport.
+if (navigator.maxTouchPoints > 0) {
+  function blurActiveEditable() {
+    if (isEditableElement(document.activeElement)) {
+      ;(document.activeElement as HTMLElement).blur()
+    }
+  }
+
+  function recoverMobileLayout() {
+    blurActiveEditable()
+    if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0)
+    if (document.documentElement.scrollTop !== 0) document.documentElement.scrollTop = 0
+    if (document.body.scrollTop !== 0) document.body.scrollTop = 0
+    scheduleViewportSync()
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) blurActiveEditable()
+    else recoverMobileLayout()
+  })
+
+  window.addEventListener('pagehide', blurActiveEditable)
+  window.addEventListener('pageshow', recoverMobileLayout)
+  window.addEventListener('focus', recoverMobileLayout)
+  // Allow code paths that know a system popup just closed (e.g. file inputs)
+  // to request an explicit recovery even if no page-visibility event fired.
+  window.addEventListener('lumiverse:recover-mobile-layout', recoverMobileLayout)
 }
 
 void initI18n().then(() => {

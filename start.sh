@@ -129,6 +129,10 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR"
 FRONTEND_DIR="${FRONTEND_PATH:-$SCRIPT_DIR/frontend}"
+TERMUX_FRONTEND_NATIVE_DEPS=(
+  "@rolldown/binding-android-arm64@1.0.2"
+  "lightningcss-android-arm64@1.32.0"
+)
 
 # ─── Ensure Bun is installed ────────────────────────────────────────────────
 
@@ -553,6 +557,17 @@ kill_pkgs() {
 
 # ─── Install dependencies ───────────────────────────────────────────────────
 
+repair_termux_frontend_native_deps() {
+  local dir="$1"
+
+  [[ "$IS_TERMUX" == true || "$IS_PROOT" == true ]] || return 0
+
+  info "Repairing Termux frontend native bindings with npm..."
+  (cd "$dir" && npm cache clean --force)
+  (cd "$dir" && npm install --force --no-save --no-package-lock --include=optional --no-audit --no-fund "${TERMUX_FRONTEND_NATIVE_DEPS[@]}")
+  ok "Termux frontend native bindings repaired"
+}
+
 install_deps() {
   local dir="$1"
   local name="$2"
@@ -600,6 +615,10 @@ install_deps() {
   if [[ $install_status -ne 0 ]]; then
     err "$name install failed (exit $install_status) — node_modules will be cleaned on next launch"
     return $install_status
+  fi
+
+  if [[ "$name" == "frontend" ]]; then
+    repair_termux_frontend_native_deps "$dir"
   fi
 
   # Stamp success so next launch knows this tree is complete.
@@ -666,6 +685,7 @@ start_backend() {
   if [[ "$USE_RUNNER" == true ]] && [[ -t 1 ]]; then
     # Interactive terminal — use the visual runner (fall back to plain if it crashes)
     local runner_args=()
+    local runner_status=0
     if [[ "$MODE" == "dev" || "$AUTO_OPEN" == true ]]; then
       runner_args+=("--")
     fi
@@ -675,10 +695,16 @@ start_backend() {
     if [[ "$AUTO_OPEN" == true ]]; then
       runner_args+=("--auto-open")
     fi
-    (cd "$BACKEND_DIR" && _bun run scripts/runner.ts "${runner_args[@]}") || {
+    # macOS ships Bash 3.2; under `set -u`, "${runner_args[@]}" errors if empty.
+    if ((${#runner_args[@]})); then
+      (cd "$BACKEND_DIR" && _bun run scripts/runner.ts "${runner_args[@]}") || runner_status=$?
+    else
+      (cd "$BACKEND_DIR" && _bun run scripts/runner.ts) || runner_status=$?
+    fi
+    if [[ "$runner_status" -ne 0 ]]; then
       warn "Visual runner failed — falling back to plain mode..."
       USE_RUNNER=false
-    }
+    fi
   fi
 
   if [[ "$USE_RUNNER" != true ]]; then

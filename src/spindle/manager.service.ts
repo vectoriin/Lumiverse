@@ -1575,6 +1575,18 @@ export async function getFrontendBundlePath(identifier: string): Promise<string 
   return (await Bun.file(bundlePath).exists()) ? bundlePath : null;
 }
 
+export async function getFrontendBundleCacheKey(identifier: string): Promise<string | null> {
+  const bundlePath = await getFrontendBundlePath(identifier);
+  if (!bundlePath) return null;
+
+  try {
+    const stat = statSync(bundlePath);
+    return `${stat.size}-${Math.floor(stat.mtimeMs)}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function getBackendEntryPath(identifier: string): Promise<string | null> {
   const manifest = await readManifest(identifier);
   const entry = manifest.entry_backend || "dist/backend.js";
@@ -1771,34 +1783,50 @@ export async function switchBranch(
     throw new Error(`Extension repo not found: ${identifier}`);
   }
 
+  const runGitStep = async (
+    cmd: string[],
+    label: string,
+    options: { timeoutMs?: number; ignoreStdout?: boolean } = {}
+  ): Promise<void> => {
+    const proc = await spawnAsync(cmd, {
+      cwd: repo,
+      timeoutMs: options.timeoutMs,
+      ignoreStdout: options.ignoreStdout,
+    });
+    if (proc.exitCode === 0) return;
+
+    const reason = proc.timedOut
+      ? `timed out after ${(options.timeoutMs ?? 0) / 1000}s`
+      : proc.stderr.trim() || proc.stdout.trim() || "unknown error";
+    throw new Error(`${label} failed: ${reason}`);
+  };
+
   // Clean working tree
-  Bun.spawnSync({ cmd: ["git", "checkout", "."], cwd: repo });
-  Bun.spawnSync({ cmd: ["git", "clean", "-fd"], cwd: repo });
+  await runGitStep(["git", "checkout", "."], "git checkout .", {
+    ignoreStdout: true,
+    timeoutMs: 15_000,
+  });
+  await runGitStep(["git", "clean", "-fd"], "git clean -fd", {
+    ignoreStdout: true,
+    timeoutMs: 15_000,
+  });
 
   // Widen the fetch refspec — shallow/single-branch clones only track one branch
-  Bun.spawnSync({
-    cmd: ["git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
-    cwd: repo,
-  });
+  await runGitStep(
+    ["git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+    "git config remote.origin.fetch",
+    { timeoutMs: 15_000 }
+  );
 
   // Fetch the target branch (--depth=1 to keep it shallow)
-  const fetchProc = Bun.spawnSync({
-    cmd: ["git", "fetch", "--depth", "1", "origin", branch],
-    cwd: repo,
-    timeout: 30_000,
+  await runGitStep(["git", "fetch", "--depth", "1", "origin", branch], `git fetch ${branch}`, {
+    timeoutMs: 30_000,
   });
-  if (fetchProc.exitCode !== 0) {
-    throw new Error(`git fetch failed: ${fetchProc.stderr.toString()}`);
-  }
 
   // Checkout the branch
-  const checkoutProc = Bun.spawnSync({
-    cmd: ["git", "checkout", "-B", branch, `origin/${branch}`],
-    cwd: repo,
+  await runGitStep(["git", "checkout", "-B", branch, `origin/${branch}`], `git checkout ${branch}`, {
+    timeoutMs: 30_000,
   });
-  if (checkoutProc.exitCode !== 0) {
-    throw new Error(`git checkout failed: ${checkoutProc.stderr.toString()}`);
-  }
 
   // Re-read manifest
   const manifest = await readManifest(identifier);
@@ -1821,11 +1849,8 @@ export async function switchBranch(
   if (hasBuildableSrc) {
     const distDir = join(repo, "dist");
     if (existsSync(distDir)) {
-      const lsFiles = Bun.spawnSync({
-        cmd: ["git", "ls-files", "dist"],
-        cwd: repo,
-      });
-      const distIsTracked = lsFiles.exitCode === 0 && lsFiles.stdout.toString().trim().length > 0;
+      const lsFiles = await spawnAsync(["git", "ls-files", "dist"], { cwd: repo });
+      const distIsTracked = lsFiles.exitCode === 0 && lsFiles.stdout.trim().length > 0;
       if (!distIsTracked) {
         rmSync(distDir, { recursive: true });
       }

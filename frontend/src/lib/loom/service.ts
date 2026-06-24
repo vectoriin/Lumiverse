@@ -44,6 +44,7 @@ export function createBlock(overrides: Partial<PromptBlock> = {}): PromptBlock {
     isLocked: false,
     color: null,
     injectionTrigger: [],
+    group: null,
     categoryMode: null,
     ...overrides,
   }
@@ -88,6 +89,19 @@ function migratePreset(preset: LoomPreset): LoomPreset {
       block.categoryMode = block.marker === 'category'
         ? coerceCategoryMode(block.categoryMode)
         : null
+      if (block.sealedSource === 'lumihub') {
+        block.sealed = true
+      }
+      if (block.sealed !== true) {
+        delete block.sealed
+        delete block.sealedKey
+        delete block.sealedSource
+        delete block.sealedOriginPresetId
+        delete block.sealedOriginVersion
+        delete block.sealedSha256
+      } else if (typeof block.sealedKey !== 'string') {
+        block.sealedKey = block.id
+      }
     }
   }
   preset.blocks = normalizeCategoryBlockState(preset.blocks || [])
@@ -195,16 +209,32 @@ function coerceCategoryMode(mode: unknown): PromptBlock['categoryMode'] {
   return mode === 'radio' || mode === 'checkbox' ? mode : null
 }
 
+function normalizeCategoryGroups(blocks: PromptBlock[]): PromptBlock[] {
+  let currentCategoryId: string | null = null
+  return blocks.map((block) => {
+    if (block.marker === 'category') {
+      currentCategoryId = block.id
+      return { ...block, group: null }
+    }
+
+    if (block.group !== undefined) {
+      return { ...block, group: block.group || null }
+    }
+
+    return { ...block, group: currentCategoryId }
+  })
+}
+
 export function normalizeCategoryBlockState(
   blocks: PromptBlock[],
   preferredBlockIdByCategory?: Map<string, string>,
 ): PromptBlock[] {
-  const normalizedBlocks = blocks.map((block) => ({
+  const normalizedBlocks = normalizeCategoryGroups(blocks.map((block) => ({
     ...block,
     categoryMode: block.marker === 'category'
       ? coerceCategoryMode(block.categoryMode)
       : null,
-  }))
+  })))
 
   for (const group of computeGroups(normalizedBlocks)) {
     if (!group.categoryBlock || group.categoryBlock.categoryMode !== 'radio') continue
@@ -354,6 +384,62 @@ export function marshalUpdate(loom: LoomPreset): UpdatePresetInput {
   }
 }
 
+export function sanitizeLumiHubSealedBlocksForExport<T extends LoomPreset>(loom: T): T {
+  const manifestKeys = getLumiHubSealedManifestKeys(loom)
+  if (!manifestKeys.size && !loom.blocks.some((block) => isLumiHubSealedBlock(block))) return loom
+
+  return {
+    ...loom,
+    blocks: loom.blocks.map((block) => {
+      const key = getLumiHubSealedExportKey(block, manifestKeys)
+      if (!key) return block
+      return {
+        ...block,
+        content: sealedPresetBlockPlaceholder(key),
+        sealed: true,
+        sealedKey: key,
+      }
+    }),
+  }
+}
+
+function getLumiHubSealedExportKey(block: PromptBlock, manifestKeys: Set<string>): string | null {
+  const sealedKey = typeof block.sealedKey === 'string' && block.sealedKey.trim() ? block.sealedKey.trim() : null
+  if (sealedKey && (block.sealedSource === 'lumihub' || manifestKeys.has(sealedKey))) return sealedKey
+
+  const placeholderKey = extractExactSealedPlaceholder(block.content || '')
+  if (placeholderKey && manifestKeys.has(placeholderKey)) return placeholderKey
+
+  return null
+}
+
+function isLumiHubSealedBlock(block: PromptBlock): boolean {
+  return block.sealedSource === 'lumihub'
+}
+
+function getLumiHubSealedManifestKeys(loom: LoomPreset): Set<string> {
+  const sealedPreset = isRecord(loom.lumihubMeta?._lumiverse_sealed_preset)
+    ? loom.lumihubMeta._lumiverse_sealed_preset
+    : null
+  const blocks = Array.isArray(sealedPreset?.blocks) ? sealedPreset.blocks : []
+  const keys = new Set<string>()
+  for (const block of blocks) {
+    if (isRecord(block) && typeof block.key === 'string' && block.key.trim()) {
+      keys.add(block.key.trim())
+    }
+  }
+  return keys
+}
+
+function sealedPresetBlockPlaceholder(key: string): string {
+  return `{{presetBlock::${key}}}`
+}
+
+function extractExactSealedPlaceholder(content: string): string | null {
+  const match = content.trim().match(/^\{\{(?:presetBlock|pblock)::([^}]+)\}\}$/)
+  return match?.[1]?.trim() || null
+}
+
 function pruneOrphanPromptVariables(
   values: LoomPreset['promptVariables'] | undefined,
   blocks: PromptBlock[],
@@ -412,6 +498,12 @@ export function computeGroups(blocks: PromptBlock[] | undefined): CategoryGroup[
       }
       currentGroup = { categoryBlock: block, children: [] }
     } else {
+      if (block.group !== undefined && block.group !== (currentGroup.categoryBlock?.id ?? null)) {
+        if (currentGroup.categoryBlock || currentGroup.children.length > 0) {
+          result.push(currentGroup)
+        }
+        currentGroup = { categoryBlock: null, children: [] }
+      }
       currentGroup.children.push(block)
     }
   }
@@ -765,10 +857,11 @@ export function importFromSTPreset(stPresetData: STPresetData, name: string): Lo
  * and flattens behavior/sampler settings to ST root-level fields.
  */
 export function exportToSTPreset(loom: LoomPreset): Record<string, any> {
+  const exportLoom = sanitizeLumiHubSealedBlocksForExport(loom)
   const prompts: Array<Record<string, any>> = []
   const orderEntries: Array<{ identifier: string; enabled: boolean }> = []
 
-  for (const block of loom.blocks) {
+  for (const block of exportLoom.blocks) {
     // Determine ST identifier — well-known markers use their ST name,
     // everything else (custom blocks, categories) uses the block's own UUID
     const markerMapping = block.marker && block.marker !== 'category'
@@ -820,10 +913,10 @@ export function exportToSTPreset(loom: LoomPreset): Record<string, any> {
   }
 
   // Build root-level sampler values
-  const samplers = loom.samplerOverrides ?? DEFAULT_SAMPLER_OVERRIDES
-  const behavior = loom.promptBehavior ?? DEFAULT_PROMPT_BEHAVIOR
-  const completion = loom.completionSettings ?? DEFAULT_COMPLETION_SETTINGS
-  const advanced = loom.advancedSettings ?? DEFAULT_ADVANCED_SETTINGS
+  const samplers = exportLoom.samplerOverrides ?? DEFAULT_SAMPLER_OVERRIDES
+  const behavior = exportLoom.promptBehavior ?? DEFAULT_PROMPT_BEHAVIOR
+  const completion = exportLoom.completionSettings ?? DEFAULT_COMPLETION_SETTINGS
+  const advanced = exportLoom.advancedSettings ?? DEFAULT_ADVANCED_SETTINGS
 
   return {
     // Sampler params at root level (ST convention: these come first)
@@ -858,7 +951,7 @@ export function exportToSTPreset(loom: LoomPreset): Record<string, any> {
     stream_openai: true,
 
     // Prompt blocks + ordering
-    name: loom.name,
+    name: exportLoom.name,
     prompts,
     prompt_order: [{ character_id: 100001, order: orderEntries }],
 

@@ -114,9 +114,12 @@ export interface StartupSettings {
   sortDirection?: CharacterSortDirection
   viewMode?: CharacterViewMode
   charactersPerPage?: number
+  favoritesBarCollapsed?: boolean
   theme?: ThemeConfig | null
   landingPageChatsDisplayed?: number
   landingPageLayoutMode?: 'cards' | 'compact'
+  wallpaper?: WallpaperSettings
+  drawerSettings?: DrawerSettings
 }
 
 export interface CharactersSlice {
@@ -240,6 +243,7 @@ export interface UISlice {
   drawerTab: string | null
   settingsModalOpen: boolean
   settingsActiveView: string
+  settingsScrollTarget: { extensionId?: string; nonce: number } | null
   portraitPanelOpen: boolean
   commandPaletteOpen: boolean
   toasts: Toast[]
@@ -250,7 +254,7 @@ export interface UISlice {
   openDrawer: (tab?: string) => void
   closeDrawer: () => void
   setDrawerTab: (tab: string) => void
-  openSettings: (view?: string) => void
+  openSettings: (view?: string, target?: { extensionId?: string }) => void
   closeSettings: () => void
   togglePortraitPanel: () => void
   openCommandPalette: () => void
@@ -477,6 +481,7 @@ export interface SettingsSlice {
   swipeGesturesEnabled: boolean
   showMessageTokenCount: boolean
   messageContextMenuEnabled: boolean
+  favoritesBarCollapsed: boolean
   guidedGenerations: GuidedGeneration[]
   quickReplySets: QuickReplySet[]
   wallpaper: WallpaperSettings
@@ -1167,6 +1172,7 @@ export interface BreakdownCacheEntry {
   }[]
   messages?: import('@/api/generate').DryRunMessage[]
   totalTokens: number
+  chatHistoryTokens?: number
   maxContext: number
   model: string
   provider: string
@@ -1378,7 +1384,19 @@ export interface FloatingAvatarSlice {
 
 // ---- Chat Heads (floating generation status) ----
 
-export type ChatHeadStatus = 'assembling' | 'council' | 'council_failed' | 'waiting' | 'reasoning' | 'streaming' | 'completed' | 'stopped' | 'error'
+export type ChatHeadStatus =
+  | 'assembling'
+  | 'council'
+  | 'council_failed'
+  | 'waiting'
+  | 'reasoning'
+  | 'streaming'
+  | 'completed'
+  | 'stopped'
+  | 'error'
+  | 'mp_your_turn'
+  | 'mp_waiting_turn'
+  | 'mp_freeform'
 
 export interface ChatHeadEntry {
   generationId: string
@@ -1390,6 +1408,8 @@ export interface ChatHeadEntry {
   model: string
   startedAt: number
   attentionCleared?: boolean
+  subtitle?: string
+  multiplayerRoomId?: string
 }
 
 export interface ChatHeadsSlice {
@@ -1506,6 +1526,7 @@ export interface WeaverSlice {
   weaverStateSessionId: string | null
   loadWeaverInterview: (sessionId: string) => Promise<void>
   nextWeaverQuestion: (sessionId: string, steer?: string) => Promise<void>
+  cancelWeaverQuestion: (sessionId: string, message: string) => void
   answerWeaverQuestion: (
     sessionId: string,
     input: { question: WeaverInterviewQuestion; kind: WeaverResponseKind; content: string; steer?: string },

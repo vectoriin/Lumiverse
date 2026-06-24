@@ -1,4 +1,8 @@
-# Wallpapers
+---
+title: Wallpaper
+---
+
+# Wallpaper
 
 Set background images or videos behind your chat to enhance the atmosphere.
 

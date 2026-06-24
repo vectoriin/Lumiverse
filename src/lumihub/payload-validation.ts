@@ -188,6 +188,26 @@ export function validateInstallPresetPayload(
   if (raw.presetSlug != null && !isString(raw.presetSlug, 512)) {
     return { ok: false, error: "presetSlug must be a string ≤512 chars" };
   }
+  if (raw.sealedPreset != null) {
+    if (!isPlainObject(raw.sealedPreset)) {
+      return { ok: false, error: "sealedPreset must be an object" };
+    }
+    const sealed = raw.sealedPreset as Record<string, unknown>;
+    if (sealed.version != null && !isString(sealed.version, 64)) {
+      return { ok: false, error: "sealedPreset.version must be a string ≤64 chars" };
+    }
+    if (!Array.isArray(sealed.blocks)) {
+      return { ok: false, error: "sealedPreset.blocks must be an array" };
+    }
+    if (sealed.blocks.length > 200) {
+      return { ok: false, error: "sealedPreset.blocks exceeds 200 entries" };
+    }
+    for (const block of sealed.blocks) {
+      if (!isPlainObject(block)) return { ok: false, error: "sealedPreset.blocks entries must be objects" };
+      if (!isString(block.key, 256)) return { ok: false, error: "sealedPreset block key must be a string ≤256 chars" };
+      if (!isString(block.sha256, 64)) return { ok: false, error: "sealedPreset block sha256 must be a string ≤64 chars" };
+    }
+  }
 
   return { ok: true, value: raw as unknown as InstallPresetPayload };
 }

@@ -1,16 +1,35 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useVirtualizer } from '@tanstack/react-virtual'
 
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Upload, Trash2, Copy, MessageSquare, User, Plus, ImagePlus, Download, Code2 } from 'lucide-react'
+import { X, Upload, Trash2, Copy, MessageSquare, User, UserPlus, Plus, ImagePlus, Download, Code2, GripVertical } from 'lucide-react'
+import {
+  DndContext,
+  closestCenter,
+  MouseSensor,
+  TouchSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
 import { IconNotebook } from '@tabler/icons-react'
 import { CloseButton } from '@/components/shared/CloseButton'
 import { Spinner } from '@/components/shared/Spinner'
 import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
-import { charactersApi } from '@/api/characters'
+import { charactersApi, type CharacterPerspectiveLayerInput } from '@/api/characters'
 import { characterGalleryApi } from '@/api/character-gallery'
 import { imagesApi } from '@/api/images'
+import { personasApi } from '@/api/personas'
 import { worldBooksApi } from '@/api/world-books'
 import { chatsApi } from '@/api/chats'
 import { useStore } from '@/store'
@@ -23,15 +42,17 @@ import LazyImage from '@/components/shared/LazyImage'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import { useLongPress } from '@/hooks/useLongPress'
-import type { Character, CharacterGalleryItem } from '@/types/api'
+import type { Character, CharacterGalleryItem, WorldBook } from '@/types/api'
 import type { WallpaperRef } from '@/types/store'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/shared/FormComponents'
+import { RangeSlider } from '@/components/shared/RangeSlider'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import VoicePicker from '@/components/shared/VoicePicker'
 import { ttsConnectionsApi } from '@/api/tts-connections'
 import type { VoiceRef } from '@/types/api'
 import { filterWorldBooksForChatContextAttachment } from '@/lib/worldBookIndexPrompt'
+import { useScaledSortableStyle } from '@/lib/dndUiScale'
 import styles from './CharacterEditorPage.module.css'
 import clsx from 'clsx'
 import {
@@ -46,6 +67,10 @@ import AlternateAvatarManager from './AlternateAvatarManager'
 import type { AlternateAvatarEntry } from './AlternateAvatarManager'
 
 const DEBOUNCE_MS = 2000
+const MAX_PERSPECTIVE_LAYERS = 5
+const GALLERY_MIN_ITEM_WIDTH = 120
+const GALLERY_GAP = 8
+const GALLERY_OVERSCAN = 3
 
 type TabId = 'core' | 'system' | 'greetings' | 'identity' | 'gallery' | 'expressions' | 'voice' | 'imageLora' | 'advanced'
 
@@ -81,6 +106,82 @@ function GalleryGridItem({ item, onRemove, onOpenMenu }: GalleryGridItemProps) {
   )
 }
 
+interface SortablePerspectiveLayerProps {
+  layer: CharacterPerspectiveLayerInput
+  index: number
+  disabled: boolean
+  onLabelChange: (layerId: string, label: string) => void
+  onIntensityChange: (layerId: string, intensity: number) => void
+  onRemove: (layerId: string) => void
+}
+
+function SortablePerspectiveLayer({ layer, index, disabled, onLabelChange, onIntensityChange, onRemove }: SortablePerspectiveLayerProps) {
+  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id: layer.id, disabled })
+  const { setNodeRef, style } = useScaledSortableStyle({ setNodeRef: setSortableRef, transform, transition, isDragging })
+  const [liveIntensity, setLiveIntensity] = useState<number | null>(null)
+  const [draftLabel, setDraftLabel] = useState(layer.label || '')
+  const intensity = liveIntensity ?? layer.intensity
+
+  useEffect(() => {
+    setDraftLabel(layer.label || '')
+  }, [layer.label])
+
+  const commitLabel = useCallback(() => {
+    if (draftLabel !== (layer.label || '')) onLabelChange(layer.id, draftLabel)
+  }, [draftLabel, layer.id, layer.label, onLabelChange])
+
+  return (
+    <div ref={setNodeRef} style={style} className={clsx(styles.perspectiveLayerRow, isDragging && styles.perspectiveLayerDragging)}>
+      <button type="button" className={styles.perspectiveLayerDrag} disabled={disabled} {...attributes} {...listeners} title="Drag to reorder">
+        <GripVertical size={16} />
+      </button>
+      <div className={styles.perspectiveLayerRowPreview}>
+        <LazyImage
+          src={imagesApi.smallUrl(layer.image_id)}
+          alt={layer.label || `Layer ${index + 1}`}
+          className={styles.perspectiveLayerRowImg}
+          fallback={<div className={styles.perspectiveLayerEmpty}><ImagePlus size={16} /></div>}
+        />
+      </div>
+      <div className={styles.perspectiveLayerRowBody}>
+        <div className={styles.perspectiveLayerRowTop}>
+          <input
+            type="text"
+            className={styles.perspectiveLayerNameInput}
+            value={draftLabel}
+            placeholder={`Layer ${index + 1}`}
+            onChange={(e) => setDraftLabel(e.target.value)}
+            onBlur={commitLabel}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
+          />
+          <button type="button" className={styles.perspectiveLayerRemove} onClick={() => onRemove(layer.id)} title="Remove layer">
+            <X size={12} />
+          </button>
+        </div>
+        <div className={styles.perspectiveLayerSliderRow}>
+          <div className={styles.perspectiveLayerSliderHeader}>
+            <span>Parallax strength</span>
+            <span>{intensity.toFixed(2)}x</span>
+          </div>
+          <RangeSlider
+            min={0}
+            max={1.5}
+            step={0.05}
+            value={layer.intensity}
+            onDragValue={setLiveIntensity}
+            onCommit={(value) => {
+              setLiveIntensity(null)
+              onIntensityChange(layer.id, value)
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -104,6 +205,9 @@ export default function CharacterEditorPage() {
   const editingCharacterId = useStore((s) => s.editingCharacterId)
   const setEditingCharacterId = useStore((s) => s.setEditingCharacterId)
   const openDrawer = useStore((s) => s.openDrawer)
+  const addPersona = useStore((s) => s.addPersona)
+  const updatePersona = useStore((s) => s.updatePersona)
+  const setSelectedPersonaId = useStore((s) => s.setSelectedPersonaId)
   const setPendingWorldBookEditId = useStore((s) => s.setPendingWorldBookEditId)
   const allCharacters = useStore((s) => s.characters)
   const activeChatId = useStore((s) => s.activeChatId)
@@ -136,19 +240,33 @@ export default function CharacterEditorPage() {
   const [lorebookResult, setLorebookResult] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [galleryItems, setGalleryItems] = useState<CharacterGalleryItem[]>([])
-  const [worldBooks, setWorldBooks] = useState<Array<{ id: string; name: string; folder: string }>>([])
+  const [worldBooks, setWorldBooks] = useState<Array<Pick<WorldBook, 'id' | 'name' | 'folder' | 'metadata'>>>([])
   const [galleryUploading, setGalleryUploading] = useState(false)
   const [extracting, setExtracting] = useState(false)
+  const [creatingPersona, setCreatingPersona] = useState(false)
   const [galleryContextMenu, setGalleryContextMenu] = useState<{ pos: ContextMenuPos; item: CharacterGalleryItem } | null>(null)
   const [avatarUploadProgress, setAvatarUploadProgress] = useState<number | null>(null)
   const [altAvatarUploadProgress, setAltAvatarUploadProgress] = useState<number | null>(null)
+  const [perspectiveLayerProgress, setPerspectiveLayerProgress] = useState<number | null>(null)
+  const [localPerspectiveLayers, setLocalPerspectiveLayers] = useState<CharacterPerspectiveLayerInput[]>([])
+  const pendingLayersRef = useRef<CharacterPerspectiveLayerInput[]>([])
+  const layersSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const layerSaveLockRef = useRef<Promise<void> | null>(null)
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const fileRef = useRef<HTMLInputElement>(null)
+  const perspectiveLayerFileRef = useRef<HTMLInputElement>(null)
   const galleryFileRef = useRef<HTMLInputElement>(null)
+  const galleryScrollRef = useRef<HTMLDivElement>(null)
+  const [galleryGridWidth, setGalleryGridWidth] = useState(0)
   const savingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const lastSyncedId = useRef<string | null>(null)
 
   const close = useCallback(() => setEditingCharacterId(null), [setEditingCharacterId])
+  const perspectiveLayerSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
 
   // Escape to close
   useEffect(() => {
@@ -216,6 +334,73 @@ export default function CharacterEditorPage() {
     fetchGallery()
   }, [fetchGallery])
 
+  // Gallery virtualization: the grid can grow very large for image-heavy
+  // characters, so render only the viewport rows via TanStack Virtual.
+  const galleryColumns = useMemo(() => {
+    if (galleryGridWidth <= 0) return 3
+    return Math.max(1, Math.floor((galleryGridWidth + GALLERY_GAP) / (GALLERY_MIN_ITEM_WIDTH + GALLERY_GAP)))
+  }, [galleryGridWidth])
+
+  const galleryRowCount = useMemo(() => {
+    const totalCells = galleryItems.length + 1 // +1 for the add button
+    return Math.max(1, Math.ceil(totalCells / galleryColumns))
+  }, [galleryItems.length, galleryColumns])
+
+  const galleryItemWidth = useMemo(() => {
+    if (galleryGridWidth <= 0) return GALLERY_MIN_ITEM_WIDTH
+    return Math.max(1, (galleryGridWidth - GALLERY_GAP * (galleryColumns - 1)) / galleryColumns)
+  }, [galleryGridWidth, galleryColumns])
+
+  const galleryRowEstimate = useMemo(() => galleryItemWidth + GALLERY_GAP, [galleryItemWidth])
+
+  const galleryVirtualizer = useVirtualizer({
+    count: galleryRowCount,
+    getScrollElement: () => galleryScrollRef.current,
+    estimateSize: () => galleryRowEstimate,
+    overscan: GALLERY_OVERSCAN,
+    anchorTo: 'start',
+    useFlushSync: false,
+    getItemKey: (index) => {
+      const start = index * galleryColumns
+      const end = Math.min(start + galleryColumns, galleryItems.length)
+      const keys = galleryItems.slice(start, end).map((item) => item.id)
+      if (index === galleryRowCount - 1) keys.push('__add__')
+      return keys.join('|') || `row-${index}`
+    },
+  })
+
+  useEffect(() => {
+    if (activeTab !== 'gallery') return
+    const el = galleryScrollRef.current
+    if (!el) return
+
+    let frame = 0
+    const update = () => {
+      frame = 0
+      setGalleryGridWidth(el.clientWidth)
+    }
+
+    const schedule = () => {
+      if (frame) return
+      frame = requestAnimationFrame(update)
+    }
+
+    update()
+    const observer = new ResizeObserver(schedule)
+    observer.observe(el)
+    window.addEventListener('resize', schedule)
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', schedule)
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    galleryVirtualizer.measure()
+  }, [galleryVirtualizer, galleryColumns, galleryRowEstimate])
+
   const boundRegexScripts = useMemo(
     () => regexScripts.filter((s) => s.scope === 'character' && s.scope_id === editingCharacterId),
     [regexScripts, editingCharacterId]
@@ -226,8 +411,8 @@ export default function CharacterEditorPage() {
     loadRegexScripts().catch(() => {})
   }, [editingCharacterId, loadRegexScripts])
 
-  const upsertWorldBookOption = useCallback((book: { id: string; name: string; folder?: string }) => {
-    const normalized = { id: book.id, name: book.name, folder: book.folder ?? '' }
+  const upsertWorldBookOption = useCallback((book: { id: string; name: string; folder?: string; metadata?: Record<string, any> }) => {
+    const normalized = { id: book.id, name: book.name, folder: book.folder ?? '', metadata: book.metadata ?? {} }
     setWorldBooks((prev) => {
       const existingIndex = prev.findIndex((item) => item.id === book.id)
       if (existingIndex === -1) return [normalized, ...prev]
@@ -244,7 +429,7 @@ export default function CharacterEditorPage() {
       if (!editingCharacterId) return
       try {
         const res = await worldBooksApi.list({ limit: 1000 })
-        if (!cancelled) setWorldBooks(res.data.map((b) => ({ id: b.id, name: b.name, folder: b.folder || '' })))
+        if (!cancelled) setWorldBooks(res.data.map((b) => ({ id: b.id, name: b.name, folder: b.folder || '', metadata: b.metadata || {} })))
       } catch {
         // no-op
       }
@@ -602,9 +787,19 @@ export default function CharacterEditorPage() {
   const clearActivatedWorldInfo = useStore((s) => s.clearActivatedWorldInfo)
 
   const attachedWorldBookIds = useMemo(
-    () => getCharacterWorldBookIds(character?.extensions),
-    [character?.extensions]
+    () => getCharacterWorldBookIds(workingExtensions),
+    [workingExtensions]
   )
+
+  const embeddedWorldBook = useMemo(() => {
+    if (!editingCharacterId) return null
+    const attachedIdSet = new Set(attachedWorldBookIds)
+    return worldBooks.find((book) =>
+      attachedIdSet.has(book.id)
+      && book.metadata?.source === 'character'
+      && book.metadata?.source_character_id === editingCharacterId,
+    ) ?? null
+  }, [attachedWorldBookIds, editingCharacterId, worldBooks])
 
   const handleRemoveWorldBook = useCallback(
     (worldBookId: string) => {
@@ -705,6 +900,159 @@ export default function CharacterEditorPage() {
     [openCropFlow]
   )
 
+  const perspectiveLayers = useMemo<CharacterPerspectiveLayerInput[]>(() => {
+    const raw = character?.extensions?.landing_perspective_layers
+    if (Array.isArray(raw)) {
+      return raw
+        .filter((entry): entry is CharacterPerspectiveLayerInput => {
+          return Boolean(entry)
+            && typeof entry === 'object'
+            && typeof (entry as CharacterPerspectiveLayerInput).id === 'string'
+            && typeof (entry as CharacterPerspectiveLayerInput).image_id === 'string'
+        })
+        .slice(0, MAX_PERSPECTIVE_LAYERS)
+        .map((entry) => ({
+          id: entry.id,
+          image_id: entry.image_id,
+          label: typeof entry.label === 'string' ? entry.label : undefined,
+          intensity: typeof entry.intensity === 'number' && Number.isFinite(entry.intensity)
+            ? Math.max(0, Math.min(1.5, entry.intensity))
+            : 0.6,
+        }))
+    }
+    if (raw && typeof raw === 'object') {
+      const legacy = raw as Record<string, string | undefined>
+      return [
+        legacy.background ? { id: 'background', image_id: legacy.background, label: 'Background', intensity: 0.15 } : null,
+        legacy.framing ? { id: 'framing', image_id: legacy.framing, label: 'Framing', intensity: 1 } : null,
+        legacy.subject ? { id: 'subject', image_id: legacy.subject, label: 'Subject', intensity: 0.6 } : null,
+      ].filter(Boolean) as CharacterPerspectiveLayerInput[]
+    }
+    return []
+  }, [character?.extensions?.landing_perspective_layers])
+
+  // Keep the in-editor perspective layer list in sync with the store character
+  // when the edited character changes, without clobbering local in-flight edits.
+  useEffect(() => {
+    if (!character) return
+    setLocalPerspectiveLayers(perspectiveLayers)
+    pendingLayersRef.current = perspectiveLayers
+  }, [character?.id])
+
+  const flushPerspectiveLayersSave = useCallback(async () => {
+    if (!editingCharacterId) return
+    // Chain saves so rapid edits never race or overwrite each other.
+    const run = async () => {
+      const toSave = pendingLayersRef.current
+      layersSaveTimerRef.current = null
+      try {
+        showSaving()
+        const updated = await charactersApi.updatePerspectiveLayers(editingCharacterId, toSave)
+        // Only adopt the server response if local state hasn't moved on since the save started.
+        if (JSON.stringify(pendingLayersRef.current) === JSON.stringify(toSave)) {
+          updateCharInStore(editingCharacterId, updated)
+        }
+      } catch (err) {
+        console.error('[Editor] Perspective layer save failed:', err)
+        toast.error('Could not save perspective layers')
+      }
+    }
+    layerSaveLockRef.current = (layerSaveLockRef.current ?? Promise.resolve()).then(run, run)
+    await layerSaveLockRef.current
+  }, [editingCharacterId, updateCharInStore, showSaving])
+
+  const requestPerspectiveLayersSave = useCallback(() => {
+    if (layersSaveTimerRef.current) clearTimeout(layersSaveTimerRef.current)
+    layersSaveTimerRef.current = setTimeout(() => {
+      void flushPerspectiveLayersSave()
+    }, 400)
+  }, [flushPerspectiveLayersSave])
+
+  // Flush any pending layer edits when the editor closes or the character changes.
+  useEffect(() => () => {
+    if (layersSaveTimerRef.current) clearTimeout(layersSaveTimerRef.current)
+    void flushPerspectiveLayersSave()
+  }, [flushPerspectiveLayersSave])
+
+  const handlePerspectiveLayerSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      e.target.value = ''
+      if (!file || !editingCharacterId) return
+      if (localPerspectiveLayers.length >= MAX_PERSPECTIVE_LAYERS) {
+        toast.error(`Maximum ${MAX_PERSPECTIVE_LAYERS} landing layers`)
+        return
+      }
+      // Persist any pending layer edits before uploading so the new layer is appended to the latest stack.
+      if (layersSaveTimerRef.current) clearTimeout(layersSaveTimerRef.current)
+      await flushPerspectiveLayersSave()
+      setPerspectiveLayerProgress(0)
+      try {
+        const updated = await charactersApi.addPerspectiveLayer(
+          editingCharacterId,
+          file,
+          { label: `Layer ${localPerspectiveLayers.length + 1}`, intensity: localPerspectiveLayers.length === 0 ? 0.2 : 0.7 },
+          setPerspectiveLayerProgress,
+        )
+        const next = (updated.extensions?.landing_perspective_layers ?? []) as CharacterPerspectiveLayerInput[]
+        setLocalPerspectiveLayers(next)
+        pendingLayersRef.current = next
+        updateCharInStore(editingCharacterId, updated)
+      } catch (err) {
+        console.error('[Editor] Perspective layer upload failed:', err)
+        toast.error(err instanceof Error ? err.message : 'Perspective layer upload failed')
+      } finally {
+        setPerspectiveLayerProgress(null)
+      }
+    },
+    [editingCharacterId, localPerspectiveLayers.length, updateCharInStore, flushPerspectiveLayersSave]
+  )
+
+  const handleRemovePerspectiveLayer = useCallback(
+    (layerId: string) => {
+      const next = localPerspectiveLayers.filter((layer) => layer.id !== layerId)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
+    },
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
+  )
+
+  const handlePerspectiveLayerDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      const oldIndex = localPerspectiveLayers.findIndex((layer) => layer.id === active.id)
+      const newIndex = localPerspectiveLayers.findIndex((layer) => layer.id === over.id)
+      if (oldIndex < 0 || newIndex < 0) return
+      const next = arrayMove(localPerspectiveLayers, oldIndex, newIndex)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
+    },
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
+  )
+
+  const handlePerspectiveLayerLabelChange = useCallback(
+    (layerId: string, label: string) => {
+      const next = localPerspectiveLayers.map((layer) => layer.id === layerId ? { ...layer, label } : layer)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
+    },
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
+  )
+
+  const handlePerspectiveLayerIntensityChange = useCallback(
+    (layerId: string, intensity: number) => {
+      const next = localPerspectiveLayers.map((layer) => layer.id === layerId ? { ...layer, intensity } : layer)
+      setLocalPerspectiveLayers(next)
+      pendingLayersRef.current = next
+      requestPerspectiveLayersSave()
+    },
+    [localPerspectiveLayers, requestPerspectiveLayersSave]
+  )
+
   // Actions
   const handleDelete = useCallback(async () => {
     if (!editingCharacterId) return
@@ -724,6 +1072,47 @@ export default function CharacterEditorPage() {
     close()
     browser.openChat(character)
   }, [character, browser.openChat, close])
+
+  const handleCreatePersonaFromCharacter = useCallback(async () => {
+    if (!character || creatingPersona) return
+
+    const description = (fields.description || '').trim()
+    const personality = (fields.personality || '').trim()
+    const personaDescription = [description, personality].filter(Boolean).join('\n\n')
+    if (!personaDescription) {
+      toast.error(t('characterEditor.personaCreateNoContent'))
+      return
+    }
+
+    setCreatingPersona(true)
+    try {
+      let persona = await personasApi.create({
+        name: (name || character.name).trim() || character.name,
+        description: personaDescription,
+      })
+      addPersona(persona)
+      if (character.image_id || character.avatar_path) {
+        try {
+          const avatarBlob = await charactersApi.getAvatarBlob(character.id)
+          const avatarFile = new File([avatarBlob], `avatar.${avatarExtension(avatarBlob.type)}`, {
+            type: avatarBlob.type || 'image/png',
+          })
+          persona = await personasApi.uploadAvatar(persona.id, avatarFile)
+          updatePersona(persona.id, persona)
+        } catch {
+          toast.warning(t('characterEditor.personaAvatarCopyFailed'))
+        }
+      }
+      setSelectedPersonaId(persona.id)
+      toast.success(t('characterEditor.personaCreateSuccess', { name: persona.name }))
+      close()
+      openDrawer('personas')
+    } catch (err: any) {
+      toast.error(err?.body?.error || err?.message || t('characterEditor.personaCreateFailed'))
+    } finally {
+      setCreatingPersona(false)
+    }
+  }, [addPersona, character, close, creatingPersona, fields.description, fields.personality, name, openDrawer, setSelectedPersonaId, t, updatePersona])
 
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -853,6 +1242,17 @@ export default function CharacterEditorPage() {
                   <div className={styles.headerActions}>
                     <Button size="icon" variant="ghost" onClick={handleOpenChat} title={t('characterEditor.openChat')}>
                       <MessageSquare size={14} />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={handleCreatePersonaFromCharacter}
+                      title={t('characterEditor.createPersona')}
+                      disabled={creatingPersona}
+                    >
+                      {creatingPersona
+                        ? <Spinner size={14} fast />
+                        : <UserPlus size={14} />}
                     </Button>
                     <div className={styles.exportWrapper} ref={exportMenuRef}>
                       <Button
@@ -1032,6 +1432,61 @@ export default function CharacterEditorPage() {
                         rows={4}
                       />
                       <div className={styles.fieldGroup}>
+                        <span className={styles.fieldLabel}>Landing perspective stack</span>
+                        <span className={styles.fieldHelper}>
+                          Add up to five WebP-optimized layers. Drag to reorder from back to front; each layer controls its own parallax strength on landing-page cards only.
+                        </span>
+                        <div className={styles.perspectiveStackEditor}>
+                          {localPerspectiveLayers.length > 0 ? (
+                            <DndContext sensors={perspectiveLayerSensors} collisionDetection={closestCenter} onDragEnd={handlePerspectiveLayerDragEnd}>
+                              <SortableContext items={localPerspectiveLayers.map((layer) => layer.id)} strategy={verticalListSortingStrategy}>
+                                <div className={styles.perspectiveLayerList}>
+                                  {localPerspectiveLayers.map((layer, index) => (
+                                    <SortablePerspectiveLayer
+                                      key={layer.id}
+                                      layer={layer}
+                                      index={index}
+                                      disabled={localPerspectiveLayers.length < 2}
+                                      onLabelChange={handlePerspectiveLayerLabelChange}
+                                      onIntensityChange={handlePerspectiveLayerIntensityChange}
+                                      onRemove={handleRemovePerspectiveLayer}
+                                    />
+                                  ))}
+                                </div>
+                              </SortableContext>
+                            </DndContext>
+                          ) : (
+                            <div className={styles.perspectiveLayerEmptyState}>
+                              <ImagePlus size={18} />
+                              <span>No landing layers yet.</span>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            className={styles.perspectiveLayerAdd}
+                            disabled={localPerspectiveLayers.length >= MAX_PERSPECTIVE_LAYERS || perspectiveLayerProgress !== null}
+                            onClick={() => perspectiveLayerFileRef.current?.click()}
+                          >
+                            {perspectiveLayerProgress !== null ? (
+                              <span>{perspectiveLayerProgress}%</span>
+                            ) : (
+                              <>
+                                <Upload size={13} />
+                                Add layer ({localPerspectiveLayers.length}/{MAX_PERSPECTIVE_LAYERS})
+                              </>
+                            )}
+                          </button>
+                          <input
+                            ref={perspectiveLayerFileRef}
+                            type="file"
+                            accept="image/*"
+                            className={styles.hiddenInput}
+                            onChange={handlePerspectiveLayerSelected}
+                          />
+                        </div>
+                      </div>
+                      <div className={styles.fieldGroup}>
                         <span className={styles.fieldLabel}>{t('characterEditor.tags')}</span>
                         <span className={styles.fieldHelper}>{t('characterEditor.tagsHelper')}</span>
                         <div className={styles.tagsList}>
@@ -1088,25 +1543,67 @@ export default function CharacterEditorPage() {
                         </span>
                       </div>
 
-                      <div className={styles.galleryGrid}>
-                        {galleryItems.map((item) => (
-                          <GalleryGridItem
-                            key={item.id}
-                            item={item}
-                            onRemove={handleGalleryRemove}
-                            onOpenMenu={(menuItem, pos) => setGalleryContextMenu({ item: menuItem, pos })}
-                          />
-                        ))}
-
-                        <button
-                          type="button"
-                          className={styles.galleryAddBtn}
-                          onClick={() => galleryFileRef.current?.click()}
-                          disabled={galleryUploading}
+                      <div className={styles.galleryScrollArea} ref={galleryScrollRef}>
+                        <div
+                          className={styles.galleryVirtualContainer}
+                          style={{ height: galleryVirtualizer.getTotalSize() }}
                         >
-                          <ImagePlus size={20} />
-                          <span>{galleryUploading ? t('characterEditor.uploading') : t('characterEditor.addImages')}</span>
-                        </button>
+                          {galleryVirtualizer.getVirtualItems().map((virtualRow) => {
+                            const rowStart = virtualRow.index * galleryColumns
+                            const rowEnd = rowStart + galleryColumns
+                            const cells: Array<{ type: 'item'; item: CharacterGalleryItem } | { type: 'add' }> = []
+                            for (let g = rowStart; g < rowEnd; g++) {
+                              if (g < galleryItems.length) {
+                                cells.push({ type: 'item', item: galleryItems[g] })
+                              } else if (g === galleryItems.length) {
+                                cells.push({ type: 'add' })
+                              }
+                            }
+
+                            return (
+                              <div
+                                key={virtualRow.key}
+                                ref={galleryVirtualizer.measureElement}
+                                data-index={virtualRow.index}
+                                className={styles.galleryGridRow}
+                                style={{
+                                  position: 'absolute',
+                                  top: virtualRow.start,
+                                  left: 0,
+                                  width: '100%',
+                                  gridTemplateColumns: `repeat(${galleryColumns}, minmax(0, 1fr))`,
+                                  gap: GALLERY_GAP,
+                                  paddingBottom: GALLERY_GAP,
+                                }}
+                              >
+                                {cells.map((cell) => {
+                                  if (cell.type === 'add') {
+                                    return (
+                                      <button
+                                        key="__add__"
+                                        type="button"
+                                        className={styles.galleryAddBtn}
+                                        onClick={() => galleryFileRef.current?.click()}
+                                        disabled={galleryUploading}
+                                      >
+                                        <ImagePlus size={20} />
+                                        <span>{galleryUploading ? t('characterEditor.uploading') : t('characterEditor.addImages')}</span>
+                                      </button>
+                                    )
+                                  }
+                                  return (
+                                    <GalleryGridItem
+                                      key={cell.item.id}
+                                      item={cell.item}
+                                      onRemove={handleGalleryRemove}
+                                      onOpenMenu={(menuItem, pos) => setGalleryContextMenu({ item: menuItem, pos })}
+                                    />
+                                  )
+                                })}
+                              </div>
+                            )
+                          })}
+                        </div>
                       </div>
 
                       <input
@@ -1231,6 +1728,18 @@ export default function CharacterEditorPage() {
                           </div>
                           {lorebookResult ? (
                             <span className={styles.lorebookSuccess}>{lorebookResult}</span>
+                          ) : embeddedWorldBook ? (
+                            <button
+                              type="button"
+                              className={styles.addBtn}
+                              onClick={() => {
+                                setPendingWorldBookEditId(embeddedWorldBook.id)
+                                close()
+                                openDrawer('lorebook')
+                              }}
+                            >
+                              {t('characterEditor.openInLorebook')}
+                            </button>
                           ) : (
                             <button
                               type="button"
@@ -1241,10 +1750,17 @@ export default function CharacterEditorPage() {
                                 setLorebookImporting(true)
                                 try {
                                   const res = await worldBooksApi.importCharacterBook(editingCharacterId)
-                                  upsertWorldBookOption({ id: res.world_book.id, name: res.world_book.name, folder: res.world_book.folder })
+                                  upsertWorldBookOption({
+                                    id: res.world_book.id,
+                                    name: res.world_book.name,
+                                    folder: res.world_book.folder,
+                                    metadata: res.world_book.metadata,
+                                  })
                                   mutateExtensions((ext) => {
                                     const currentIds = getCharacterWorldBookIds(ext)
-                                    return setCharacterWorldBookIds(ext, [...currentIds, res.world_book.id])
+                                    return currentIds.includes(res.world_book.id)
+                                      ? setCharacterWorldBookIds(ext, currentIds)
+                                      : setCharacterWorldBookIds(ext, [...currentIds, res.world_book.id])
                                   }, true)
                                   setLorebookResult(t('characterEditor.lorebookImported', { count: res.entry_count, name: res.world_book.name }))
                                 } catch {
@@ -1400,6 +1916,14 @@ function Field({
       )}
     </div>
   )
+}
+
+function avatarExtension(mimeType: string): string {
+  if (mimeType === 'image/jpeg') return 'jpg'
+  if (mimeType === 'image/webp') return 'webp'
+  if (mimeType === 'image/gif') return 'gif'
+  if (mimeType === 'image/svg+xml') return 'svg'
+  return 'png'
 }
 
 /**

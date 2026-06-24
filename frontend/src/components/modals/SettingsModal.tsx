@@ -42,6 +42,7 @@ import type { EmbeddingConfig, ChatMemorySettings } from '@/types/api'
 import type { WorldBookVectorPresetMode, WorldBookVectorSettings } from '@/types/world-book-vector-settings'
 import AccountSettings from '@/components/settings/AccountSettings'
 import UserManagement from '@/components/settings/UserManagement'
+import SsoProviderSettings from '@/components/settings/SsoProviderSettings'
 import MigrationSettings from '@/components/settings/MigrationSettings'
 import TokenizerManager from '@/components/settings/TokenizerManager'
 import Diagnostics from '@/components/settings/Diagnostics'
@@ -65,6 +66,7 @@ interface SettingsModalProps {
 export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { t: ts } = useTranslation('settings')
   const settingsActiveView = useStore((s) => s.settingsActiveView)
+  const settingsScrollTarget = useStore((s) => s.settingsScrollTarget)
   const user = useStore((s) => s.user)
   const [activeView, setActiveView] = useState(settingsActiveView || 'display')
 
@@ -73,6 +75,10 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const contentRef = useRef<HTMLDivElement>(null)
   const navNonce = useRef(0)
   const [scrollTarget, setScrollTarget] = useState<{ anchorId: string | null; nonce: number } | null>(null)
+
+  useEffect(() => {
+    setActiveView(settingsActiveView || 'display')
+  }, [settingsActiveView])
 
   useEffect(() => {
     if (!VIEWS.some((tab) => tab.id === activeView) && VIEWS.length > 0) {
@@ -112,6 +118,39 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       if (raf2) cancelAnimationFrame(raf2)
     }
   }, [scrollTarget])
+
+  useEffect(() => {
+    const extensionId = settingsScrollTarget?.extensionId
+    if (!extensionId) return
+
+    if (activeView !== 'extensions') {
+      setActiveView('extensions')
+      return
+    }
+
+    let frame = 0
+    let attempts = 0
+    const selector = [
+      `[data-spindle-extension-root="${CSS.escape(extensionId)}"]`,
+      '[data-spindle-mount-point="settings_extensions"]',
+    ].join('')
+    const scrollToExtension = () => {
+      const container = contentRef.current
+      const el = container?.querySelector<HTMLElement>(selector)
+      if (el) {
+        el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        el.classList.add(styles.sectionFlash)
+        window.setTimeout(() => el.classList.remove(styles.sectionFlash), 1400)
+        return
+      }
+      if (++attempts < 20) frame = requestAnimationFrame(scrollToExtension)
+    }
+
+    frame = requestAnimationFrame(scrollToExtension)
+    return () => {
+      cancelAnimationFrame(frame)
+    }
+  }, [activeView, settingsScrollTarget])
 
   return createPortal(
     <div className={styles.overlay} onClick={onClose}>
@@ -194,6 +233,8 @@ function SettingsView({ view }: { view: string }) {
       return <TokenizerManager />
     case 'users':
       return <UserManagement />
+    case 'ssoProviders':
+      return <SsoProviderSettings />
     case 'memoryCortex':
       return <MemoryCortexSettings />
     case 'notifications':
@@ -685,7 +726,6 @@ function ChatSettings() {
   const messagesPerPage = useStore((s) => s.messagesPerPage)
   const regenFeedback = useStore((s) => s.regenFeedback)
   const setSetting = useStore((s) => s.setSetting)
-  const isMac = navigator.platform.toUpperCase().includes('MAC')
 
   return (
     <div className={styles.settingsSection}>
@@ -905,9 +945,6 @@ function ChatSettings() {
         checked={enterToSend}
         onChange={(checked) => setSetting('chatSheldEnterToSend', checked)}
         label={t('chat.enterToSend')}
-        hint={enterToSend
-          ? t('chat.enterToSendHintOn')
-          : isMac ? t('chat.enterToSendHintOffMac') : t('chat.enterToSendHintOffWin')}
       />
 
       <Toggle.Checkbox
@@ -3056,7 +3093,7 @@ function AdvancedSettings() {
                 <label className={styles.fieldLabel}>{t('advanced.headerTemplate')}</label>
                 <textarea
                   className={styles.textarea}
-                  rows={2}
+                  rows={7}
                   value={cfg.memoryHeaderTemplate}
                   onChange={(e) => update({ memoryHeaderTemplate: e.target.value })}
                 />
@@ -3065,8 +3102,9 @@ function AdvancedSettings() {
               <div className={styles.drawerRow}>
                 <div className={styles.field}>
                   <label className={styles.fieldLabel}>{t('advanced.chunkTemplate')}</label>
-                  <input
-                    className={styles.select}
+                  <textarea
+                    className={styles.textarea}
+                    rows={4}
                     value={cfg.chunkTemplate}
                     onChange={(e) => update({ chunkTemplate: e.target.value })}
                   />

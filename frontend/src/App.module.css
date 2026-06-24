@@ -23,8 +23,8 @@
      Safe for all browsers — the app shell has an opaque background so
      backdrop-filter children blur against rendered app content as intended. */
   isolation: isolate;
-  /* Safe area insets + Spindle dock panel insets */
-  padding-top: calc(env(safe-area-inset-top, 0px) + var(--spindle-dock-top, 0px));
+  /* Safe area insets + desktop PWA window controls + Spindle dock panel insets */
+  padding-top: calc(var(--app-interactive-safe-top, env(safe-area-inset-top, 0px)) + var(--spindle-dock-top, 0px));
   padding-right: var(--spindle-dock-right, 0px);
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--spindle-dock-bottom, 0px));
   padding-left: var(--spindle-dock-left, 0px);
@@ -54,6 +54,8 @@
 }
 
 .main {
+  position: relative;
+  z-index: 1;
   flex: 1 1 0;
   display: flex;
   flex-direction: column;

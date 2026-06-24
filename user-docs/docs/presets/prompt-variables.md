@@ -1,3 +1,7 @@
+---
+title: Prompt Variables
+---
+
 # Prompt Variables
 
 Prompt Variables allow preset creators to expose customizable inputs to end users without requiring them to edit raw prompt block text or touch any macros. 

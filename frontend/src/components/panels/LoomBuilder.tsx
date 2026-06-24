@@ -8,6 +8,7 @@ import {
   MouseSensor,
   TouchSensor,
   KeyboardSensor,
+  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
@@ -56,6 +57,7 @@ import {
   Camera,
   Link,
   Unlink,
+  Shield,
 } from 'lucide-react'
 import clsx from 'clsx'
 import ExpandedTextEditor, { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
@@ -74,7 +76,7 @@ import {
   DEFAULT_COMPLETION_SETTINGS,
   DEFAULT_ADVANCED_SETTINGS,
 } from '@/lib/loom/constants'
-import type { PromptBlock, PromptVariableDef, LoomConnectionProfile, SamplerParam, MacroGroup, CategoryGroup, LoomPreset } from '@/lib/loom/types'
+import type { PromptBlock, PromptVariableDef, PromptVariableValues, LoomConnectionProfile, SamplerParam, MacroGroup, CategoryGroup, LoomPreset } from '@/lib/loom/types'
 import { useLoomOptionLabels } from '@/lib/i18n/loomOptionLabels'
 import { PromptVariablesModal } from '@/components/shared/PromptVariablesModal'
 import { VariablesEditor } from './PromptVariablesEditor'
@@ -119,6 +121,94 @@ const ROLE_DISPLAY_LABELS: Record<string, string> = {
   assistant: 'assistant',
   user_append: 'user+',
   assistant_append: 'asst+',
+}
+
+const ROOT_DROP_PREFIX = 'root-drop:'
+
+function parseRootDropId(id: unknown) {
+  if (typeof id !== 'string' || !id.startsWith(ROOT_DROP_PREFIX)) return null
+  const index = Number(id.slice(ROOT_DROP_PREFIX.length).split(':', 1)[0])
+  return Number.isFinite(index) ? index : null
+}
+
+function rootDropId(index: number, appendCategoryId?: string) {
+  return `${ROOT_DROP_PREFIX}${index}${appendCategoryId ? `:category:${appendCategoryId}` : ''}`
+}
+
+function hasExplicitGroup(block: PromptBlock) {
+  return block.group !== undefined
+}
+
+function blockGroup(block: PromptBlock) {
+  return block.group ?? null
+}
+
+function sanitizeSealedBlockKey(value: string) {
+  return value.trim().replace(/[^A-Za-z0-9._:-]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+function filterSealedBlockKeyInput(value: string) {
+  return value.replace(/[^A-Za-z0-9._:-]+/g, '-')
+}
+
+function suggestedSealedBlockKey(block: PromptBlock, name: string) {
+  const fromTitle = (name || block.name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+  return fromTitle || sanitizeSealedBlockKey(block.id).toLowerCase() || block.id.toLowerCase()
+}
+
+function inferGroupAtIndex(blocks: PromptBlock[], index: number) {
+  const target = blocks[index]
+  if (!target || target.marker === 'category') return null
+  if (hasExplicitGroup(target)) return blockGroup(target)
+
+  for (let i = index - 1; i >= 0; i--) {
+    if (blocks[i].marker === 'category') return blocks[i].id
+  }
+  return null
+}
+
+function getCategoryEndIndex(blocks: PromptBlock[], categoryId: string) {
+  const categoryIndex = blocks.findIndex((block) => block.id === categoryId)
+  if (categoryIndex === -1) return -1
+
+  let endIndex = categoryIndex + 1
+  while (endIndex < blocks.length) {
+    const block = blocks[endIndex]
+    if (block.marker === 'category') break
+    if (hasExplicitGroup(block) && blockGroup(block) !== categoryId) break
+    endIndex += 1
+  }
+  return endIndex
+}
+
+function parseRootDropCategoryId(id: unknown) {
+  if (typeof id !== 'string' || !id.startsWith(ROOT_DROP_PREFIX)) return null
+  const marker = ':category:'
+  const markerIndex = id.indexOf(marker)
+  return markerIndex === -1 ? null : id.slice(markerIndex + marker.length) || null
+}
+
+function RootDropSlot({ id, active, appendArmed }: { id: string; active: boolean; appendArmed?: boolean }) {
+  const { t } = useLb()
+  const { setNodeRef, isOver } = useDroppable({ id, disabled: !active })
+  return (
+    <div className={s.rootDropSlotWrap}>
+      <div
+        ref={setNodeRef}
+        className={clsx(
+          s.rootDropSlot,
+          active && s.rootDropSlotActive,
+          isOver && s.rootDropSlotOver,
+          appendArmed && s.rootDropSlotAppendArmed,
+        )}
+        aria-label={appendArmed
+          ? t('block.dropAtCategoryEnd', { defaultValue: 'Drop at bottom of category' })
+          : t('block.dropAtRoot', { defaultValue: 'Drop at root level' })}
+      />
+    </div>
+  )
 }
 
 // ============================================================================
@@ -229,6 +319,7 @@ function SortableBlockItem({ block, onEdit, onDelete, onToggle, indented, dragDi
           <span className={s.blockName}>
             {isMarker && <Hash size={12} className={s.blockNameIcon} />}
             {block.isLocked && <Lock size={10} className={clsx(s.blockNameIcon, s.blockNameIconMuted)} />}
+            {block.sealed === true && <Shield size={10} className={clsx(s.blockNameIcon, s.blockNameIconSealed)} />}
             <span className={s.blockNameText}>{block.name}</span>
           </span>
           <span className={s.blockMetaRow}>
@@ -271,6 +362,8 @@ function SortableBlockItem({ block, onEdit, onDelete, onToggle, indented, dragDi
 
 interface BlockEditorProps {
   block: PromptBlock
+  blocks: PromptBlock[]
+  promptVariables: PromptVariableValues
   onSave: (updates: Partial<PromptBlock>) => void
   onBack: () => void
   availableMacros: MacroGroup[]
@@ -278,16 +371,20 @@ interface BlockEditorProps {
   compact: boolean
 }
 
-function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, compact }: BlockEditorProps) {
+function BlockEditor({ block, blocks, promptVariables, onSave, onBack, availableMacros, refreshMacros, compact }: BlockEditorProps) {
   const { t } = useLb()
   const { t: tc } = useTranslation('common')
   const { injectionTriggerTypes, injectionTriggerLabel } = useLoomOptionLabels()
+  const isInstalledLumiHubSealed = block.sealedSource === 'lumihub'
   const [name, setName] = useState(block.name)
   const [role, setRole] = useState<PromptBlock['role']>(block.role || 'system')
   const [content, setContent] = useState(block.content || '')
   const [position, setPosition] = useState<PromptBlock['position']>(block.position || 'pre_history')
   const [depth, setDepth] = useState(block.depth || 0)
   const [isLocked, setIsLocked] = useState(block.isLocked || false)
+  const [sealControlsOpen, setSealControlsOpen] = useState(block.sealed === true)
+  const [sealed, setSealed] = useState(block.sealed === true)
+  const [sealedKey, setSealedKey] = useState(typeof block.sealedKey === 'string' ? block.sealedKey : '')
   const [injectionTrigger, setInjectionTrigger] = useState<string[]>(block.injectionTrigger || [])
   const [categoryMode, setCategoryMode] = useState<PromptBlock['categoryMode']>(block.categoryMode ?? null)
   const [variables, setVariables] = useState<PromptVariableDef[]>(
@@ -318,7 +415,18 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
       // leading/trailing whitespace from each resolved block, except append
       // roles, where it preserves whitespace for inter-append spacing.
       const isAppend = role === 'user_append' || role === 'assistant_append'
-      resolveMacrosApi({ template: content, trim: !isAppend, ...(activeChatId ? { chat_id: activeChatId } : {}) })
+      const previewBlocks = blocks.map((b) =>
+        b.id === block.id
+          ? { ...b, content, role, position, depth, variables, enabled: true }
+          : b,
+      )
+      resolveMacrosApi({
+        template: content,
+        trim: !isAppend,
+        prompt_blocks: previewBlocks,
+        prompt_variables: promptVariables,
+        ...(activeChatId ? { chat_id: activeChatId } : {}),
+      })
         .then((res) => {
           setPreviewText(res.text)
           setPreviewDiagnostics(res.diagnostics)
@@ -330,7 +438,7 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
         .finally(() => setPreviewLoading(false))
     }, 500)
     return () => { if (previewTimerRef.current) clearTimeout(previewTimerRef.current) }
-  }, [content, showPreview, activeChatId, role])
+  }, [content, showPreview, activeChatId, role, blocks, block.id, position, depth, variables, promptVariables])
 
   const handlePositionChange = (newPosition: string) => {
     const pos = newPosition as PromptBlock['position']
@@ -343,11 +451,19 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
   const handleSave = () => {
     const isAppend = role === 'user_append' || role === 'assistant_append'
     const cleanedVariables = variables.filter((v) => v && v.name?.trim().length > 0)
+    const cleanSealedKey = sanitizeSealedBlockKey(sealedKey || block.sealedKey || block.id)
+    const shouldSeal = isInstalledLumiHubSealed || (sealed && !!cleanSealedKey)
     onSave({
       name, role, content,
       position: isAppend ? 'pre_history' : position,
       depth: (position === 'in_history' || isAppend) ? depth : 0,
       isLocked, injectionTrigger,
+      sealed: shouldSeal ? true : undefined,
+      sealedKey: shouldSeal ? cleanSealedKey : undefined,
+      sealedSource: isInstalledLumiHubSealed ? block.sealedSource : undefined,
+      sealedOriginPresetId: isInstalledLumiHubSealed ? block.sealedOriginPresetId : undefined,
+      sealedOriginVersion: isInstalledLumiHubSealed ? block.sealedOriginVersion : undefined,
+      sealedSha256: isInstalledLumiHubSealed ? block.sealedSha256 : undefined,
       categoryMode: block.marker === 'category' ? categoryMode : null,
       variables: cleanedVariables.length ? cleanedVariables : undefined,
     })
@@ -499,6 +615,53 @@ function BlockEditor({ block, onSave, onBack, availableMacros, refreshMacros, co
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Toggle.Checkbox checked={isLocked} onChange={setIsLocked} label={<><Lock size={14} /> {t('blockEditor.lockBlock')}</>} />
           </div>
+
+          {!block.marker && (
+            <div className={clsx(s.sealedBlockPanel, sealed && s.sealedBlockPanelActive)}>
+              <button
+                className={s.sealedBlockReveal}
+                type="button"
+                onClick={() => {
+                  const nextOpen = !sealControlsOpen
+                  setSealControlsOpen(nextOpen)
+                  if (nextOpen && !sealedKey.trim()) setSealedKey(suggestedSealedBlockKey(block, name))
+                }}
+                aria-expanded={sealControlsOpen}
+              >
+                <span className={s.sealedBlockRevealCopy}>
+                  <Shield size={14} />
+                  <span>{t('blockEditor.sealedBlockTitle')}</span>
+                </span>
+                <ChevronDown size={14} className={clsx(s.sealedBlockChevron, sealControlsOpen && s.sealedBlockChevronOpen)} />
+              </button>
+              {sealControlsOpen && (
+                <div className={s.sealedBlockBody}>
+                  <p className={s.sealedBlockText}>{t(isInstalledLumiHubSealed ? 'blockEditor.sealedBlockInstalledHint' : 'blockEditor.sealedBlockHint')}</p>
+                  <div className={s.formGroup}>
+                    <label className={s.label}>{t('blockEditor.sealedBlockKey')}</label>
+                    <input
+                      className={s.input}
+                      value={sealedKey}
+                      onChange={e => setSealedKey(filterSealedBlockKeyInput(e.target.value))}
+                      placeholder={t('blockEditor.sealedBlockKeyPlaceholder')}
+                      spellCheck={false}
+                      disabled={isInstalledLumiHubSealed}
+                    />
+                    <span className={s.settingsHint}>{t('blockEditor.sealedBlockKeyHint')}</span>
+                  </div>
+                  <label className={clsx(s.sealedBlockArmRow, !sealedKey.trim() && s.sealedBlockArmRowDisabled)}>
+                    <input
+                      type="checkbox"
+                      checked={(isInstalledLumiHubSealed || sealed) && !!sealedKey.trim()}
+                      disabled={isInstalledLumiHubSealed || !sealedKey.trim()}
+                      onChange={e => setSealed(e.target.checked)}
+                    />
+                    <span>{t(isInstalledLumiHubSealed ? 'blockEditor.sealedBlockInstalledEnable' : 'blockEditor.sealedBlockEnable')}</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
 
           {block.marker === 'category' && (
             <div className={s.formGroup}>
@@ -1395,6 +1558,9 @@ export default function LoomBuilder({
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set())
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const [hoveredAppendRootDropId, setHoveredAppendRootDropId] = useState<string | null>(null)
+  const [armedAppendRootDropId, setArmedAppendRootDropId] = useState<string | null>(null)
 
   const configurableVariableCount = useMemo(() => {
     return (activePreset?.blocks ?? []).reduce((count, b) => {
@@ -1488,6 +1654,22 @@ export default function LoomBuilder({
     return () => cancelAnimationFrame(frame)
   }, [isSearchVisible])
 
+  useEffect(() => {
+    if (!hoveredAppendRootDropId) {
+      setArmedAppendRootDropId(null)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setArmedAppendRootDropId(hoveredAppendRootDropId)
+    }, 3000)
+
+    return () => {
+      window.clearTimeout(timer)
+      setArmedAppendRootDropId(null)
+    }
+  }, [hoveredAppendRootDropId])
+
   const visibleBlockIds = useMemo(() => {
     const ids: string[] = []
     for (const group of displayedGroups) {
@@ -1502,6 +1684,32 @@ export default function LoomBuilder({
     }
     return ids
   }, [displayedGroups, collapsedCategories, isSearchActive])
+
+  const activeDraggedBlock = useMemo(() => {
+    if (!activeDragId) return null
+    return activePreset?.blocks.find((block) => block.id === activeDragId) ?? null
+  }, [activeDragId, activePreset?.blocks])
+
+  const rootDropIndexAfterGroup = useCallback((group: CategoryGroup) => {
+    const blocks = activePreset?.blocks ?? []
+    if (group.categoryBlock) {
+      const categoryIndex = blocks.findIndex((block) => block.id === group.categoryBlock!.id)
+      if (categoryIndex === -1) return blocks.length
+      let endIndex = categoryIndex + 1
+      while (endIndex < blocks.length) {
+        const block = blocks[endIndex]
+        if (block.marker === 'category') break
+        if (hasExplicitGroup(block) && blockGroup(block) !== group.categoryBlock.id) break
+        endIndex += 1
+      }
+      return endIndex
+    }
+
+    const childIndexes = group.children
+      .map((child) => blocks.findIndex((block) => block.id === child.id))
+      .filter((index) => index >= 0)
+    return childIndexes.length > 0 ? Math.max(...childIndexes) + 1 : blocks.length
+  }, [activePreset?.blocks])
 
   const toggleCollapse = useCallback((categoryId: string) => {
     setCollapsedCategories(prev => {
@@ -1538,31 +1746,84 @@ export default function LoomBuilder({
 
   const handleDragEnd = useCallback((event: any) => {
     const { active, over } = event
+    setActiveDragId(null)
+    setHoveredAppendRootDropId(null)
+    setArmedAppendRootDropId(null)
     if (!over || active.id === over.id || !activePreset) return
 
     const blocks = activePreset.blocks
     const draggedBlock = blocks.find(b => b.id === active.id)
     if (!draggedBlock) return
+    const rootDropIndex = parseRootDropId(over.id)
+    const armedAppendCategoryId = armedAppendRootDropId === over.id ? parseRootDropCategoryId(over.id) : null
 
     if (draggedBlock.marker === 'category') {
       const catIdx = blocks.findIndex(b => b.id === active.id)
       let endIdx = blocks.length
       for (let i = catIdx + 1; i < blocks.length; i++) {
         if (blocks[i].marker === 'category') { endIdx = i; break }
+        if (hasExplicitGroup(blocks[i]) && blockGroup(blocks[i]) !== draggedBlock.id) { endIdx = i; break }
       }
       const group = blocks.slice(catIdx, endIdx)
       const remaining = [...blocks.slice(0, catIdx), ...blocks.slice(endIdx)]
-      const overIdx = remaining.findIndex(b => b.id === over.id)
+      const overIdx = rootDropIndex == null
+        ? remaining.findIndex(b => b.id === over.id)
+        : Math.max(0, Math.min(remaining.length, rootDropIndex > catIdx ? rootDropIndex - group.length : rootDropIndex))
       if (overIdx === -1) return
       remaining.splice(overIdx, 0, ...group)
       saveBlocks(remaining)
     } else {
       const oldIndex = blocks.findIndex(b => b.id === active.id)
+      if (oldIndex === -1) return
+
+      if (armedAppendCategoryId) {
+        const endIndex = getCategoryEndIndex(blocks, armedAppendCategoryId)
+        if (endIndex === -1) return
+        const nextBlocks = [...blocks]
+        const [moved] = nextBlocks.splice(oldIndex, 1)
+        const insertAt = Math.max(0, Math.min(nextBlocks.length, endIndex > oldIndex ? endIndex - 1 : endIndex))
+        nextBlocks.splice(insertAt, 0, { ...moved, group: armedAppendCategoryId })
+        saveBlocks(nextBlocks)
+        return
+      }
+
+      if (rootDropIndex != null) {
+        const nextBlocks = [...blocks]
+        const [moved] = nextBlocks.splice(oldIndex, 1)
+        const insertAt = Math.max(0, Math.min(nextBlocks.length, rootDropIndex > oldIndex ? rootDropIndex - 1 : rootDropIndex))
+        nextBlocks.splice(insertAt, 0, { ...moved, group: null })
+        saveBlocks(nextBlocks)
+        return
+      }
+
       const newIndex = blocks.findIndex(b => b.id === over.id)
-      if (oldIndex === -1 || newIndex === -1) return
-      saveBlocks(arrayMove(blocks, oldIndex, newIndex))
+      if (newIndex === -1) return
+      if (blocks[newIndex].marker === 'category') {
+        const nextBlocks = [...blocks]
+        const [moved] = nextBlocks.splice(oldIndex, 1)
+        const insertAt = newIndex > oldIndex ? newIndex : newIndex + 1
+        nextBlocks.splice(insertAt, 0, { ...moved, group: blocks[newIndex].id })
+        saveBlocks(nextBlocks)
+        return
+      }
+
+      const movedGroup = inferGroupAtIndex(blocks, newIndex)
+      const reordered = arrayMove(blocks, oldIndex, newIndex)
+      saveBlocks(reordered.map(block => block.id === draggedBlock.id ? { ...block, group: movedGroup } : block))
     }
-  }, [activePreset, saveBlocks])
+  }, [activePreset, armedAppendRootDropId, saveBlocks])
+
+  const handleDragOver = useCallback((event: any) => {
+    const activeBlock = activePreset?.blocks.find((block) => block.id === event.active?.id)
+    const appendCategoryId = parseRootDropCategoryId(event.over?.id)
+    setHoveredAppendRootDropId(appendCategoryId && activeBlock?.marker !== 'category' ? event.over.id : null)
+  }, [activePreset?.blocks])
+
+  const handleDragCancel = useCallback(() => {
+    setActiveDragId(null)
+    setHoveredAppendRootDropId(null)
+    setArmedAppendRootDropId(null)
+  }, [])
 
   const handleEdit = useCallback((block: PromptBlock) => {
     setEditingBlock(block)
@@ -1672,6 +1933,8 @@ export default function LoomBuilder({
     return (
       <BlockEditor
         block={editingBlock}
+        blocks={activePreset?.blocks ?? []}
+        promptVariables={activePreset?.promptVariables ?? {}}
         onSave={handleEditSave}
         onBack={() => { setView('list'); setEditingBlock(null) }}
         availableMacros={availableMacros}
@@ -1975,10 +2238,18 @@ export default function LoomBuilder({
               <button type="button" className={s.btn} onClick={clearSearch}>{lb('empty.clearSearch')}</button>
             </div>
           ) : (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={(event) => setActiveDragId(String(event.active.id))}
+              onDragOver={handleDragOver}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
               <SortableContext items={visibleBlockIds} strategy={verticalListSortingStrategy}>
+                <RootDropSlot id={rootDropId(0)} active={!!activeDragId && !isSearchActive} />
                 {displayedGroups.map(group => (
-                  <Fragment key={group.categoryBlock?.id || 'ungrouped'}>
+                  <Fragment key={group.categoryBlock?.id || group.children[0]?.id || 'ungrouped'}>
                     {group.categoryBlock && (
                       <SortableCategoryItem
                         block={group.categoryBlock}
@@ -2004,6 +2275,11 @@ export default function LoomBuilder({
                         />
                       ))
                     }
+                    <RootDropSlot
+                      id={rootDropId(rootDropIndexAfterGroup(group), group.categoryBlock?.id)}
+                      active={!!activeDragId && !isSearchActive}
+                      appendArmed={!!activeDraggedBlock && activeDraggedBlock.marker !== 'category' && armedAppendRootDropId === rootDropId(rootDropIndexAfterGroup(group), group.categoryBlock?.id)}
+                    />
                   </Fragment>
                 ))}
               </SortableContext>

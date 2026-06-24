@@ -28,6 +28,8 @@ export interface BuildEnvContext {
   targetCharacterName?: string;
   /** Optional abort signal — threaded onto MacroEnv so the evaluator can cancel between iterations. */
   signal?: AbortSignal;
+  /** Content of the regenerate/swipe target before the new swipe was staged. */
+  rejectedSwipe?: string;
 }
 
 export function resolvePersonaPronouns(persona: Persona | null): {
@@ -114,6 +116,7 @@ export function buildEnv(ctx: BuildEnvContext): MacroEnv {
       firstIncludedMessageId: messages.length > 0 ? 0 : -1,
       lastSwipeId: lastMsg?.swipes ? lastMsg.swipes.length - 1 : 0,
       currentSwipeId: lastMsg?.swipe_id ?? 0,
+      rejectedSwipe: ctx.rejectedSwipe ?? "",
     },
     system: {
       model: connection?.model || "",
@@ -124,7 +127,7 @@ export function buildEnv(ctx: BuildEnvContext): MacroEnv {
       isMobile: false,
     },
     variables: {
-      local: new Map(Object.entries((chat.metadata?.macro_variables?.local as Record<string, string>) || {})),
+      local: new Map(),
       global: new Map(Object.entries((chat.metadata?.macro_variables?.global as Record<string, string>) || {})),
       chat: new Map(Object.entries((chat.metadata?.chat_variables as Record<string, string>) || {})),
     },
@@ -136,6 +139,9 @@ export function buildEnv(ctx: BuildEnvContext): MacroEnv {
       messages: messages.map((m) => ({ content: m.content, name: m.name, is_user: m.is_user })),
       chatCreatedAt: (chat as any).created_at as number | undefined,
       characterTags: Array.isArray((character as any).tags) ? (character as any).tags : [],
+      lastMessageTime: lastMsg && typeof lastMsg.send_date === "number"
+        ? lastMsg.send_date * 1000
+        : undefined,
     },
   };
 }

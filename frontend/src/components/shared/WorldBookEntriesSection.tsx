@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useWorldBookEntryLabels } from '@/lib/i18n/worldBookEntryLabels'
 import {
@@ -32,9 +32,13 @@ import {
   MouseSensor,
   TouchSensor,
   KeyboardSensor,
+  DragOverlay,
   closestCenter,
   useSensor,
   useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DraggableAttributes,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -43,9 +47,17 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
+import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
 import { useScaledSortableStyle } from '@/lib/dndUiScale'
 import clsx from 'clsx'
 import { worldBooksApi } from '@/api/world-books'
+import { wsClient } from '@/ws/client'
+import { EventType } from '@/ws/events'
+import type {
+  WorldBookChangedPayload,
+  WorldBookEntryChangedPayload,
+  WorldBookEntryDeletedPayload,
+} from '@/types/ws-events'
 import WorldBookEntryEditor from '@/components/shared/WorldBookEntryEditor'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
@@ -68,6 +80,9 @@ import styles from './WorldBookEntriesSection.module.css'
 
 const DEFAULT_PAGE_SIZE = 50 as const
 const CUSTOM_PAGE_SIZE = 200 as const
+
+/** Ignore WORLD_BOOK_ENTRY_CHANGED echoes of our own writes for this long. */
+const SELF_ECHO_WINDOW_MS = 2_000
 
 function mapSortForApi(sortBy: WorldBookEntrySortBy): 'order' | 'priority' | 'created' | 'updated' | 'name' {
   return sortBy === 'custom' ? 'order' : sortBy
@@ -99,7 +114,13 @@ interface EntryRowProps {
   onOpenPositionMenu: (entryId: string, position: ContextMenuPos) => void
 }
 
-function SortableEntryRow({
+interface EntryRowContentProps extends EntryRowProps {
+  dragHandleAttributes?: DraggableAttributes
+  dragHandleListeners?: Record<string, unknown>
+  isDragging?: boolean
+}
+
+function EntryRowContent({
   entry,
   expanded,
   dragEnabled,
@@ -112,19 +133,13 @@ function SortableEntryRow({
   onOpenMenu,
   onOpenTypeMenu,
   onOpenPositionMenu,
-}: EntryRowProps) {
+  dragHandleAttributes,
+  dragHandleListeners,
+  isDragging,
+}: EntryRowContentProps) {
   const { t } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entries' })
+  const { t: tEntryFields } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entryEditor.fields' })
   const labels = useWorldBookEntryLabels()
-  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({
-    id: entry.id,
-    disabled: !dragEnabled,
-  })
-  const { setNodeRef, style } = useScaledSortableStyle({
-    setNodeRef: setSortableRef,
-    transform,
-    transition,
-    isDragging,
-  })
 
   const controlWrapProps = {
     onClick: (e: React.MouseEvent) => e.stopPropagation(),
@@ -132,7 +147,7 @@ function SortableEntryRow({
   }
 
   return (
-    <div ref={setNodeRef} style={style} className={clsx(isDragging && styles.rowDragging)}>
+    <div className={clsx(isDragging && styles.rowDragging)}>
       <div
         className={clsx(
           styles.entryRow,
@@ -168,8 +183,8 @@ function SortableEntryRow({
               title={dragEnabled ? t('dragReorder') : t('dragUnavailable')}
               aria-label={t('dragHandle')}
               tabIndex={-1}
-              {...attributes}
-              {...listeners}
+              {...dragHandleAttributes}
+              {...dragHandleListeners}
             >
               <GripVertical size={13} />
             </button>
@@ -212,6 +227,14 @@ function SortableEntryRow({
                   <span>{labels.positionLabel(entry.position)}</span>
                   <ChevronDown size={11} />
                 </button>
+                <span
+                  className={clsx(styles.entryMetaItem, styles.orderBadge)}
+                  title={`${tEntryFields('order')}: ${entry.order_value.toLocaleString()}`}
+                  {...controlWrapProps}
+                >
+                  <Hash size={10} aria-hidden="true" />
+                  <span>{entry.order_value.toLocaleString()}</span>
+                </span>
               </div>
             </div>
 
@@ -253,6 +276,30 @@ function SortableEntryRow({
   )
 }
 
+function SortableEntryRow(props: EntryRowProps) {
+  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({
+    id: props.entry.id,
+    disabled: !props.dragEnabled,
+  })
+  const { setNodeRef, style } = useScaledSortableStyle({
+    setNodeRef: setSortableRef,
+    transform,
+    transition,
+    isDragging,
+  })
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <EntryRowContent
+        {...props}
+        dragHandleAttributes={attributes}
+        dragHandleListeners={listeners}
+        isDragging={isDragging}
+      />
+    </div>
+  )
+}
+
 interface MoveCopyModalState {
   mode: 'move' | 'copy'
   entryIds: string[]
@@ -278,12 +325,14 @@ interface WorldBookEntriesSectionProps {
   books: WorldBook[]
   selectedBookId: string
   onRefreshVectorSummary?: (bookId: string) => Promise<void> | void
+  scrollElementRef?: React.RefObject<HTMLElement | null>
 }
 
 export default function WorldBookEntriesSection({
   books,
   selectedBookId,
   onRefreshVectorSummary,
+  scrollElementRef,
 }: WorldBookEntriesSectionProps) {
   const { t } = useTranslation('panels', { keyPrefix: 'worldBookPanel' })
   const { t: te } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entries' })
@@ -322,6 +371,18 @@ export default function WorldBookEntriesSection({
   const [bulkDepth, setBulkDepth] = useState('4')
   const [pendingAction, setPendingAction] = useState(false)
   const entryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const entryListRef = useRef<HTMLDivElement>(null)
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
+
+  // ── Live-sync (WORLD_BOOK_ENTRY_* / WORLD_BOOK_CHANGED) ──
+  // Mirror of `entries` for use inside WS handlers without re-subscribing.
+  const entriesRef = useRef<WorldBookEntry[]>(entries)
+  useEffect(() => { entriesRef.current = entries }, [entries])
+  // entryId → timestamp of the last local write; used to ignore our own echoes.
+  const recentLocalWrites = useRef<Map<string, number>>(new Map())
+  // Always-current silent refetch of the visible page, called from WS handlers.
+  const liveRefetchRef = useRef<() => void>(() => {})
+  const liveRefetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const pageSize = entryPageSize === 'all' ? null : entryPageSize
   const entryTotalPages = pageSize ? Math.max(1, Math.ceil(entryTotal / pageSize)) : 1
@@ -347,11 +408,34 @@ export default function WorldBookEntriesSection({
   }, [entrySortBy, entrySearchFilter, entryPageSize, te])
   const dragEnabled = entrySortBy === 'custom' && !dragUnavailableReason
 
+  const rangeExtractor = useCallback((range: Range) => {
+    // Drag-and-drop needs every sortable item mounted so @dnd-kit can
+    // measure/position the list. Fall back to the full range in custom-sort
+    // mode; otherwise virtualize normally.
+    if (dragEnabled) {
+      return Array.from({ length: range.count }, (_, i) => i)
+    }
+    return defaultRangeExtractor(range)
+  }, [dragEnabled])
+
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
+
+  const entryVirtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollElementRef?.current ?? entryListRef.current,
+    estimateSize: () => 72,
+    overscan: 6,
+    getItemKey: (index) => entries[index]?.id ?? index,
+    rangeExtractor,
+    measureElement: (element) => {
+      const size = element.getBoundingClientRect().height
+      return Math.max(1, Number.isFinite(size) ? size : 72)
+    },
+  })
 
   const persistViewPref = useCallback((bookId: string, pref: {
     sortBy: WorldBookEntrySortBy
@@ -404,8 +488,12 @@ export default function WorldBookEntriesSection({
     sortDir: WorldBookEntrySortDir,
     search: string,
     nextPageSize: WorldBookEntryPageSize,
+    opts?: { silent?: boolean },
   ) => {
-    setLoadingEntries(true)
+    // Silent loads (live-sync refetches) skip the loading flash so they don't
+    // momentarily unmount an expanded entry editor and drop in-progress text.
+    const silent = opts?.silent ?? false
+    if (!silent) setLoadingEntries(true)
     try {
       const res = nextPageSize === 'all'
         ? await fetchAllEntries(bookId, sortBy, sortDir, search)
@@ -423,7 +511,7 @@ export default function WorldBookEntriesSection({
         setEntryPage(totalPages)
       }
     } finally {
-      setLoadingEntries(false)
+      if (!silent) setLoadingEntries(false)
     }
   }, [fetchAllEntries])
 
@@ -454,6 +542,65 @@ export default function WorldBookEntriesSection({
     return () => clearTimeout(handle)
   }, [selectedBookId, entryPage, entrySortBy, entrySortDir, entrySearchFilter, entryPageSize, loadEntries])
 
+  // Keep the silent-refetch closure current so the WS subscription (bound once
+  // per book) always refetches the page/sort/filter the user is actually viewing.
+  useEffect(() => {
+    liveRefetchRef.current = () => {
+      if (!selectedBookId) return
+      void loadEntries(selectedBookId, entryPage, entrySortBy, entrySortDir, entrySearchFilter.trim(), entryPageSize, { silent: true })
+    }
+  })
+
+  const scheduleLiveRefetch = useCallback(() => {
+    clearTimeout(liveRefetchTimer.current)
+    liveRefetchTimer.current = setTimeout(() => liveRefetchRef.current(), 250)
+  }, [])
+
+  // Reflect world-book changes made elsewhere (another tab/device, or a Spindle
+  // extension) into the open editor. WORLD_BOOK_ENTRY_CHANGED carries the full
+  // entry, so a visible entry is patched in place — safe because the entry editor
+  // keeps edited text in id-keyed local state and won't re-sync a same-id patch.
+  // Unknown entries (newly created / on another page) and structural book changes
+  // (reorder, bulk ops) trigger a silent refetch of the visible page instead.
+  useEffect(() => {
+    if (!selectedBookId) return
+    const isSelfEcho = (id: string) => {
+      const ts = recentLocalWrites.current.get(id)
+      if (ts == null) return false
+      if (Date.now() - ts > SELF_ECHO_WINDOW_MS) {
+        recentLocalWrites.current.delete(id)
+        return false
+      }
+      return true
+    }
+    const offEntryChanged = wsClient.on(EventType.WORLD_BOOK_ENTRY_CHANGED, (p: WorldBookEntryChangedPayload) => {
+      if (!p?.entry || p.worldBookId !== selectedBookId || isSelfEcho(p.id)) return
+      if (!entriesRef.current.some((e) => e.id === p.id)) {
+        scheduleLiveRefetch()
+        return
+      }
+      setEntries((cur) => cur.map((e) => (e.id === p.id ? p.entry : e)))
+    })
+    const offEntryDeleted = wsClient.on(EventType.WORLD_BOOK_ENTRY_DELETED, (p: WorldBookEntryDeletedPayload) => {
+      if (!p?.id || p.worldBookId !== selectedBookId) return
+      if (!entriesRef.current.some((e) => e.id === p.id)) return
+      setEntries((cur) => cur.filter((e) => e.id !== p.id))
+      setEntryTotal((tot) => Math.max(0, tot - 1))
+      setSelectedEntryId((cur) => (cur === p.id ? null : cur))
+      setSelectedIds((cur) => cur.filter((id) => id !== p.id))
+    })
+    const offBookChanged = wsClient.on(EventType.WORLD_BOOK_CHANGED, (p: WorldBookChangedPayload) => {
+      if (p?.id !== selectedBookId) return
+      scheduleLiveRefetch()
+    })
+    return () => {
+      offEntryChanged()
+      offEntryDeleted()
+      offBookChanged()
+      clearTimeout(liveRefetchTimer.current)
+    }
+  }, [selectedBookId, scheduleLiveRefetch])
+
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => entries.some((entry) => entry.id === id)))
   }, [entries])
@@ -464,6 +611,7 @@ export default function WorldBookEntriesSection({
 
   const updateEntry = useCallback((entryId: string, updates: Record<string, any>) => {
     setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...updates } : entry)))
+    recentLocalWrites.current.set(entryId, Date.now())
     void worldBooksApi.updateEntry(selectedBookId, entryId, updates)
       .then(async () => {
         await refreshVectorSummary()
@@ -475,6 +623,7 @@ export default function WorldBookEntriesSection({
 
   const debouncedUpdateEntry = useCallback((entryId: string, updates: Record<string, any>) => {
     setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...updates } : entry)))
+    recentLocalWrites.current.set(entryId, Date.now())
     const key = `${entryId}:${Object.keys(updates).sort().join(',')}`
     clearTimeout(entryTimers.current[key])
     entryTimers.current[key] = setTimeout(() => {
@@ -494,6 +643,7 @@ export default function WorldBookEntriesSection({
       key: [],
       content: '',
     })
+    recentLocalWrites.current.set(entry.id, Date.now())
     setSelectedEntryId(entry.id)
     setEntryPage(1)
     await loadEntries(selectedBookId, 1, entrySortBy, entrySortDir, entrySearchFilter.trim(), entryPageSize)
@@ -654,7 +804,12 @@ export default function WorldBookEntriesSection({
     })
   }, [entrySortBy, entrySortDir, persistViewPref, selectedBookId])
 
-  const handleDragEnd = useCallback(async ({ active, over }: any) => {
+  const handleDragStart = useCallback(({ active }: DragStartEvent) => {
+    setActiveDragId(String(active.id))
+  }, [])
+
+  const handleDragEnd = useCallback(async ({ active, over }: DragEndEvent) => {
+    setActiveDragId(null)
     if (!dragEnabled || !over || active.id === over.id) return
     const oldIndex = entries.findIndex((entry) => entry.id === active.id)
     const newIndex = entries.findIndex((entry) => entry.id === over.id)
@@ -672,6 +827,7 @@ export default function WorldBookEntriesSection({
   const selectedEntry = contextMenu ? entries.find((entry) => entry.id === contextMenu.entryId) ?? null : null
   const selectedTypeEntry = typeMenu ? entries.find((entry) => entry.id === typeMenu.entryId) ?? null : null
   const selectedPositionEntry = positionMenu ? entries.find((entry) => entry.id === positionMenu.entryId) ?? null : null
+  const activeDragEntry = activeDragId ? entries.find((entry) => entry.id === activeDragId) ?? null : null
   const contextMenuItems: ContextMenuEntry[] = selectedEntry
     ? [
         {
@@ -783,7 +939,7 @@ export default function WorldBookEntriesSection({
     : []
 
   return (
-    <>
+    <div className={styles.section}>
       <div className={styles.entryListHeader}>
         <span className={styles.entryListTitle}>{te('entriesTitle', { count: entryTotal })}</span>
         <div className={styles.toolbarActions}>
@@ -964,46 +1120,93 @@ export default function WorldBookEntriesSection({
         <div className={styles.emptyState}>{te('loading')}</div>
       ) : (
         <>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <SortableContext items={entries.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
-              <div className={styles.entryList}>
-                {entries.map((entry) => (
-                  <SortableEntryRow
-                    key={entry.id}
-                    entry={entry}
-                    expanded={selectedEntryId === entry.id}
-                    dragEnabled={dragEnabled}
-                    selectMode={selectMode}
-                    selected={selectedIds.includes(entry.id)}
-                    onToggleExpand={() => setSelectedEntryId((current) => (current === entry.id ? null : entry.id))}
-                    onToggleSelect={() => handleToggleSelect(entry.id)}
-                    onUpdate={updateEntry}
-                    onDebouncedUpdate={debouncedUpdateEntry}
-                    onOpenMenu={(entryId, position) => setContextMenu({ entryId, position })}
-                    onOpenTypeMenu={(entryId, position) => setTypeMenu({ entryId, position })}
-                    onOpenPositionMenu={(entryId, position) => setPositionMenu({ entryId, position })}
-                  />
-                ))}
-                {entries.length === 0 && (
+              <div ref={entryListRef} className={styles.entryList}>
+                {entries.length === 0 ? (
                   <div className={styles.emptyState}>
                     {entrySearchFilter.trim() ? te('noMatch') : te('empty')}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      height: entryVirtualizer.getTotalSize(),
+                      position: 'relative',
+                    }}
+                  >
+                    {entryVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const entry = entries[virtualRow.index]
+                      if (!entry) return null
+                      return (
+                        <div
+                          key={virtualRow.key}
+                          data-index={virtualRow.index}
+                          data-entry-id={entry.id}
+                          ref={entryVirtualizer.measureElement}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            paddingBottom: 8,
+                            transform: `translateY(${virtualRow.start}px)`,
+                          }}
+                        >
+                          <SortableEntryRow
+                            entry={entry}
+                            expanded={selectedEntryId === entry.id}
+                            dragEnabled={dragEnabled}
+                            selectMode={selectMode}
+                            selected={selectedIds.includes(entry.id)}
+                            onToggleExpand={() => setSelectedEntryId((current) => (current === entry.id ? null : entry.id))}
+                            onToggleSelect={() => handleToggleSelect(entry.id)}
+                            onUpdate={updateEntry}
+                            onDebouncedUpdate={debouncedUpdateEntry}
+                            onOpenMenu={(entryId, position) => setContextMenu({ entryId, position })}
+                            onOpenTypeMenu={(entryId, position) => setTypeMenu({ entryId, position })}
+                            onOpenPositionMenu={(entryId, position) => setPositionMenu({ entryId, position })}
+                          />
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
             </SortableContext>
+            <DragOverlay dropAnimation={null}>
+              {activeDragEntry && (
+                <EntryRowContent
+                  entry={activeDragEntry}
+                  expanded={selectedEntryId === activeDragEntry.id}
+                  dragEnabled={dragEnabled}
+                  selectMode={selectMode}
+                  selected={selectedIds.includes(activeDragEntry.id)}
+                  onToggleExpand={() => setSelectedEntryId((current) => (current === activeDragEntry.id ? null : activeDragEntry.id))}
+                  onToggleSelect={() => handleToggleSelect(activeDragEntry.id)}
+                  onUpdate={updateEntry}
+                  onDebouncedUpdate={debouncedUpdateEntry}
+                  onOpenMenu={(entryId, position) => setContextMenu({ entryId, position })}
+                  onOpenTypeMenu={(entryId, position) => setTypeMenu({ entryId, position })}
+                  onOpenPositionMenu={(entryId, position) => setPositionMenu({ entryId, position })}
+                  isDragging
+                />
+              )}
+            </DragOverlay>
           </DndContext>
 
           {entryPageSize !== 'all' && entryTotalPages > 1 && (
-            <Pagination
-              currentPage={entryPage}
-              totalPages={entryTotalPages}
-              onPageChange={(page) => {
-                setEntryPage(page)
-                setSelectedEntryId(null)
-                setSelectedIds([])
-              }}
-              totalItems={entryTotal}
-            />
+            <div className={styles.entryPagination}>
+              <Pagination
+                currentPage={entryPage}
+                totalPages={entryTotalPages}
+                onPageChange={(page) => {
+                  setEntryPage(page)
+                  setSelectedEntryId(null)
+                  setSelectedIds([])
+                }}
+                totalItems={entryTotal}
+              />
+            </div>
           )}
         </>
       )}
@@ -1169,6 +1372,6 @@ export default function WorldBookEntriesSection({
           </div>
         </ModalShell>
       )}
-    </>
+    </div>
   )
 }

@@ -33,6 +33,9 @@ import { registerChatUtilsMacros } from "./definitions/chat-utils";
 import { registerRegexRefMacros } from "./definitions/regex-ref";
 import { registerDatabankMacros } from "./definitions/databank";
 import { registerPromptVarMacros } from "./definitions/prompt-vars";
+import { registerMultiplayerMacros } from "./definitions/multiplayer";
+import { registerIterationMacros } from "./definitions/iteration";
+import { registerListMacros } from "./definitions/lists";
 
 let initialized = false;
 
@@ -64,4 +67,7 @@ export function initMacros(): void {
   registerRegexRefMacros();
   registerDatabankMacros();
   registerPromptVarMacros();
+  registerMultiplayerMacros();
+  registerIterationMacros();
+  registerListMacros();
 }

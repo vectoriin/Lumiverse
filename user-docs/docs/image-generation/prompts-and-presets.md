@@ -1,3 +1,7 @@
+---
+title: Prompts & Presets
+---
+
 # Prompts & Presets
 
 Lumiverse builds the final image prompt from three things: the **prompt mode** you've chosen, any **preset** you've loaded, and the **character / persona snippets** bound to the active chat. This page covers all three and the **prompt preview** flow you can use to inspect the result before you generate.

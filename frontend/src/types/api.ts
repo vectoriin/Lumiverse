@@ -21,6 +21,13 @@ export interface Character {
   updated_at: number;
 }
 
+export interface CharacterPerspectiveLayer {
+  id: string;
+  image_id: string;
+  label?: string;
+  intensity: number;
+}
+
 export interface CreateCharacterInput {
   name: string;
   description?: string;
@@ -92,6 +99,7 @@ export interface GroupedRecentChat {
   character_name: string;
   character_avatar_path: string | null;
   character_image_id: string | null;
+  character_perspective_layers?: CharacterPerspectiveLayer[];
   latest_chat_id: string;
   latest_chat_name: string;
   updated_at: number;
@@ -168,6 +176,8 @@ export interface MessageAttachment {
   original_filename: string;
   width?: number;
   height?: number;
+  /** Image-only: bounded WebP data URL for multiplayer peers that cannot fetch the host's image row. */
+  relay_preview_url?: string;
   /**
    * Audio-only: the message swipe this audio was generated for. The
    * player is only visible when `message.swipe_id` matches. Undefined
@@ -289,17 +299,15 @@ export interface NanoGptUsageWindow {
   remaining: number
   percentUsed: number
   resetAt: number | null
+  limit: number | null
 }
 
 export interface NanoGptSubscriptionUsage {
   active: boolean
-  enforceDailyLimit: boolean
-  limits: {
-    daily: number | null
-    monthly: number | null
-  }
-  daily: NanoGptUsageWindow | null
-  monthly: NanoGptUsageWindow | null
+  allowOverage: boolean
+  dailyInputTokens: NanoGptUsageWindow | null
+  weeklyInputTokens: NanoGptUsageWindow | null
+  dailyImages: NanoGptUsageWindow | null
   period: {
     currentPeriodEnd: string | null
   }
@@ -1116,7 +1124,7 @@ export interface ActivatedWorldInfoEntry {
   keys: string[];
   source: 'keyword' | 'vector';
   score?: number;
-  bookSource?: 'character' | 'persona' | 'chat' | 'global';
+  bookSource?: 'character' | 'persona' | 'chat' | 'global' | 'peer';
   bookId?: string;
 }
 

@@ -833,7 +833,7 @@ function appendBaseRole(role: string): "user" | "assistant" {
  * reappear on re-enable. On a variable-name collision across enabled blocks the
  * last block in prompt_order wins; the UI warns creators about shadowing.
  */
-function resolvePromptVariables(
+export function resolvePromptVariables(
   env: MacroEnv,
   blocks: PromptBlock[],
   preset: Preset | null,
@@ -878,11 +878,9 @@ function resolvePromptVariables(
   // in-prompt {{setvar::name::…}} can still override mid-assembly (setvar
   // wins because it runs later during block evaluation).
   //
-  // Preset-variable names are AUTHORITATIVE — they always overwrite any
-  // pre-seeded entry from chat.metadata.macro_variables.local. Without the
-  // overwrite, a value persisted from a prior generation would shadow the
-  // user's current Configure-Prompt-Variables choice, which is the exact bug
-  // chat-macro-render.service.ts:localWithoutPresetVars also defends against.
+  // Local variables are transient per assembly, so this is the only seed source
+  // for preset variables. In-prompt {{setvar::name::...}} can still override the
+  // value later in the same assembly, but nothing is rehydrated from chat state.
   for (const [name, value] of Object.entries(values)) {
     env.variables.local.set(name, String(value));
   }
@@ -1012,6 +1010,48 @@ type MultiplayerPersonaProvider = (chatId: string) => Array<{ name: string; desc
 let multiplayerPersonaProvider: MultiplayerPersonaProvider | null = null;
 export function setMultiplayerPersonaProvider(fn: MultiplayerPersonaProvider | null): void {
   multiplayerPersonaProvider = fn;
+}
+
+// ── Multiplayer participant lorebooks ──
+// Each peer can have an attached persona lorebook (world book) that lives on
+// THEIR instance — the host has no row for it. The multiplayer service relays a
+// sanitized copy and materializes it into runtime world-info entries, exposed
+// here so assembly can splice them into the normal world-info pipeline (keyword
+// scan / positions / budgeting all apply unchanged). Returns null for non-room
+// chats. `bookIds` are synthetic per-participant ids for source attribution.
+type MultiplayerWorldInfoProvider = (
+  chatId: string,
+) => { entries: import("../types/world-book").WorldBookEntry[]; bookIds: string[] } | null;
+let multiplayerWorldInfoProvider: MultiplayerWorldInfoProvider | null = null;
+export function setMultiplayerWorldInfoProvider(fn: MultiplayerWorldInfoProvider | null): void {
+  multiplayerWorldInfoProvider = fn;
+}
+
+// ── Multiplayer room macro context ──
+// Registered by the multiplayer service (initMultiplayer). Returns a live
+// snapshot of the room (roster, host, whose turn it is) so the multiplayer
+// macros — {{isMultiplayer}}, {{players}}, {{playerCount}}, etc. — can read it
+// off env.extra. Same inverted dependency as the providers above: assembly never
+// imports the multiplayer service, so there is no import cycle. Null for
+// non-room chats.
+export interface MultiplayerMacroContext {
+  /** Number of active participants (host + peers). */
+  playerCount: number;
+  /** Active participant display names in join order (host first). */
+  playerNames: string[];
+  /** Host's display name ("" if somehow absent). */
+  hostName: string;
+  /** Display name of whoever's turn it is, or "" (freeform / unknown). */
+  currentTurnName: string;
+  /** Room turn strategy ("round_robin" | "freeform"). */
+  turnStrategy: string;
+}
+type MultiplayerMacroContextProvider = (chatId: string) => MultiplayerMacroContext | null;
+let multiplayerMacroContextProvider: MultiplayerMacroContextProvider | null = null;
+export function setMultiplayerMacroContextProvider(
+  fn: MultiplayerMacroContextProvider | null,
+): void {
+  multiplayerMacroContextProvider = fn;
 }
 
 export async function assemblePrompt(
@@ -1244,9 +1284,12 @@ export async function assemblePrompt(
         .join(" ");
       const emotionalContext = buildEmotionalContext(recentContent);
 
-      const excludeMessageIds = ctx.excludeMessageId
-        ? [ctx.excludeMessageId]
-        : undefined;
+      const excludeMessageIds = buildMemoryExcludeMessageIds(
+        messages,
+        effective,
+        cortexPerChatOverrides,
+        ctx.excludeMessageId,
+      );
       const mainQueryParams = {
         chatId: ctx.chatId,
         userId: ctx.userId,
@@ -1282,7 +1325,7 @@ export async function assemblePrompt(
             memoryCortex.primeCortexCache(
               ctx.chatId,
               mainResult,
-              excludeMessageIds ?? [],
+              excludeMessageIds,
             );
           }
           if (linkedResult) {
@@ -1428,7 +1471,17 @@ export async function assemblePrompt(
       globalWorldBooks,
       chatWorldBookIds,
     );
-  const wiEntries = wiSources.entries;
+  let wiEntries = wiSources.entries;
+  // Multiplayer: splice in active peers' attached persona lorebooks (relayed
+  // from each peer's own instance, materialized into runtime entries). No-op for
+  // single-user chats (provider returns null). These flow through the normal
+  // interceptor + activation path below, so keyword matching / positions / token
+  // budgeting all apply identically to host-owned world info.
+  const mpWorldInfo = multiplayerWorldInfoProvider?.(ctx.chatId);
+  if (mpWorldInfo && mpWorldInfo.entries.length > 0) {
+    wiEntries = wiEntries.concat(mpWorldInfo.entries);
+    for (const bookId of mpWorldInfo.bookIds) wiSources.bookSourceMap.set(bookId, "peer");
+  }
   const wiState: WiState = (chat.metadata?.wi_state as WiState) ?? {};
   const worldInfoSettings =
     pf?.allSettings.get("worldInfoSettings") ??
@@ -1633,6 +1686,7 @@ export async function assemblePrompt(
     messages,
     generationType: ctx.generationType,
     connection,
+    rejectedSwipe: ctx.rejectedSwipe,
     groupCharacterNames,
     groupNotMutedNames,
     targetCharacterId: ctx.targetCharacterId,
@@ -1641,6 +1695,10 @@ export async function assemblePrompt(
       : undefined,
     signal: ctx.signal,
   });
+  if (preset) {
+    macroEnv.extra.presetId = preset.id;
+    macroEnv.extra.presetMetadata = preset.metadata || {};
+  }
 
   // Prompt variables — resolve creator-defined schemas + end-user overrides and
   // surface them on env.extra so {{var::name}} / {{hasVar::name}} / {{varDefault::name}}
@@ -1687,6 +1745,14 @@ export async function assemblePrompt(
   const themeVal = settingsMap.get("theme");
   if (themeVal) {
     macroEnv.extra.theme = { mode: themeVal.mode ?? "dark" };
+  }
+
+  // Populate multiplayer room state for {{isMultiplayer}} / {{players}} /
+  // {{playerCount}} / {{hostName}} / {{currentPlayer}}. Resolved via the
+  // inverted provider so assembly stays decoupled from the multiplayer service.
+  const multiplayerContext = multiplayerMacroContextProvider?.(ctx.chatId) ?? null;
+  if (multiplayerContext) {
+    macroEnv.extra.multiplayer = multiplayerContext;
   }
 
   // Populate Lumia / Loom / Council / OOC / Sovereign Hand context for macros
@@ -1744,19 +1810,17 @@ export async function assemblePrompt(
 
   if (cortexConfig.enabled) {
     // Fast path: warm cache from a previous generation (synchronous, no I/O).
-    // On regenerate/swipe the excluded message has real content we must not
-    // re-inject, so require the cached entry to have been warmed with that
-    // message excluded; otherwise fall through to exclusion-aware retrieval.
-    // Normal/continue sends exclude only an empty staged message, so they read
-    // the warm cache ungated to avoid a needless cold retrieval.
-    const requireExcludedMessageId =
-      (ctx.generationType === "regenerate" || ctx.generationType === "swipe") &&
-      ctx.excludeMessageId
-        ? ctx.excludeMessageId
-        : undefined;
+    // Require the cached entry to have excluded the current live-context tail
+    // (and regen target, if any), otherwise it may re-inject recent messages as
+    // long-term memory.
     cortexResult = memoryCortex.getCachedCortexResult(
       ctx.chatId,
-      requireExcludedMessageId,
+      buildMemoryExcludeMessageIds(
+        messages,
+        chatMemSettings ?? embeddingsSvc.DEFAULT_CHAT_MEMORY_SETTINGS,
+        perChatOverrides,
+        ctx.excludeMessageId,
+      ),
     );
 
     if (cortexResult && cortexResult.memories.length > 0) {
@@ -3359,7 +3423,7 @@ export function populateLumiaLoomContext(
 // Helpers
 // ---------------------------------------------------------------------------
 
-export type BookSource = "character" | "persona" | "chat" | "global";
+export type BookSource = "character" | "persona" | "chat" | "global" | "peer";
 
 /**
  * Collect all WorldBookEntry[] from character extensions + persona attached book.
@@ -4386,6 +4450,24 @@ async function buildQueryText(
       );
     }
   }
+}
+
+function buildMemoryExcludeMessageIds(
+  messages: Message[],
+  settings: import("./embeddings.service").ChatMemorySettings,
+  perChatOverrides?: import("./embeddings.service").PerChatMemoryOverrides | null,
+  explicitMessageId?: string,
+): string[] {
+  const rawWindow = perChatOverrides?.exclusionWindow ?? settings.exclusionWindow;
+  const exclusionWindow = Math.max(5, Math.min(50, rawWindow));
+  const ids = new Set<string>();
+  for (const message of messages
+    .filter((m) => !m.extra?.hidden && m.content.trim().length > 0)
+    .slice(-exclusionWindow)) {
+    ids.add(message.id);
+  }
+  if (explicitMessageId) ids.add(explicitMessageId);
+  return [...ids];
 }
 
 function formatMemoryOutput(
@@ -5561,6 +5643,9 @@ function buildParameters(
  *                thinking on `:thinking`-suffixed models when the user disables
  *                API reasoning (the `:thinking` suffix activates reasoning
  *                server-side regardless of `reasoning_effort`).
+ * - Bedrock:     reasoning_effort (top-level OpenAI Chat Completions string).
+ *                Bedrock maps it to each model's native mechanism (gpt-oss
+ *                reasoning, Claude thinking, etc.). Valid: none/minimal/low/medium/high.
  * - Moonshot:    thinking: { type: "enabled" } — toggle-only, effort ignored
  * - Z.AI:        thinking: { type: "enabled" } — toggle-only, effort ignored
  * - Others:      reasoning: { effort } (generic OpenAI-compatible passthrough)
@@ -5694,6 +5779,19 @@ export function injectReasoningParams(
     if (!params.thinking) {
       params.thinking = { type: "enabled" };
     }
+  } else if (providerName === "bedrock") {
+    // Bedrock's OpenAI-compatible Chat Completions endpoint exposes a single
+    // top-level `reasoning_effort` string that it maps to each model family's
+    // native mechanism (gpt-oss reasoning; Claude thinking.budget_tokens or
+    // adaptive thinking; etc.). Valid values: none/minimal/low/medium/high — our
+    // higher tiers (xhigh/max) clamp down to high.
+    if (params.reasoning_effort === undefined) {
+      const validEfforts = new Set(["none", "minimal", "low", "medium", "high"]);
+      params.reasoning_effort = validEfforts.has(effort) ? effort : "high";
+    }
+    // The generic `reasoning: { effort }` object isn't part of the Chat
+    // Completions schema Bedrock accepts — make sure it isn't sent.
+    delete params.reasoning;
   } else {
     // Generic OpenAI-compatible providers (OpenAI, xAI, etc.)
     // reasoning: { effort } is the standard format for reasoning-capable models.
@@ -5739,6 +5837,13 @@ export function applyProviderReasoningOffSwitch(
   }
 
   delete params.output_config;
+
+  if (providerName === "bedrock") {
+    // Bedrock reasoning models (gpt-oss, Claude, …) default to low reasoning
+    // when `reasoning_effort` is omitted, so explicitly send "none" to disable.
+    params.reasoning_effort = "none";
+    return;
+  }
 
   if (providerName === "deepseek") {
     params.thinking = { type: "disabled" };

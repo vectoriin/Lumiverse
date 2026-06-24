@@ -1,3 +1,7 @@
+---
+title: Installation
+---
+
 # Installation
 
 Lumiverse runs on your own machine. It needs **Bun** (a fast JavaScript runtime) and takes about two minutes to set up.
