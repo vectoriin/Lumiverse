@@ -358,4 +358,53 @@ describe("bunInstallCmd", () => {
       }
     );
   });
+
+  test("keeps grun as the linker wrapper for native Termux installs", () => {
+    withEnv(
+      {
+        LUMIVERSE_IS_TERMUX: "true",
+        LUMIVERSE_IS_PROOT: undefined,
+        LUMIVERSE_BUN_METHOD: "grun",
+        LUMIVERSE_BUN_PATH: "/usr/bin/bun",
+      },
+      () => {
+        expect(bunInstallCmd()).toEqual([
+          "proot",
+          "--link2symlink",
+          "-0",
+          "grun",
+          "/usr/bin/bun",
+          "install",
+          "--ignore-scripts",
+          "--backend=copyfile",
+        ]);
+      }
+    );
+  });
+
+  test("falls back to the explicit glibc loader when proot is the only working method", () => {
+    withEnv(
+      {
+        LUMIVERSE_IS_TERMUX: "true",
+        LUMIVERSE_IS_PROOT: undefined,
+        LUMIVERSE_BUN_METHOD: "proot",
+        LUMIVERSE_BUN_PATH: "/usr/bin/bun",
+        PREFIX: "/data/data/com.termux/files/usr",
+      },
+      () => {
+        expect(bunInstallCmd()).toEqual([
+          "proot",
+          "--link2symlink",
+          "-0",
+          "/data/data/com.termux/files/usr/glibc/lib/ld-linux-aarch64.so.1",
+          "--library-path",
+          "/data/data/com.termux/files/usr/glibc/lib",
+          "/usr/bin/bun",
+          "install",
+          "--ignore-scripts",
+          "--backend=copyfile",
+        ]);
+      }
+    );
+  });
 });

@@ -85,6 +85,11 @@ _proot_bun() {
   if [[ "$TERMUX_BUN_METHOD" == "direct" ]]; then
     # bun-termux wrapper handles linker; proot adds syscall interception
     proot --link2symlink -0 "$bun_path" "$@"
+  elif [[ "$TERMUX_BUN_METHOD" == "grun" ]]; then
+    # Keep using grun inside proot. Reconstructing ld.so manually can drift
+    # from the user's installed glibc-runner layout and pass `--version`
+    # probes while still failing the real `bun install` path.
+    proot --link2symlink -0 grun "$bun_path" "$@"
   elif [[ -x "$glibc_ld" ]]; then
     # Explicit glibc linker + proot for full coverage
     proot --link2symlink -0 "$glibc_ld" --library-path "${PREFIX}/glibc/lib" "$bun_path" "$@"
@@ -92,6 +97,49 @@ _proot_bun() {
     # Last resort — hope proot alone handles it
     proot --link2symlink -0 "$bun_path" "$@"
   fi
+}
+
+rebuild_bun_termux_wrapper() {
+  local repo="$HOME/.bun-termux"
+
+  if [[ -d "$repo" ]]; then
+    info "Rebuilding bun-termux wrapper..."
+    if [[ -d "$repo/.git" ]] && ! (cd "$repo" && git pull --ff-only); then
+      warn "Could not update bun-termux checkout — rebuilding the existing copy"
+    fi
+    (cd "$repo" && make && make install)
+    return
+  fi
+
+  info "Installing bun-termux wrapper..."
+  git clone https://github.com/Happ1ness-dev/bun-termux.git "$repo" \
+    && (cd "$repo" && make && make install)
+}
+
+verify_termux_bun_install_path() {
+  [[ "$IS_TERMUX" == true ]] || return 0
+
+  # Native Termux always installs packages through _proot_bun, so validate the
+  # exact wrapper chain we will later use for `bun install`.
+  if (_proot_bun --version) &>/dev/null 2>&1; then
+    return 0
+  fi
+
+  warn "Native Termux Bun probe failed for the proot-wrapped install path"
+  warn "grun/direct version checks may pass even when bun install will not"
+
+  if rebuild_bun_termux_wrapper && _resolve_bun && (_proot_bun --version) &>/dev/null 2>&1; then
+    ok "Recovered a working native Termux Bun install path"
+    return 0
+  fi
+
+  err "Native Termux Bun is not install-capable in the current shell."
+  err "Lumiverse needs a Bun path that survives the proot-wrapped install probe."
+  err "This usually means bun-termux or glibc-runner is stale or partially installed."
+  err "Repair it on native Termux, then retry:"
+  err "  ./start.sh --upgrade-bun"
+  err "  pkg reinstall glibc-runner proot"
+  exit 1
 }
 
 # ─── Parse arguments ─────────────────────────────────────────────────────────
@@ -144,6 +192,11 @@ _resolve_bun() {
   export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
   export PATH="$BUN_INSTALL/bin:$PATH"
   [[ -f "$BUN_INSTALL/env" ]] && source "$BUN_INSTALL/env"
+
+  if [[ "$IS_TERMUX" == true ]]; then
+    TERMUX_BUN_METHOD=""
+    TERMUX_BUN_PATH=""
+  fi
 
   # Build list of candidate paths
   local candidates=()
@@ -357,6 +410,7 @@ ALIASES
 ensure_bun() {
   # ── Try to resolve an existing Bun installation ──────────────────────────
   if _resolve_bun; then
+    verify_termux_bun_install_path
     # Capture only the first line — bun may dump its full help text to stdout
     # through some execution methods, and we don't want that in the status line
     local ver
@@ -386,6 +440,7 @@ ensure_bun() {
 
   # ── Make bun available in this session ──────────────────────────────────
   if _resolve_bun; then
+    verify_termux_bun_install_path
     local ver
     ver="$(_bun --version 2>/dev/null | head -1 || echo 'unknown')"
     case "$TERMUX_BUN_METHOD" in
@@ -447,6 +502,9 @@ upgrade_bun_if_requested() {
       return 0
     fi
 
+    _resolve_bun
+    verify_termux_bun_install_path
+
     local after
     after="$(_bun --version 2>/dev/null || echo unknown)"
     ok "Bun upgraded via bun-termux: $before -> $after"
@@ -494,7 +552,7 @@ run_setup_if_needed() {
     if [[ ! -f "$identity_file" || ! -f "$credentials_file" ]]; then
       err "Setup wizard did not create the required identity and owner credentials."
       err "Files expected at: $identity_file and $credentials_file"
-      err "Try running the wizard manually:  bun run setup"
+      err "Try running the wizard manually:  ./start.sh --setup"
       exit 1
     fi
   fi

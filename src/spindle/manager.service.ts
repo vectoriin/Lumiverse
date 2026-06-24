@@ -1058,7 +1058,14 @@ export function bunInstallCmd(): string[] {
     return ["proot", "--link2symlink", "-0", bunPath, "install", "--ignore-scripts", "--backend=copyfile"];
   }
 
-  // grun/proot: explicit glibc linker + proot
+  if (method === "grun") {
+    // Keep using the user's working grun wrapper inside proot instead of
+    // reconstructing ld.so arguments ourselves. Native Termux installs can
+    // otherwise pass `grun bun --version` and still fail the real install path.
+    return ["proot", "--link2symlink", "-0", "grun", bunPath, "install", "--ignore-scripts", "--backend=copyfile"];
+  }
+
+  // proot/unknown: explicit glibc linker + proot
   return [
     "proot", "--link2symlink", "-0",
     glibcLd, "--library-path", `${prefix}/glibc/lib`,
