@@ -2179,39 +2179,12 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
                 title={title}
                 aria-label={title}
               >
-                <IconPlaylistAdd size={14} />
-                {chatAddonOverrideCount > 0 && <span className={styles.badge}>{chatAddonOverrideCount}</span>}
+                <Layers size={14} />
+                {hasSelection && <span className={styles.badge}>{selectionCount}</span>}
               </button>
-            )}
-            <button
-              type="button"
-              className={clsx(
-                styles.actionBtn,
-                openPopover === 'guides' && styles.actionBtnActive,
-                activeGuideCount > 0 && styles.actionBtnHasSelection,
-              )}
-              onClick={() => setOpenPopover((p) => (p === 'guides' ? null : 'guides'))}
-              title={t('input.guidedGenerations')}
-            >
-              <Compass size={14} />
-              {activeGuideCount > 0 && <span className={styles.badge}>{activeGuideCount}</span>}
-            </button>
-            <button
-              type="button"
-              className={clsx(styles.actionBtn, openPopover === 'quick' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'quick' ? null : 'quick'))}
-              title={t('input.quickReplies')}
-            >
-              <MessageSquareQuote size={14} />
-            </button>
-            <button
-              type="button"
-              className={clsx(styles.actionBtn, openPopover === 'tools' && styles.actionBtnActive)}
-              onClick={() => setOpenPopover((p) => (p === 'tools' ? null : 'tools'))}
-              title={t('input.tools')}
-            >
-              <Wrench size={14} />
-            </button>
+            )
+          })()}
+          {activePersonaId && (
             <button
               type="button"
               className={clsx(
@@ -2223,11 +2196,16 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
               title={chatAddonOverrideCount > 0 ? t('input.personaAddonsCustomized') : t('input.personaAddons')}
             >
               <IconPlaylistAdd size={14} />
+              {chatAddonOverrideCount > 0 && <span className={styles.badge}>{chatAddonOverrideCount}</span>}
             </button>
           )}
           <button
             type="button"
-            className={clsx(styles.actionBtn, openPopover === 'guides' && styles.actionBtnActive)}
+            className={clsx(
+              styles.actionBtn,
+              openPopover === 'guides' && styles.actionBtnActive,
+              activeGuideCount > 0 && styles.actionBtnHasSelection,
+            )}
             onClick={() => setOpenPopover((p) => (p === 'guides' ? null : 'guides'))}
             title={t('input.guidedGenerations')}
           >
