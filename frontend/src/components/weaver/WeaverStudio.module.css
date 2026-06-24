@@ -754,6 +754,17 @@
   outline: none;
 }
 
+.dreamScroll {
+  display: flex;
+}
+
+.paneScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
 .dreamWrap {
   display: flex;
   flex-direction: column;
@@ -2833,5 +2844,78 @@
   }
   .tuningInput::placeholder {
     text-align: left;
+  }
+}
+
+@media (max-width: 600px) {
+  .overlay {
+    padding: 0;
+  }
+  .shell {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+  .panel {
+    padding: 16px 16px 0;
+  }
+  .footer {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+  }
+  .stageHead {
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  /* Interview / bible / render: answer area first, progress rail below it. */
+  .work {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .workMain {
+    order: 1;
+  }
+  .workRail {
+    order: 2;
+    position: static;
+    padding-right: 0;
+    margin-right: 0;
+    border-right: none;
+    padding-top: 18px;
+    border-top: 1px solid var(--lumiverse-border-light, rgba(255, 255, 255, 0.075));
+  }
+
+  .dreamScroll {
+    display: block;
+  }
+  .dreamWrap {
+    display: block;
+    height: auto;
+    flex: none;
+  }
+  .dreamGrid {
+    display: block;
+  }
+  .dreamEdit {
+    display: block;
+    min-width: 0;
+  }
+  .dreamEdit .field {
+    flex: none;
+    min-height: 180px;
+  }
+  .dreamRail {
+    padding-left: 0;
+    margin-left: 0;
+    border-left: none;
+    margin-top: 24px;
+    padding-top: 22px;
+    border-top: 1px solid var(--lumiverse-border-light, rgba(255, 255, 255, 0.075));
   }
 }
