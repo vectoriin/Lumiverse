@@ -1526,6 +1526,7 @@ export interface WeaverSlice {
   weaverStateSessionId: string | null
   loadWeaverInterview: (sessionId: string) => Promise<void>
   nextWeaverQuestion: (sessionId: string, steer?: string) => Promise<void>
+  cancelWeaverQuestion: (sessionId: string, message: string) => void
   answerWeaverQuestion: (
     sessionId: string,
     input: { question: WeaverInterviewQuestion; kind: WeaverResponseKind; content: string; steer?: string },
