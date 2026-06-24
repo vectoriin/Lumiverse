@@ -685,6 +685,7 @@ start_backend() {
   if [[ "$USE_RUNNER" == true ]] && [[ -t 1 ]]; then
     # Interactive terminal — use the visual runner (fall back to plain if it crashes)
     local runner_args=()
+    local runner_status=0
     if [[ "$MODE" == "dev" || "$AUTO_OPEN" == true ]]; then
       runner_args+=("--")
     fi
@@ -694,10 +695,16 @@ start_backend() {
     if [[ "$AUTO_OPEN" == true ]]; then
       runner_args+=("--auto-open")
     fi
-    (cd "$BACKEND_DIR" && _bun run scripts/runner.ts "${runner_args[@]}") || {
+    # macOS ships Bash 3.2; under `set -u`, "${runner_args[@]}" errors if empty.
+    if ((${#runner_args[@]})); then
+      (cd "$BACKEND_DIR" && _bun run scripts/runner.ts "${runner_args[@]}") || runner_status=$?
+    else
+      (cd "$BACKEND_DIR" && _bun run scripts/runner.ts) || runner_status=$?
+    fi
+    if [[ "$runner_status" -ne 0 ]]; then
       warn "Visual runner failed — falling back to plain mode..."
       USE_RUNNER=false
-    }
+    fi
   fi
 
   if [[ "$USE_RUNNER" != true ]]; then
