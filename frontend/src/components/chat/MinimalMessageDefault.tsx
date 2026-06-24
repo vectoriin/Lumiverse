@@ -2,7 +2,7 @@
  * Default MinimalMessage renderer — the original implementation extracted
  * so it can be used as a fallback when a user override crashes or is disabled.
  */
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { Copy, Pencil, Trash2, EyeOff, Eye, BarChart3, Volume2, Square } from 'lucide-react'
@@ -13,7 +13,7 @@ import { useMessagePlayback } from '@/hooks/useMessagePlayback'
 import useSwipeAction from '@/hooks/useSwipeAction'
 import useSwipeGesture from '@/hooks/useSwipeGesture'
 import { copyTextToClipboard, getSelectionTextWithin } from '@/lib/clipboard'
-import { replay as replaySpindleInjections } from '@/lib/spindle/dom-injection-registry'
+import { scheduleReplay as scheduleSpindleInjectionReplay } from '@/lib/spindle/dom-injection-registry'
 import MessageContent from './MessageContent'
 import MessageEditArea from './MessageEditArea'
 import MessageAttachments from './MessageAttachments'
@@ -200,13 +200,12 @@ export default function MinimalMessageDefault({
 
   const cardRef = useRef<HTMLDivElement>(null)
 
-  // Replay any Spindle extension DOM that was registered against this
-  // message id but lost when the chat virtualizer unmounted the row. See
-  // dom-injection-registry.ts for the full mechanism. useLayoutEffect so
-  // the injection lands in the same paint as the bubble's mount.
-  useLayoutEffect(() => {
+  // Replay extension-owned DOM after paint through the cooperative
+  // Spindle queue so chat switches do not pay for injection re-attachment
+  // during the bubble's synchronous mount path.
+  useEffect(() => {
     if (!cardRef.current) return
-    replaySpindleInjections(message.id, cardRef.current)
+    return scheduleSpindleInjectionReplay(message.id, cardRef.current)
   }, [message.id])
 
   const [contextMenuPos, setContextMenuPos] = useState<ContextMenuPos | null>(null)

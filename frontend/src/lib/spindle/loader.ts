@@ -25,6 +25,7 @@ import { spindleApi } from '@/api/spindle'
 import { charactersApi } from '@/api/characters'
 import { messagesApi } from '@/api/chats'
 import { useStore } from '@/store'
+import { yieldToBrowser } from './browser-scheduler'
 
 interface LoadedExtension {
   id: string
@@ -260,6 +261,7 @@ async function doLoadFrontendExtension(
     const blob = await response.blob()
     const blobUrl = URL.createObjectURL(blob)
 
+    await yieldToBrowser({ when: 'paint' })
     const mod: SpindleFrontendModule = await import(/* @vite-ignore */ blobUrl)
     URL.revokeObjectURL(blobUrl)
 
@@ -845,6 +847,7 @@ async function doLoadFrontendExtension(
     let teardownResult: unknown
     try {
       loadedExtensions.set(extensionId, loaded)
+      await yieldToBrowser({ when: 'paint' })
       teardownResult = mod.setup(context)
     } catch (err) {
       if (loadedExtensions.get(extensionId) === loaded) {

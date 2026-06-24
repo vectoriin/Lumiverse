@@ -12,6 +12,7 @@ import {
   TIMEOUT_BUN_BUILD_MS,
 } from "./lib/constants.js";
 import { spawnAsync } from "./lib/spawn-async.js";
+import { npmCmd } from "./lib/termux-cli.js";
 
 export interface UpdateState {
   available: boolean;
@@ -381,13 +382,12 @@ async function repairTermuxFrontendNativeDeps(frontendDir: string): Promise<void
   if (!isTermuxRuntime() && !isProotRuntime()) return;
 
   log("Repairing Termux frontend native bindings with npm...");
-  await runCommandOrThrow(["npm", "cache", "clean", "--force"], {
+  await runCommandOrThrow(npmCmd(["cache", "clean", "--force"]), {
     cwd: frontendDir,
     timeoutMs: 60_000,
     label: "npm cache clean",
   });
-  await runCommandOrThrow([
-    "npm",
+  await runCommandOrThrow(npmCmd([
     "install",
     "--force",
     "--no-save",
@@ -396,7 +396,7 @@ async function repairTermuxFrontendNativeDeps(frontendDir: string): Promise<void
     "--no-audit",
     "--no-fund",
     ...TERMUX_FRONTEND_NATIVE_DEPS,
-  ], {
+  ]), {
     cwd: frontendDir,
     timeoutMs: TIMEOUT_BUN_INSTALL_MS,
     label: "Termux frontend native binding install",
