@@ -50,7 +50,7 @@ export default function TagFilter({
 
   const activeCount = selectedTags.length + excludedTags.length
 
-  if (allTags.length === 0) return <div className={styles.placeholder} />
+  if (allTags.length === 0 && activeCount === 0) return null
 
   return (
     <div className={styles.container} ref={ref}>
