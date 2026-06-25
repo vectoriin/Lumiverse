@@ -136,7 +136,7 @@ export const charactersApi = {
     if (skipDuplicates) {
       form.append('skip_duplicates', 'true')
     }
-    return upload<BulkImportResult>('/characters/import-bulk', form)
+    return upload<BulkImportResult>('/characters/import-bulk', form, { timeout: 0 })
   },
 
   importTagLibrary(file: File) {
