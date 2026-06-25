@@ -3,6 +3,11 @@ import type { Image } from '@/types/api'
 
 export type ImageSize = 'sm' | 'lg'
 
+export interface ImageListResult {
+  data: Image[]
+  total: number
+}
+
 export interface ThumbnailRebuildProgress {
   total: number
   current: number
@@ -28,11 +33,15 @@ export const imagesApi = {
   uploadWallpaper(file: File, onProgress?: (percent: number) => void) {
     const form = new FormData()
     form.append('image', file)
-    const path = file.type.startsWith('video/') ? '/images?strip_audio=1' : '/images'
+    const path = file.type.startsWith('video/') ? '/images/wallpapers?strip_audio=1' : '/images/wallpapers'
     if (onProgress) {
       return uploadWithProgress<Image>(path, form, onProgress)
     }
     return upload<Image>(path, form)
+  },
+
+  listWallpapers(params?: { limit?: number; offset?: number }) {
+    return get<ImageListResult>('/images/wallpapers', params)
   },
 
   delete(id: string) {

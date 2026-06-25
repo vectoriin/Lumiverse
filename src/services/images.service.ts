@@ -6,13 +6,14 @@ import { env } from "../env";
 import type { Image } from "../types/image";
 import { mkdirSync, existsSync, unlinkSync } from "fs";
 import { join, extname } from "path";
-import { stripAudioFromVideoBuffer } from "./silent-video.service";
+import { extractVideoPosterBuffer, stripAudioFromVideoBuffer } from "./silent-video.service";
 
 const IMAGES_DIR = "images";
 
 const DEFAULT_SMALL_SIZE = 300;
 const DEFAULT_LARGE_SIZE = 700;
 const WEBP_QUALITY = 80;
+export const WALLPAPER_LIBRARY_OWNER = "lumiverse.wallpaper";
 
 type ThumbnailSource = Buffer | string;
 
@@ -87,6 +88,7 @@ function getImagesDir(): string {
 function rowToImage(row: any, specificity: ImageSpecificity = "full"): Image {
   return {
     ...row,
+    byte_size: row.byte_size ?? 0,
     has_thumbnail: !!row.has_thumbnail,
     width: row.width ?? null,
     height: row.height ?? null,
@@ -96,6 +98,40 @@ function rowToImage(row: any, specificity: ImageSpecificity = "full"): Image {
     owner_character_id: row.owner_character_id ?? null,
     owner_chat_id: row.owner_chat_id ?? null,
   };
+}
+
+async function deriveMediaMetadataAndThumbnails(
+  userId: string,
+  id: string,
+  dir: string,
+  source: Buffer,
+  mimeType: string,
+): Promise<{ width: number | null; height: number | null; hasThumbnail: boolean }> {
+  let width: number | null = null;
+  let height: number | null = null;
+  let hasThumbnail = false;
+
+  const thumbnailSource = mimeType.startsWith("video/")
+    ? await extractVideoPosterBuffer(source, mimeType)
+    : source;
+  if (!thumbnailSource) return { width, height, hasThumbnail };
+
+  try {
+    const metadata = await sharp(thumbnailSource).metadata();
+    width = metadata.width ?? null;
+    height = metadata.height ?? null;
+
+    const sizes = getThumbnailSettings(userId);
+    const [smOk, lgOk] = await Promise.all([
+      generateThumbnail(thumbnailSource, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
+      generateThumbnail(thumbnailSource, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
+    ]);
+    hasThumbnail = smOk || lgOk;
+  } catch {
+    // Non-image or thumbnail derivation failure — leave metadata empty.
+  }
+
+  return { width, height, hasThumbnail };
 }
 
 /** Read thumbnail size settings from the DB. Returns defaults if not set. */
@@ -173,24 +209,13 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
 
   await Bun.write(filepath, buffer);
 
-  let width: number | null = null;
-  let height: number | null = null;
-  let hasThumbnail = false;
-
-  try {
-    const metadata = await sharp(buffer).metadata();
-    width = metadata.width ?? null;
-    height = metadata.height ?? null;
-
-    const sizes = getThumbnailSettings(userId);
-    const [smOk, lgOk] = await Promise.all([
-      generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
-      generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
-    ]);
-    hasThumbnail = smOk || lgOk;
-  } catch {
-    // Non-image file or sharp failure — skip thumbnails
-  }
+  const { width, height, hasThumbnail } = await deriveMediaMetadataAndThumbnails(
+    userId,
+    id,
+    dir,
+    buffer,
+    file.type || "",
+  );
 
   const now = Math.floor(Date.now() / 1000);
   const ownerExtensionIdentifier = normalizeOwnershipValue(options?.owner_extension_identifier);
@@ -204,6 +229,7 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
          filename,
          original_filename,
          mime_type,
+         byte_size,
          width,
          height,
          has_thumbnail,
@@ -211,7 +237,7 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
          owner_character_id,
          owner_chat_id,
          created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -219,6 +245,7 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
       filename,
       file.name,
       file.type || "",
+      buffer.byteLength,
       width,
       height,
       hasThumbnail ? 1 : 0,
@@ -256,12 +283,16 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
 
   await Bun.write(filepath, webpBuffer);
 
-  const sizes = getThumbnailSettings(userId);
-  const [smOk, lgOk] = await Promise.all([
-    generateThumbnail(webpBuffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
-    generateThumbnail(webpBuffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
-  ]);
-  hasThumbnail = smOk || lgOk;
+  const derived = await deriveMediaMetadataAndThumbnails(
+    userId,
+    id,
+    dir,
+    webpBuffer,
+    "image/webp",
+  );
+  width = derived.width ?? width;
+  height = derived.height ?? height;
+  hasThumbnail = derived.hasThumbnail;
 
   const now = Math.floor(Date.now() / 1000);
   const ownerExtensionIdentifier = normalizeOwnershipValue(options?.owner_extension_identifier);
@@ -275,6 +306,7 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
          filename,
          original_filename,
          mime_type,
+         byte_size,
          width,
          height,
          has_thumbnail,
@@ -282,7 +314,7 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
          owner_character_id,
          owner_chat_id,
          created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -290,6 +322,7 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
       filename,
       file.name,
       "image/webp",
+      webpBuffer.byteLength,
       width,
       height,
       hasThumbnail ? 1 : 0,
@@ -329,24 +362,13 @@ export async function saveImageFromDataUrl(
   const buffer = Buffer.from(base64, "base64");
   await Bun.write(filepath, buffer);
 
-  let width: number | null = null;
-  let height: number | null = null;
-  let hasThumbnail = false;
-
-  try {
-    const metadata = await sharp(buffer).metadata();
-    width = metadata.width ?? null;
-    height = metadata.height ?? null;
-
-    const sizes = getThumbnailSettings(userId);
-    const [smOk, lgOk] = await Promise.all([
-      generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
-      generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
-    ]);
-    hasThumbnail = smOk || lgOk;
-  } catch {
-    // Non-image or sharp failure — skip thumbnails
-  }
+  const { width, height, hasThumbnail } = await deriveMediaMetadataAndThumbnails(
+    userId,
+    id,
+    dir,
+    buffer,
+    mimeType,
+  );
 
   const now = Math.floor(Date.now() / 1000);
   const ownerExtensionIdentifier = normalizeOwnershipValue(options?.owner_extension_identifier);
@@ -360,6 +382,7 @@ export async function saveImageFromDataUrl(
          filename,
          original_filename,
          mime_type,
+         byte_size,
          width,
          height,
          has_thumbnail,
@@ -367,7 +390,7 @@ export async function saveImageFromDataUrl(
          owner_character_id,
          owner_chat_id,
          created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -375,6 +398,7 @@ export async function saveImageFromDataUrl(
       filename,
       originalFilename || `image-gen-${id}${ext}`,
       mimeType,
+      buffer.byteLength,
       width,
       height,
       hasThumbnail ? 1 : 0,
@@ -462,10 +486,10 @@ export async function uploadImages(
   const insertStmt = db.query(
     `INSERT INTO images (
        id, user_id, filename, original_filename, mime_type,
-       width, height, has_thumbnail,
+       byte_size, width, height, has_thumbnail,
        owner_extension_identifier, owner_character_id, owner_chat_id,
        created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   db.transaction(() => {
     for (let i = 0; i < prepared.length; i++) {
@@ -477,6 +501,7 @@ export async function uploadImages(
         p.filename,
         p.item.filename || "",
         p.item.mime_type || "",
+        p.item.data.byteLength,
         null,
         null,
         0,
@@ -500,6 +525,7 @@ export async function uploadImages(
       filename: p.filename,
       original_filename: p.item.filename || "",
       mime_type: p.item.mime_type || "",
+      byte_size: p.item.data.byteLength,
       width: null,
       height: null,
       has_thumbnail: false,
@@ -765,6 +791,10 @@ function hasImageReference(sql: string, params: any[]): boolean {
 export function isImageReferenced(userId: string, id: string): boolean {
   const needle = `%${id}%`;
   return (
+    hasImageReference(
+      "SELECT 1 AS found FROM images WHERE user_id = ? AND id = ? AND owner_extension_identifier = ? LIMIT 1",
+      [userId, id, WALLPAPER_LIBRARY_OWNER],
+    ) ||
     hasImageReference(
       "SELECT 1 AS found FROM character_gallery WHERE user_id = ? AND image_id = ? LIMIT 1",
       [userId, id],

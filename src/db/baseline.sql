@@ -328,6 +328,7 @@ CREATE TABLE images (
   filename TEXT NOT NULL,
   original_filename TEXT NOT NULL DEFAULT '',
   mime_type TEXT NOT NULL DEFAULT '',
+  byte_size INTEGER NOT NULL DEFAULT 0,
   width INTEGER,
   height INTEGER,
   has_thumbnail INTEGER NOT NULL DEFAULT 0,

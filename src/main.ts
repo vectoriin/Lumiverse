@@ -9,15 +9,7 @@ import { startAllExtensions } from "./spindle/lifecycle";
 import { initIdentity } from "./crypto/init";
 import { initVapidKeys } from "./crypto/vapid";
 import { eventBus } from "./ws/bus";
-
-export function isTermuxLikeEnvironment(): boolean {
-  return Boolean(process.env.TERMUX_VERSION)
-    || process.env.LUMIVERSE_IS_TERMUX === "true"
-    || process.env.LUMIVERSE_IS_PROOT === "true"
-    || process.env.PREFIX?.startsWith("/data/data/com.termux/") === true
-    || process.env.HOME?.startsWith("/data/data/com.termux/files/home") === true
-    || env.dataDir.startsWith("/data/data/com.termux/");
-}
+import { isTermuxLikeEnvironment } from "./utils/termux";
 
 // Validate data directory is accessible and writable before any file operations.
 // This catches permission issues early (common on Termux/Android) instead of

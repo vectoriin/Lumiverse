@@ -9,6 +9,7 @@ import { FormField, Select, EditorSection } from '@/components/shared/FormCompon
 import { Toggle } from '@/components/shared/Toggle'
 import { flushSettingsNow } from '@/store/slices/settings'
 import type { WallpaperRef } from '@/types/store'
+import WallpaperLibraryModal from './WallpaperLibraryModal'
 import styles from './WallpaperPanel.module.css'
 
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024 // 100MB
@@ -90,6 +91,7 @@ export default function WallpaperPanel() {
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadTarget, setUploadTarget] = useState<'global' | 'chat'>('global')
+  const [libraryTarget, setLibraryTarget] = useState<'global' | 'chat' | null>(null)
 
   const globalWp = wallpaper.global
   const chatWp = activeChatWallpaper
@@ -100,6 +102,28 @@ export default function WallpaperPanel() {
   const handleUpload = async (target: 'global' | 'chat') => {
     setUploadTarget(target)
     fileInputRef.current?.click()
+  }
+
+  const applyWallpaper = async (target: 'global' | 'chat', ref: WallpaperRef) => {
+    setError(null)
+    try {
+      if (target === 'chat') {
+        if (!activeChatId) throw new Error(t('wallpaperPanel.openChatHint'))
+        const oldImageId = activeChatWallpaper?.image_id
+        await chatsApi.patchMetadata(activeChatId, { wallpaper: ref })
+        setActiveChatWallpaper(ref)
+        if (oldImageId && oldImageId !== ref.image_id) void imagesApi.deleteIfUnused(oldImageId).catch(() => {})
+        return
+      }
+
+      const oldImageId = wallpaper.global?.image_id
+      setWallpaper({ global: ref })
+      await flushSettingsNow()
+      if (oldImageId && oldImageId !== ref.image_id) void imagesApi.deleteIfUnused(oldImageId).catch(() => {})
+    } catch (err: any) {
+      setError(err?.message || t('wallpaperPanel.assignFailed'))
+      throw err
+    }
   }
 
   const onFileSelected: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
@@ -128,20 +152,7 @@ export default function WallpaperPanel() {
         image_id: image.id,
         type: isVideo ? 'video' : 'image',
       }
-
-      if (uploadTarget === 'chat' && activeChatId) {
-        const oldImageId = activeChatWallpaper?.image_id
-        // Save to chat metadata
-        await chatsApi.patchMetadata(activeChatId, { wallpaper: ref })
-        setActiveChatWallpaper(ref)
-        if (oldImageId && oldImageId !== ref.image_id) void imagesApi.deleteIfUnused(oldImageId).catch(() => {})
-      } else {
-        const oldImageId = wallpaper.global?.image_id
-        // Save as global wallpaper
-        setWallpaper({ global: ref })
-        await flushSettingsNow()
-        if (oldImageId && oldImageId !== ref.image_id) void imagesApi.deleteIfUnused(oldImageId).catch(() => {})
-      }
+      await applyWallpaper(uploadTarget, ref)
     } catch (err: any) {
       setError(err?.message || t('wallpaperPanel.uploadFailed'))
     } finally {
@@ -221,6 +232,14 @@ export default function WallpaperPanel() {
           <Upload size={14} />
           <span>{uploading && uploadTarget === 'global' ? t('wallpaperPanel.uploading') : t('wallpaperPanel.setGlobal')}</span>
         </button>
+        <button
+          type="button"
+          className={styles.secondaryBtn}
+          onClick={() => setLibraryTarget('global')}
+        >
+          <ImageIcon size={14} />
+          <span>{t('wallpaperPanel.browseLibrary')}</span>
+        </button>
         {globalWp && (
           <button type="button" className={styles.dangerBtn} onClick={clearGlobal}>
             <Trash2 size={14} />
@@ -259,6 +278,14 @@ export default function WallpaperPanel() {
             >
               <Upload size={14} />
               <span>{uploading && uploadTarget === 'chat' ? t('wallpaperPanel.uploading') : t('wallpaperPanel.setForChat')}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={() => setLibraryTarget('chat')}
+            >
+              <ImageIcon size={14} />
+              <span>{t('wallpaperPanel.browseLibrary')}</span>
             </button>
             {chatWp && (
               <button type="button" className={styles.dangerBtn} onClick={clearChat}>
@@ -317,6 +344,14 @@ export default function WallpaperPanel() {
       </EditorSection>
 
       {error && <div className={styles.error}>{error}</div>}
+
+      <WallpaperLibraryModal
+        isOpen={libraryTarget !== null}
+        target={libraryTarget ?? 'global'}
+        currentImageId={libraryTarget === 'chat' ? chatWp?.image_id ?? null : globalWp?.image_id ?? null}
+        onClose={() => setLibraryTarget(null)}
+        onSelect={(ref) => applyWallpaper(libraryTarget ?? 'global', ref)}
+      />
     </div>
   )
 }

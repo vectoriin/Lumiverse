@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { closeDatabase, getDb, initDatabase } from "../db/connection";
-import { getImage, listImages } from "./images.service";
+import { WALLPAPER_LIBRARY_OWNER, deleteImageIfUnreferenced, getImage, listImages } from "./images.service";
 
 function initImagesTestDb(): void {
   closeDatabase();
@@ -12,6 +12,7 @@ function initImagesTestDb(): void {
     filename TEXT NOT NULL,
     original_filename TEXT NOT NULL DEFAULT '',
     mime_type TEXT NOT NULL DEFAULT '',
+    byte_size INTEGER NOT NULL DEFAULT 0,
     width INTEGER,
     height INTEGER,
     has_thumbnail INTEGER NOT NULL DEFAULT 0,
@@ -39,6 +40,7 @@ function seedImage(
         filename,
         original_filename,
         mime_type,
+        byte_size,
         width,
         height,
         has_thumbnail,
@@ -46,7 +48,7 @@ function seedImage(
         owner_character_id,
         owner_chat_id,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       id,
@@ -54,6 +56,7 @@ function seedImage(
       `${id}.png`,
       `${id}.png`,
       "image/png",
+      4096,
       100,
       100,
       1,
@@ -109,5 +112,14 @@ describe("images.service ownership filters", () => {
     expect(match?.url).toBe("/api/v1/images/img-1?size=lg");
     expect(match?.owner_chat_id).toBe("chat-1");
     expect(mismatch).toBeNull();
+  });
+
+  test("treats wallpaper-library images as long-term references", () => {
+    seedImage("img-1", 100, { owner_extension_identifier: WALLPAPER_LIBRARY_OWNER });
+
+    const deleted = deleteImageIfUnreferenced("u1", "img-1");
+
+    expect(deleted).toBe(false);
+    expect(getImage("u1", "img-1")).not.toBeNull();
   });
 });

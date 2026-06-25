@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import * as svc from "../services/images.service";
+import { parsePagination } from "../services/pagination";
 import { parseRangeHeader } from "./http-range";
 
 const app = new Hono();
 
 const MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+const MAX_WALLPAPER_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
 function isTruthyFlag(value: string | undefined): boolean {
   if (!value) return false;
@@ -15,6 +17,33 @@ function resolveImageContentType(filepath: string, fallbackMimeType: string): st
   if (filepath.endsWith(".webp")) return "image/webp";
   return fallbackMimeType || null;
 }
+
+app.get("/wallpapers", (c) => {
+  const userId = c.get("userId");
+  const pagination = parsePagination(c.req.query("limit"), c.req.query("offset"));
+  return c.json(svc.listImages(userId, {
+    ...pagination,
+    owner_extension_identifier: svc.WALLPAPER_LIBRARY_OWNER,
+  }));
+});
+
+app.post("/wallpapers", async (c) => {
+  const userId = c.get("userId");
+  const formData = await c.req.formData();
+  const file = formData.get("image") as File | null;
+  if (!file) return c.json({ error: "image file is required" }, 400);
+  const stripAudio = isTruthyFlag(c.req.query("strip_audio"));
+
+  if (typeof file.size === "number" && file.size > MAX_WALLPAPER_UPLOAD_BYTES) {
+    return c.json({ error: "Image too large", maxBytes: MAX_WALLPAPER_UPLOAD_BYTES }, 413);
+  }
+
+  const image = await svc.uploadImage(userId, file, {
+    strip_audio: stripAudio,
+    owner_extension_identifier: svc.WALLPAPER_LIBRARY_OWNER,
+  });
+  return c.json(image, 201);
+});
 
 app.post("/", async (c) => {
   const userId = c.get("userId");
