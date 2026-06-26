@@ -27,6 +27,7 @@ import type { LlmMessage } from "../llm/types";
 import type { ImageGenRequest } from "../image-gen/types";
 import type { Message } from "../types/message";
 import type { ImageGenConnectionProfile } from "../types/image-gen-connection";
+import { scheduleLowPriorityTask } from "../utils/low-priority-task";
 
 // Ensure image gen providers are registered
 import "../image-gen/index";
@@ -520,13 +521,13 @@ export async function generateSceneBackground(
       if (settings.addToGallery !== false) {
         const characterId = chatsSvc.getChat(userId, chatId)?.character_id;
         if (characterId) {
-          queueMicrotask(() => {
+          scheduleLowPriorityTask(() => {
             try {
               gallerySvc.linkImageToGallery(userId, characterId, image.id, "Generated image");
             } catch (err) {
               console.warn("[image-gen] Gallery linkage failed (non-fatal):", err);
             }
-          });
+          }, { label: "image gallery linkage" });
         }
       }
     }

@@ -25,6 +25,7 @@ import { join, resolve, dirname, sep } from "path";
 import { getUserExtensionPath } from "../auth/provision";
 import { spawnAsync } from "./spawn-async";
 import { normalizeSpindleHttpsUrl } from "./url-safety";
+import { bunCmd } from "../utils/bun-cmd";
 
 export type InstallScope = "operator" | "user";
 type ManagedSpindlePermission = SpindlePermission | "databanks" | "presets";
@@ -997,39 +998,6 @@ function applyStorageSeeds(identifier: string, manifest: SpindleManifest): void 
 }
 
 // ─── Termux-aware Bun command builders ───────────────────────────────────
-// On Termux, the bare `bun` binary can't execute natively. start.sh detects
-// the working invocation method and exports it via env vars so we can mirror
-// the same wrapping here when spawning bun subprocesses.
-
-/**
- * Build a command array for running `bun <args>`.
- * Mirrors start.sh's `_bun()` wrapper.
- */
-export function bunCmd(...args: string[]): string[] {
-  const method = process.env.LUMIVERSE_BUN_METHOD;
-  const bunPath = process.env.LUMIVERSE_BUN_PATH;
-
-  if (!method || !bunPath) return ["bun", ...args];
-
-  switch (method) {
-    case "direct":
-      return [bunPath, ...args];
-    case "grun":
-      return ["grun", bunPath, ...args];
-    case "proot": {
-      const prefix = process.env.PREFIX || "/data/data/com.termux/files/usr";
-      return [
-        "proot", "--link2symlink", "-0",
-        `${prefix}/glibc/lib/ld-linux-aarch64.so.1`,
-        "--library-path", `${prefix}/glibc/lib`,
-        bunPath, ...args,
-      ];
-    }
-    default:
-      return [bunPath, ...args];
-  }
-}
-
 /**
  * Build a command array for `bun install`.
  * On Termux, `bun install` always needs proot wrapping (Android's seccomp

@@ -251,11 +251,12 @@ async function gracefulShutdown(signal: string) {
   const { stopTicketSweep } = await import("./ws/tickets");
   const { stopOAuthStateSweep } = await import("./spindle/oauth-state");
   const { stopPkceSweep } = await import("./routes/lumihub.routes");
-  const { stopQueryCacheCleanup, stopWorldBookVectorizationSweep } = await import("./services/vectorization-queue.service");
+  const { stopChatChunkVectorizationWorker, stopQueryCacheCleanup, stopWorldBookVectorizationSweep } = await import("./services/vectorization-queue.service");
   const { stopVersionCheckCleanup } = await import("./services/embeddings.service");
   stopTicketSweep();
   stopOAuthStateSweep();
   stopPkceSweep();
+  stopChatChunkVectorizationWorker();
   stopQueryCacheCleanup();
   stopWorldBookVectorizationSweep();
   stopVersionCheckCleanup();

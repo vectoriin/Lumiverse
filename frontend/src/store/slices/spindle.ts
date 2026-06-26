@@ -3,6 +3,7 @@ import type { SpindleSlice, PendingPermissionRequest, PendingTextEditorRequest, 
 import { wsClient } from '@/ws/client'
 import { spindleApi } from '@/api/spindle'
 import { loadFrontendExtension, unloadFrontendExtension } from '@/lib/spindle/loader'
+import { scheduleLowPriorityTask } from '@/lib/low-priority-task'
 import { yieldToBrowser } from '@/lib/spindle/browser-scheduler'
 
 const MUTED_THEMES_KEY = 'lumiverse:mutedExtensionThemes'
@@ -58,7 +59,7 @@ export const createSpindleSlice: StateCreator<SpindleSlice> = (set, get) => ({
       const { extensions, isPrivileged } = await spindleApi.list()
       set({ extensions, spindlePrivileged: isPrivileged })
 
-      queueMicrotask(() => {
+      scheduleLowPriorityTask(() => {
         const hydrateExtension = async (ext: typeof extensions[number]) => {
           const status = get().extensionOperationStatus
           const updateReloadPending =
@@ -119,7 +120,7 @@ export const createSpindleSlice: StateCreator<SpindleSlice> = (set, get) => ({
         })().catch((err) => {
           console.error('[Spindle] Frontend hydration loop failed:', err)
         })
-      })
+      }, { label: 'spindle frontend hydration' })
     } catch (err) {
       console.error('[Spindle] Failed to load extensions:', err)
     }
@@ -181,11 +182,11 @@ export const createSpindleSlice: StateCreator<SpindleSlice> = (set, get) => ({
 
     const ext = get().extensions.find((e) => e.id === id)
     if (ext?.has_frontend) {
-      queueMicrotask(() => {
+      scheduleLowPriorityTask(() => {
         void spindleApi.getManifest(id)
           .then((manifest) => loadFrontendExtension(id, manifest))
           .catch((err) => console.error('[Spindle] Failed to load frontend after enable:', err))
-      })
+      }, { label: 'spindle frontend enable hydration' })
     }
   },
 
