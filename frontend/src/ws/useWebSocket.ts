@@ -1864,20 +1864,48 @@ export function useWebSocket() {
       }),
     ]
 
-    // Re-sync pooled tokens whenever the tab becomes visible. Mobile PWAs and
-    // background tabs may miss live STREAM_TOKEN_RECEIVED events while hidden
-    // even when the WS stays open; the server pool is authoritative, so a
-    // status poll on every visible transition restores all accumulated content
-    // (segment offsets slice off anything the client already rendered).
-    const onVisibilityChange = () => {
+    // Re-sync the active chat whenever the app resumes. STREAM_TOKEN_RECEIVED
+    // is only routed to the focused chat session, so desktop window blur can
+    // drop live segments without ever flipping document.visibilityState to
+    // hidden. After the pool recovery, re-fetch the idle chat tail so a missed
+    // deferred METRICS_READY event (TTFT/TPS/model/provider) or a stale final
+    // message snapshot is refreshed from the authoritative saved row.
+    let resumeReconcileInFlight = false
+    const reconcileActiveChatOnResume = async () => {
       if (document.visibilityState !== 'visible') return
-      const activeChatId = store.getState().activeChatId
-      if (activeChatId) {
-        recoverPooledGeneration(activeChatId).catch(() => { /* best-effort */ })
+      if (resumeReconcileInFlight) return
+      resumeReconcileInFlight = true
+      try {
+        const activeChatId = store.getState().activeChatId
+        if (!activeChatId) {
+          store.getState().reconcileChatHeads().catch(() => { /* best-effort */ })
+          return
+        }
+
+        await recoverPooledGeneration(activeChatId).catch(() => { /* best-effort */ })
+        await store.getState().reconcileChatHeads().catch(() => { /* best-effort */ })
+
+        const latest = store.getState()
+        if (latest.activeChatId !== activeChatId) return
+        if (latest.isStreaming) return
+        if (latest.mpRoomId && !latest.mpIsHost && latest.mpChatId === activeChatId) return
+
+        try {
+          const fresh = await fetchLatestMessages(activeChatId)
+          const after = store.getState()
+          if (after.activeChatId === activeChatId && !after.isStreaming) {
+            after.setMessages(fresh.data, fresh.total)
+          }
+        } catch {
+          /* best-effort */
+        }
+      } finally {
+        resumeReconcileInFlight = false
       }
-      store.getState().reconcileChatHeads().catch(() => { /* best-effort */ })
     }
-    document.addEventListener('visibilitychange', onVisibilityChange)
+    const onResume = () => { void reconcileActiveChatOnResume() }
+    document.addEventListener('visibilitychange', onResume)
+    window.addEventListener('focus', onResume)
 
     // Mobile browsers occasionally deliver the full token stream but miss or
     // delay the terminal WS event. While a chat is streaming, poll the pooled
@@ -1946,7 +1974,8 @@ export function useWebSocket() {
     relayPersona(store.getState())
 
     return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange)
+      document.removeEventListener('visibilitychange', onResume)
+      window.removeEventListener('focus', onResume)
       clearInterval(recoveryWatchdog)
       clearInterval(chatHeadReconcile)
       unsubDrawerTabs()
