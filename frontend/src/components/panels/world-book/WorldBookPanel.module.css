@@ -11,9 +11,181 @@
 .panelBody {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: hidden;
   overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   position: relative;
+}
+
+.panelMobile {
+  gap: 10px;
+  padding: 10px 10px 0;
+}
+
+.panelMobile .globalSection,
+.panelMobile .chatSection {
+  gap: 5px;
+  padding: 8px;
+}
+
+.panelMobile .globalPills,
+.panelMobile .chatPills {
+  gap: 4px;
+}
+
+.attachmentAccordion {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 10px;
+  background: var(--lumiverse-fill-subtle);
+  overflow: hidden;
+}
+
+.attachmentAccordionExpanded {
+  border-color: color-mix(in srgb, var(--lumiverse-border) 70%, var(--lumiverse-text) 30%);
+}
+
+.attachmentAccordionHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px 7px 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    background var(--lumiverse-transition-fast),
+    border-color var(--lumiverse-transition-fast);
+}
+
+.attachmentAccordionHeader:hover {
+  background: var(--lumiverse-fill-hover);
+}
+
+.attachmentAccordionStart {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.attachmentAccordionIconBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.attachmentAccordionGlobal .attachmentAccordionIconBadge {
+  background: color-mix(in srgb, var(--lumiverse-primary) 14%, transparent);
+  color: var(--lumiverse-primary);
+}
+
+.attachmentAccordionChat .attachmentAccordionIconBadge {
+  background: color-mix(in srgb, var(--lumiverse-info, #42a5f5) 14%, transparent);
+  color: var(--lumiverse-info, #42a5f5);
+}
+
+.attachmentAccordionLabel {
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lumiverse-text);
+}
+
+.attachmentAccordionCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--lumiverse-border);
+  color: var(--lumiverse-text-dim);
+  font-size: calc(10px * var(--lumiverse-font-scale, 1));
+  font-weight: 600;
+}
+
+.attachmentAccordionPreview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.attachmentAccordionPreviewChip,
+.attachmentAccordionPreviewMore {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: min(120px, 32vw);
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: calc(10.5px * var(--lumiverse-font-scale, 1));
+  white-space: nowrap;
+}
+
+.attachmentAccordionPreviewChip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachmentAccordionPreviewChipGlobal,
+.attachmentAccordionGlobal .attachmentAccordionPreviewMore {
+  background: color-mix(in srgb, var(--lumiverse-primary) 12%, transparent);
+  color: var(--lumiverse-primary);
+}
+
+.attachmentAccordionPreviewChipChat,
+.attachmentAccordionChat .attachmentAccordionPreviewMore {
+  background: color-mix(in srgb, var(--lumiverse-info, #42a5f5) 12%, transparent);
+  color: var(--lumiverse-info, #42a5f5);
+}
+
+.attachmentAccordionEmpty {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  font-style: italic;
+  color: var(--lumiverse-text-dim);
+}
+
+.attachmentAccordionChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  color: var(--lumiverse-text-dim);
+}
+
+.attachmentAccordionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px 8px;
+}
+
+.attachmentAccordionActions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* ── Global world books ── */
@@ -248,9 +420,21 @@
   padding: 0;
 }
 
+.topBarMobile {
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .bookSelectWrapper {
   flex: 1;
   min-width: 0;
+}
+
+.mobileTopActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .sourceBadge {
@@ -338,6 +522,29 @@
   background: var(--lumiverse-fill-subtle);
   border: 1px solid var(--lumiverse-border);
   border-radius: 8px;
+}
+
+.bookFieldsMobile {
+  padding: 12px;
+}
+
+.bookSourceNote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lumiverse-primary) 10%, transparent);
+  color: var(--lumiverse-primary);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  font-weight: 600;
+}
+
+.bookSourceIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .fieldGroup {
