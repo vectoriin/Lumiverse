@@ -1070,6 +1070,15 @@
     padding: 6px 10px 8px;
   }
 
+  .actionBar {
+    gap: 1px;
+    padding: 0;
+  }
+
+  .actionBtn {
+    width: 28px;
+  }
+
   :global(html[data-ios-pwa]) .container {
     bottom: var(--app-keyboard-inset-bottom, 0px);
     padding-bottom: calc(8px + max(0px, env(safe-area-inset-bottom, 0px) - var(--app-keyboard-inset-bottom, 0px)));

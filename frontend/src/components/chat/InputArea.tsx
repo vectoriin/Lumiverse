@@ -2265,6 +2265,17 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
           )}
           <button
             type="button"
+            className={styles.actionBtn}
+            onClick={() => handleImpersonate('oneliner')}
+            title={`${t('quickMenu.oneLiner')}: ${t('quickMenu.oneLinerDesc')}`}
+            aria-label={t('quickMenu.oneLiner')}
+            disabled={isGeneratingInChat}
+            style={isGeneratingInChat ? { opacity: 0.5 } : undefined}
+          >
+            <MessageSquare size={14} />
+          </button>
+          <button
+            type="button"
             className={clsx(styles.actionBtn, openPopover === 'persona' && styles.actionBtnActive)}
             onClick={() => setOpenPopover((p) => (p === 'persona' ? null : 'persona'))}
             title={t('input.sendAsPersona')}
