@@ -29,6 +29,7 @@ import type { AutocompleteResult } from '@/api/databank'
 import styles from './InputArea.module.css'
 import clsx from 'clsx'
 import InputBarExtensionActions from './InputBarExtensionActions'
+import { getMobileQueueHintKey, type MobileQueueHoldState } from './mobileQueueHint'
 import { unlockNotificationAudio } from '@/lib/notificationAudio'
 import { unlockTTSAudio } from '@/lib/ttsAudio'
 import { createSTTEngine, getSupportedSTTAudioFormat, isWebSpeechAvailable, type STTAudioFrame, type STTEngine } from '@/lib/sttEngine'
@@ -51,8 +52,6 @@ const STT_IDLE_BARS = Array.from({ length: STT_VISUALIZER_BARS }, (_, index) => 
 type STTCommandState = {
   thoughtDepth: number
 }
-
-type MobileQueueHoldState = 'idle' | 'holding' | 'armed' | 'queueing'
 
 const STT_COMMAND_ALIASES: Record<string, string[]> = {
   'quote': ['quote start', 'quote end', 'open quote', 'close quote'],
@@ -2169,13 +2168,12 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
     setSetting('guidedGenerations', next)
   }, [guidedGenerations, setSetting])
 
-  let mobileQueueHint: string | null = null
-  if (supportsTouchQueueHold && !isGeneratingInChat && (hasDraftContent || mobileQueueHoldState !== 'idle')) {
-    if (mobileQueueHoldState === 'queueing') mobileQueueHint = t('input.queueingMessage')
-    else if (mobileQueueHoldState === 'armed') mobileQueueHint = t('input.releaseToQueue')
-    else if (mobileQueueHoldState === 'holding') mobileQueueHint = t('input.keepHoldingToQueue')
-    else mobileQueueHint = t('input.holdToQueue')
-  }
+  const mobileQueueHintKey = getMobileQueueHintKey({
+    supportsTouchQueueHold,
+    isGeneratingInChat,
+    mobileQueueHoldState,
+  })
+  const mobileQueueHint = mobileQueueHintKey ? t(mobileQueueHintKey) : null
 
   let sendButtonTitle = t('input.nudgeFreshReply')
   if (isGeneratingInChat) {
