@@ -1,6 +1,6 @@
 import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, useSyncExternalStore, startTransition, memo, type ReactNode, type TouchEvent, type WheelEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useVirtualizer, defaultRangeExtractor, type Range, type Virtualizer } from '@tanstack/react-virtual'
+import { useVirtualizer, defaultRangeExtractor, type Range, type VirtualItem, type Virtualizer } from '@tanstack/react-virtual'
 import { useScrollGate } from '@/hooks/useScrollGate'
 import { useChunkedMessages } from '@/hooks/useChunkedMessages'
 import {
@@ -12,6 +12,7 @@ import { parseOOC, type OOCBlock } from '@/lib/oocParser'
 import MessageCard from './MessageCard'
 import GroupChatProgressBar from './GroupChatProgressBar'
 import GroupChatMemberBar from './GroupChatMemberBar'
+import { shouldAdjustMessageListScrollOnResize } from './messageListScrollAdjust'
 import type { Message } from '@/types/api'
 import type { OOCStyleType } from '@/types/store'
 import styles from './MessageList.module.css'
@@ -269,6 +270,8 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     }, duration)
   }, [isCoarsePointer])
   const streamingError = useStore((s) => s.streamingError)
+  const regeneratingMessageId = useStore((s) => s.regeneratingMessageId)
+  const streamingGenerationType = useStore((s) => s.streamingGenerationType)
   const displayMode = useStore((s) => s.chatSheldDisplayMode)
   const styleMode = useStore((s) => {
     const claims = s.chatStyleModes[chatId]
@@ -279,6 +282,16 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   const isNudgeLoopActive = useStore((s) => s.isNudgeLoopActive)
   const isBubble = displayMode === 'bubble'
   const estimateSize = isBubble ? 260 : 180
+  const streamingTargetMessageId = useMemo(() => {
+    if (!isStreaming) return null
+    if (regeneratingMessageId) return regeneratingMessageId
+    if (streamingGenerationType === 'continue') {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (!messages[index]?.is_user) return messages[index]!.id
+      }
+    }
+    return null
+  }, [isStreaming, messages, regeneratingMessageId, streamingGenerationType])
 
   const virtualListItems = useMemo<VirtualListItem[]>(() => {
     const items: VirtualListItem[] = []
@@ -506,6 +519,24 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     [virtualListItems]
   )
 
+  const shouldAdjustScrollPositionOnItemSizeChange = useCallback(
+    (item: VirtualItem, delta: number, instance: Virtualizer<HTMLDivElement, Element>) => {
+      const row = virtualListItems[item.index]
+      const isStreamingTail = row?.type === 'message' && row.message.id === streamingTargetMessageId
+      return shouldAdjustMessageListScrollOnResize({
+        delta,
+        itemStart: item.start,
+        itemEnd: item.end,
+        scrollOffset: instance.scrollOffset ?? lastScrollTopRef.current,
+        scrollDirection: instance.scrollDirection,
+        hasMeasuredSize: instance.itemSizeCache.has(item.key),
+        isPinned: isPinnedRef.current,
+        isStreamingTail,
+      })
+    },
+    [streamingTargetMessageId, virtualListItems]
+  )
+
   const scheduleInitialScrollToEnd = useCallback((instance: Virtualizer<HTMLDivElement, Element>) => {
     if (!hasRows || virtualListItems.length === 0 || initialBottomPinnedChatRef.current === chatId) return
     if (!scrollRef.current) return
@@ -576,6 +607,9 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       if (!sync) scheduleInitialScrollToEnd(instance)
     },
   })
+  // The core virtualizer exposes this as a mutable instance hook even though
+  // the React wrapper's options type does not currently declare it.
+  rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = shouldAdjustScrollPositionOnItemSizeChange
 
   const measureMountedRows = useCallback(() => {
     const el = scrollRef.current
