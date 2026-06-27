@@ -54,6 +54,7 @@ import { useScrollGate } from '@/hooks/useScrollGate'
 import useIsMobile from '@/hooks/useIsMobile'
 import clsx from 'clsx'
 import { worldBooksApi } from '@/api/world-books'
+import { renderedPxToLayoutPx } from '@/lib/uiScale'
 import { wsClient } from '@/ws/client'
 import { EventType } from '@/ws/events'
 import type {
@@ -513,7 +514,7 @@ export default function WorldBookEntriesSection({
 
     const nextMargin = Math.max(
       0,
-      listEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop,
+      renderedPxToLayoutPx(listEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top) + scrollEl.scrollTop,
     )
 
     setVirtualScrollMargin((current) => (Math.abs(current - nextMargin) < 1 ? current : nextMargin))
@@ -532,7 +533,7 @@ export default function WorldBookEntriesSection({
     getItemKey: (index) => entries[index]?.id ?? index,
     rangeExtractor,
     measureElement: (element) => {
-      const size = element.getBoundingClientRect().height
+      const size = renderedPxToLayoutPx(element.getBoundingClientRect().height)
       return Math.max(1, Number.isFinite(size) ? size : 72)
     },
   })

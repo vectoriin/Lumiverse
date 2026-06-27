@@ -15,6 +15,7 @@ import { useStore } from '@/store'
 import { useScrollGate } from '@/hooks/useScrollGate'
 import { warmCharacterPalette } from '@/hooks/useCharacterTheme'
 import { prefetchImages } from '@/lib/imageDecodeCache'
+import { renderedPxToLayoutPx } from '@/lib/uiScale'
 import LazyImage from '@/components/shared/LazyImage'
 import {
   doesDeviceRotationNeedPermission,
@@ -899,7 +900,9 @@ export default function LandingPage() {
     const scrollEl = scrollRef.current
     const virtualEl = virtualContainerRef.current
     if (!scrollEl || !virtualEl) return
-    const next = virtualEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+    const next = renderedPxToLayoutPx(
+      virtualEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top,
+    ) + scrollEl.scrollTop
     setVirtualScrollMargin(next)
   }, [])
 
