@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { useWorldBookEntryLabels } from '@/lib/i18n/worldBookEntryLabels'
@@ -48,13 +48,11 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
-import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
 import { useScaledSortableStyle } from '@/lib/dndUiScale'
 import { useScrollGate } from '@/hooks/useScrollGate'
 import useIsMobile from '@/hooks/useIsMobile'
 import clsx from 'clsx'
 import { worldBooksApi } from '@/api/world-books'
-import { measureLayoutHeight, renderedPxToLayoutPx } from '@/lib/uiScale'
 import { wsClient } from '@/ws/client'
 import { EventType } from '@/ws/events'
 import type {
@@ -101,22 +99,6 @@ function getEntryType(entry: WorldBookEntry): 'trigger' | 'constant' | 'vector' 
 function useFormatEntryCount() {
   const { t } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entries' })
   return useCallback((count: number) => t('entryCount', { count }), [t])
-}
-
-function isEditableTarget(target: EventTarget | Element | null): target is HTMLElement {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  )
-}
-
-function getEditableEntryId(root: HTMLElement | null, target: EventTarget | Element | null) {
-  if (!root || !isEditableTarget(target)) return null
-  const row = target.closest<HTMLElement>('[data-entry-id]')
-  if (!row || !root.contains(row)) return null
-  return row.dataset.entryId ?? null
 }
 
 interface EntryRowProps {
@@ -404,12 +386,7 @@ export default function WorldBookEntriesSection({
   const [pendingAction, setPendingAction] = useState(false)
   const entryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const localScrollRef = useRef<HTMLDivElement>(null)
-  const entryListRef = useRef<HTMLDivElement>(null)
-  const focusedEntryClearTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const entryMeasureRaf = useRef<number | null>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
-  const [focusedEntryId, setFocusedEntryId] = useState<string | null>(null)
-  const [virtualScrollMargin, setVirtualScrollMargin] = useState(0)
   const activeScrollRef = scrollContainerRef ?? localScrollRef
   const usesSharedScroll = scrollContainerRef != null
   useScrollGate(activeScrollRef)
@@ -459,110 +436,12 @@ export default function WorldBookEntriesSection({
     return null
   }, [entrySortBy, entrySearchFilter, entryPageSize, te])
   const dragEnabled = entrySortBy === 'custom' && !dragUnavailableReason
-  const useStaticListLayout = isMobile
-  const selectedEntryIndex = useMemo(
-    () => (selectedEntryId ? entries.findIndex((entry) => entry.id === selectedEntryId) : -1),
-    [entries, selectedEntryId],
-  )
-  const focusedEntryIndex = useMemo(
-    () => (focusedEntryId ? entries.findIndex((entry) => entry.id === focusedEntryId) : -1),
-    [entries, focusedEntryId],
-  )
-
-  const rangeExtractor = useCallback((range: Range) => {
-    // Drag-and-drop needs every sortable item mounted so @dnd-kit can
-    // measure/position the list. Fall back to the full range in custom-sort
-    // mode; otherwise virtualize normally.
-    if (dragEnabled) {
-      return Array.from({ length: range.count }, (_, i) => i)
-    }
-    const indexes = new Set(defaultRangeExtractor(range))
-
-    // Keep the expanded/focused editor mounted even when the mobile keyboard
-    // shrinks the viewport and TanStack recalculates the visible range. If the
-    // active row unmounts, Android/iOS drop focus and the keyboard flashes shut.
-    if (selectedEntryIndex >= 0) indexes.add(selectedEntryIndex)
-    if (focusedEntryIndex >= 0) indexes.add(focusedEntryIndex)
-
-    return Array.from(indexes).sort((a, b) => a - b)
-  }, [dragEnabled, focusedEntryIndex, selectedEntryIndex])
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-
-  useEffect(() => () => {
-    if (focusedEntryClearTimer.current) clearTimeout(focusedEntryClearTimer.current)
-    if (entryMeasureRaf.current != null) cancelAnimationFrame(entryMeasureRaf.current)
-  }, [])
-
-  const commitFocusedEntryId = useCallback((nextId: string | null) => {
-    setFocusedEntryId((current) => (current === nextId ? current : nextId))
-  }, [])
-
-  const handleEntryListFocusCapture = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-    const nextId = getEditableEntryId(entryListRef.current, e.target)
-    if (!nextId) return
-    if (focusedEntryClearTimer.current) clearTimeout(focusedEntryClearTimer.current)
-    commitFocusedEntryId(nextId)
-  }, [commitFocusedEntryId])
-
-  const handleEntryListBlurCapture = useCallback(() => {
-    if (focusedEntryClearTimer.current) clearTimeout(focusedEntryClearTimer.current)
-    focusedEntryClearTimer.current = setTimeout(() => {
-      commitFocusedEntryId(getEditableEntryId(entryListRef.current, document.activeElement))
-    }, 160)
-  }, [commitFocusedEntryId])
-
-  const updateVirtualScrollMargin = useCallback(() => {
-    const scrollEl = activeScrollRef.current
-    const listEl = entryListRef.current
-    if (!scrollEl || !listEl) return
-
-    const nextMargin = Math.max(
-      0,
-      renderedPxToLayoutPx(listEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top) + scrollEl.scrollTop,
-    )
-
-    setVirtualScrollMargin((current) => (Math.abs(current - nextMargin) < 1 ? current : nextMargin))
-  }, [activeScrollRef])
-
-  useLayoutEffect(() => {
-    updateVirtualScrollMargin()
-  })
-
-  const entryVirtualizer = useVirtualizer({
-    count: entries.length,
-    getScrollElement: () => activeScrollRef.current,
-    estimateSize: () => 72,
-    overscan: 6,
-    scrollMargin: virtualScrollMargin,
-    getItemKey: (index) => entries[index]?.id ?? index,
-    rangeExtractor,
-    measureElement: (element) => {
-      const size = measureLayoutHeight(element)
-      return Math.max(1, Number.isFinite(size) ? size : 72)
-    },
-  })
-
-  const scheduleEntryMeasure = useCallback((frames = 1) => {
-    if (entryMeasureRaf.current != null) cancelAnimationFrame(entryMeasureRaf.current)
-
-    const tick = (remaining: number) => {
-      entryMeasureRaf.current = requestAnimationFrame(() => {
-        if (remaining > 1) {
-          tick(remaining - 1)
-          return
-        }
-        entryVirtualizer.measure()
-        entryMeasureRaf.current = null
-      })
-    }
-
-    tick(Math.max(1, frames))
-  }, [entryVirtualizer])
 
   const persistViewPref = useCallback((bookId: string, pref: {
     sortBy: WorldBookEntrySortBy
@@ -574,50 +453,6 @@ export default function WorldBookEntriesSection({
       [bookId]: pref,
     })
   }, [setSetting, worldBookEntryViewPrefs])
-
-  useEffect(() => {
-    updateVirtualScrollMargin()
-    const scrollEl = activeScrollRef.current
-    const listEl = entryListRef.current
-    if (!scrollEl || !listEl || typeof ResizeObserver === 'undefined') return
-
-    const resizeObserver = new ResizeObserver(() => {
-      updateVirtualScrollMargin()
-    })
-
-    resizeObserver.observe(scrollEl)
-    resizeObserver.observe(listEl)
-
-    return () => resizeObserver.disconnect()
-  }, [activeScrollRef, entries.length, loadingEntries, updateVirtualScrollMargin])
-
-  useEffect(() => {
-    window.addEventListener('resize', updateVirtualScrollMargin)
-    return () => window.removeEventListener('resize', updateVirtualScrollMargin)
-  }, [updateVirtualScrollMargin])
-
-  useEffect(() => {
-    entryVirtualizer.measure()
-  }, [entryVirtualizer, virtualScrollMargin])
-
-  useEffect(() => {
-    // Android Chrome can miss ResizeObserver updates for transformed,
-    // absolutely-positioned virtual rows while scrolling. Re-measure after
-    // expand/collapse so the next rows pick up the editor's full height.
-    scheduleEntryMeasure(selectedEntryId ? 2 : 1)
-  }, [scheduleEntryMeasure, selectedEntryId])
-
-  useEffect(() => {
-    const scrollEl = activeScrollRef.current
-    if (!scrollEl || !selectedEntryId) return
-
-    const handleScroll = () => {
-      scheduleEntryMeasure()
-    }
-
-    scrollEl.addEventListener('scroll', handleScroll, { passive: true })
-    return () => scrollEl.removeEventListener('scroll', handleScroll)
-  }, [activeScrollRef, scheduleEntryMeasure, selectedEntryId])
 
   const refreshVectorSummary = useCallback(async () => {
     if (!selectedBookId || !onRefreshVectorSummary) return
@@ -1350,17 +1185,12 @@ export default function WorldBookEntriesSection({
                 ref={usesSharedScroll ? undefined : localScrollRef}
                 className={clsx(styles.entryScroll, usesSharedScroll && styles.entryScrollShared)}
               >
-                <div
-                  ref={entryListRef}
-                  className={styles.entryList}
-                  onFocusCapture={handleEntryListFocusCapture}
-                  onBlurCapture={handleEntryListBlurCapture}
-                >
+                <div className={styles.entryList}>
                   {entries.length === 0 ? (
                     <div className={styles.emptyState}>
                       {entrySearchFilter.trim() ? te('noMatch') : te('empty')}
                     </div>
-                  ) : useStaticListLayout ? (
+                  ) : (
                     entries.map((entry, index) => (
                       <div
                         key={entry.id}
@@ -1384,49 +1214,6 @@ export default function WorldBookEntriesSection({
                         />
                       </div>
                     ))
-                  ) : (
-                    <div
-                      style={{
-                        height: entryVirtualizer.getTotalSize(),
-                        position: 'relative',
-                      }}
-                    >
-                      {entryVirtualizer.getVirtualItems().map((virtualRow) => {
-                        const entry = entries[virtualRow.index]
-                        if (!entry) return null
-                        return (
-                          <div
-                            key={virtualRow.key}
-                            data-index={virtualRow.index}
-                            data-entry-id={entry.id}
-                            ref={entryVirtualizer.measureElement}
-                            style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              paddingBottom: 8,
-                              transform: `translateY(${virtualRow.start - virtualScrollMargin}px)`,
-                            }}
-                          >
-                            <EntryRow
-                              entry={entry}
-                              expanded={selectedEntryId === entry.id}
-                              dragEnabled={dragEnabled}
-                              selectMode={selectMode}
-                              selected={selectedIds.includes(entry.id)}
-                              onToggleExpand={() => setSelectedEntryId((current) => (current === entry.id ? null : entry.id))}
-                              onToggleSelect={() => handleToggleSelect(entry.id)}
-                              onUpdate={updateEntry}
-                              onDebouncedUpdate={debouncedUpdateEntry}
-                              onOpenMenu={(entryId, position) => setContextMenu({ entryId, position })}
-                              onOpenTypeMenu={(entryId, position) => setTypeMenu({ entryId, position })}
-                              onOpenPositionMenu={(entryId, position) => setPositionMenu({ entryId, position })}
-                            />
-                          </div>
-                        )
-                      })}
-                    </div>
                   )}
                 </div>
               </div>

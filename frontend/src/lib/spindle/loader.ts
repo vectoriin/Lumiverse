@@ -1,4 +1,10 @@
-import type { SpindleManifest, SpindleFrontendContext, SpindleFrontendModule, PermissionRequestOptions } from 'lumiverse-spindle-types'
+import type {
+  SpindleManifest,
+  SpindleFrontendContext,
+  SpindleFrontendModule,
+  PermissionRequestOptions,
+  SpindleMountPoint,
+} from 'lumiverse-spindle-types'
 import type { SpindleCharacterEditorUI } from './character-editor-types'
 import type { SpindleTabMobilityUI, TabLocation } from './tab-mobility-types'
 import { createDOMHelper } from './dom-helper'
@@ -150,6 +156,35 @@ const FORCE_LOAD_DEDUPE_MS = 2000
 const pendingStartupItems = new Map<string, PendingStartupItem[]>()
 const MAX_PENDING_STARTUP_ITEMS = 100
 const FRONTEND_READY_TIMEOUT_MS = 10_000
+const extensionMountPoints = new Map<string, Set<SpindleMountPoint>>()
+const extensionMountPointListeners = new Set<() => void>()
+let extensionMountPointsVersion = 0
+
+function notifyExtensionMountPointListeners(): void {
+  extensionMountPointsVersion += 1
+  for (const listener of extensionMountPointListeners) {
+    try {
+      listener()
+    } catch (err) {
+      console.error('[Spindle] Extension mount-point listener error:', err)
+    }
+  }
+}
+
+function recordExtensionMountPoint(extensionId: string, point: SpindleMountPoint): void {
+  const existing = extensionMountPoints.get(extensionId)
+  if (existing?.has(point)) return
+
+  const next = existing ? new Set(existing) : new Set<SpindleMountPoint>()
+  next.add(point)
+  extensionMountPoints.set(extensionId, next)
+  notifyExtensionMountPointListeners()
+}
+
+function clearExtensionMountPoints(extensionId: string): void {
+  if (!extensionMountPoints.delete(extensionId)) return
+  notifyExtensionMountPointListeners()
+}
 
 function deliverBackendMessage(loaded: LoadedExtension, payload: unknown): void {
   for (const handler of loaded.backendHandlers) {
@@ -394,6 +429,7 @@ async function doLoadFrontendExtension(
       }
       mountRoots.clear()
       mountedPoints.clear()
+      clearExtensionMountPoints(extensionId)
     }
 
     let loaded!: LoadedExtension
@@ -443,6 +479,7 @@ async function doLoadFrontendExtension(
             root.setAttribute('data-spindle-mount-point', point)
             mountRoots.set(point, root)
           }
+          recordExtensionMountPoint(extensionId, point)
           if (!mountedPoints.has(point)) {
             root.replaceChildren()
             mountedPoints.add(point)
@@ -1242,6 +1279,21 @@ export function routeFrontendProcessEvent(extensionId: string, payload: Frontend
 
 export function getLoadedExtensions(): Map<string, LoadedExtension> {
   return loadedExtensions
+}
+
+export function hasExtensionMountPoint(extensionId: string, point: SpindleMountPoint): boolean {
+  return extensionMountPoints.get(extensionId)?.has(point) ?? false
+}
+
+export function subscribeExtensionMountPoints(listener: () => void): () => void {
+  extensionMountPointListeners.add(listener)
+  return () => {
+    extensionMountPointListeners.delete(listener)
+  }
+}
+
+export function getExtensionMountPointsVersion(): number {
+  return extensionMountPointsVersion
 }
 
 export async function unloadAllFrontendExtensions(): Promise<void> {

@@ -71,16 +71,18 @@ function getFontScale() {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
 }
 
+function isEditableElement(el: Element | null): boolean {
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLElement && el.isContentEditable)
+  )
+}
+
 function getFocusedEditableMessageId(root: HTMLElement | null) {
   const active = document.activeElement
   if (!root || !active || !root.contains(active)) return null
-  if (
-    !(active instanceof HTMLInputElement) &&
-    !(active instanceof HTMLTextAreaElement) &&
-    !(active instanceof HTMLElement && active.isContentEditable)
-  ) {
-    return null
-  }
+  if (!(active instanceof Element) || !isEditableElement(active)) return null
   return active.closest<HTMLElement>('[data-message-id]')?.dataset.messageId ?? null
 }
 
@@ -193,6 +195,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   // This replaces CSS padding-bottom so isAtEnd/scrollToEnd/followOnAppend
   // all land at the true bottom of the list.
   const [inputSafeZone, setInputSafeZone] = useState(100)
+  const [editableFocusInList, setEditableFocusInList] = useState(false)
   const interceptorRegistryVersion = useSyncExternalStore(
     subscribeTagInterceptorRegistry,
     getTagInterceptorRegistryVersion,
@@ -251,6 +254,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     averageMeasuredHeightRef.current = null
     initialBottomPinnedChatRef.current = null
     initialScrollStartedAtRef.current = 0
+    setEditableFocusInList(false)
     if (initialScrollRafRef.current != null) {
       cancelAnimationFrame(initialScrollRafRef.current)
       initialScrollRafRef.current = null
@@ -433,6 +437,51 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     }
   }, [chatId])
 
+  // While the user is typing inside the list (message edit textarea, an
+  // extension-mounted input), the browser owns caret reveal. Treat that focus
+  // like an explicit unpin so virtualizer end anchoring cannot fight it.
+  const hasInListEditableFocus = useCallback(() => {
+    const el = scrollRef.current
+    const active = document.activeElement
+    return !!(el && active instanceof Element && el.contains(active) && isEditableElement(active))
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    let blurTimer = 0
+    const syncEditableFocus = () => {
+      const hasFocus = hasInListEditableFocus()
+      setEditableFocusInList(hasFocus)
+      if (!hasFocus) return
+
+      cancelInitialScrollToEnd()
+      isPinnedRef.current = false
+      suppressNextPinUpdateRef.current = false
+      recordScrollPosition()
+    }
+
+    const handleFocusIn = () => {
+      if (blurTimer) window.clearTimeout(blurTimer)
+      syncEditableFocus()
+    }
+    const handleFocusOut = () => {
+      if (blurTimer) window.clearTimeout(blurTimer)
+      blurTimer = window.setTimeout(syncEditableFocus, 120)
+    }
+
+    el.addEventListener('focusin', handleFocusIn)
+    el.addEventListener('focusout', handleFocusOut)
+    syncEditableFocus()
+
+    return () => {
+      if (blurTimer) window.clearTimeout(blurTimer)
+      el.removeEventListener('focusin', handleFocusIn)
+      el.removeEventListener('focusout', handleFocusOut)
+    }
+  }, [cancelInitialScrollToEnd, hasInListEditableFocus, recordScrollPosition])
+
   const estimateMessageSize = useCallback((message: Message, measureKey: string) => {
     const measured = measuredRowHeightsRef.current.get(measureKey)
     if (measured) return measured
@@ -612,8 +661,8 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     overscan: initialRangeWarm ? (isCoarsePointer ? 8 : 5) : 2,
     getItemKey,
     rangeExtractor,
-    anchorTo: 'end',
-    followOnAppend: true,
+    anchorTo: editableFocusInList ? 'start' : 'end',
+    followOnAppend: editableFocusInList ? false : true,
     scrollEndThreshold: SCROLL_END_THRESHOLD,
     paddingEnd: inputSafeZone,
     directDomUpdatesMode: 'position',
@@ -766,21 +815,6 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
 
   useEffect(() => () => {
     if (settleRafRef.current) cancelAnimationFrame(settleRafRef.current)
-  }, [])
-
-  // While the user is typing inside the list (message edit textarea, an
-  // extension-mounted input), every auto-pin fights the browser's native
-  // caret-reveal scrolling — on iOS Safari the two attractors oscillate the
-  // viewport on every keystroke. Suspend auto-pinning until focus leaves.
-  const hasInListEditableFocus = useCallback(() => {
-    const el = scrollRef.current
-    const active = document.activeElement
-    if (!el || !active || !el.contains(active)) return false
-    return (
-      active instanceof HTMLInputElement ||
-      active instanceof HTMLTextAreaElement ||
-      (active instanceof HTMLElement && active.isContentEditable)
-    )
   }, [])
 
   const pinToBottomIfNeeded = useCallback((el: HTMLElement) => {

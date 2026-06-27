@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { RefreshCw, RotateCw, Trash2, Github, Plus, ChevronDown, Download, FolderOpen, SlidersHorizontal } from 'lucide-react'
@@ -11,6 +11,11 @@ import SpindleSettings from './SpindleSettings'
 import { Spinner } from '@/components/shared/Spinner'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import { getSafeHttpsUrl } from '@/lib/navigationSafety'
+import {
+  getExtensionMountPointsVersion,
+  hasExtensionMountPoint,
+  subscribeExtensionMountPoints,
+} from '@/lib/spindle/loader'
 import { toast } from '@/lib/toast'
 import styles from './SpindlePanel.module.css'
 import clsx from 'clsx'
@@ -43,8 +48,22 @@ export default function SpindlePanel() {
   const setOperationStatus = useStore((s) => s.setExtensionOperationStatus)
   const bulkUpdateStatus = useStore((s) => s.bulkUpdateStatus)
   const updateAllExtensions = useStore((s) => s.updateAllExtensions)
+  const extensionMountPointsVersion = useSyncExternalStore(
+    subscribeExtensionMountPoints,
+    getExtensionMountPointsVersion,
+    getExtensionMountPointsVersion,
+  )
 
   const isPrivileged = spindlePrivileged || user?.role === 'owner' || user?.role === 'admin'
+
+  const extensionsWithRegisteredSettings = useMemo(
+    () => new Set(
+      extensions
+        .filter((ext) => hasExtensionMountPoint(ext.id, 'settings_extensions'))
+        .map((ext) => ext.id)
+    ),
+    [extensions, extensionMountPointsVersion]
+  )
 
   const [togglingPerm, setTogglingPerm] = useState<string | null>(null)
   const [installUrl, setInstallUrl] = useState('')
@@ -607,16 +626,17 @@ export default function SpindlePanel() {
                       <span>{t('spindlePanel.branch')}</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className={styles.labeledBtn}
-                    onClick={() => openSettings('extensions', { extensionId: ext.id })}
-                    disabled={!ext.has_frontend}
-                    title={ext.has_frontend ? t('spindlePanel.openSettings') : t('spindlePanel.noSettings')}
-                  >
-                    <SlidersHorizontal size={14} />
-                    <span>{t('spindlePanel.settingsLabel')}</span>
-                  </button>
+                  {extensionsWithRegisteredSettings.has(ext.id) && (
+                    <button
+                      type="button"
+                      className={styles.labeledBtn}
+                      onClick={() => openSettings('extensions', { extensionId: ext.id })}
+                      title={t('spindlePanel.openSettings')}
+                    >
+                      <SlidersHorizontal size={14} />
+                      <span>{t('spindlePanel.settingsLabel')}</span>
+                    </button>
+                  )}
                 </div>
                 <div className={styles.secondaryActions}>
                   {getSafeHttpsUrl(ext.github) && (
