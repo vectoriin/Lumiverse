@@ -191,11 +191,11 @@ export function getReasoningBindingSummary(settings: ReasoningSettings, promptBi
   }
 
   if (settings.keepInHistory === -1) {
-    parts.push('keep all history')
+    parts.push('keep all prompt history')
   } else if (settings.keepInHistory === 0) {
-    parts.push('strip history')
+    parts.push('strip prompt history')
   } else {
-    parts.push(`keep ${settings.keepInHistory} history`)
+    parts.push(`keep ${settings.keepInHistory} prompt blocks`)
   }
 
   if (!settings.autoParse) parts.push('manual parse')

@@ -143,6 +143,8 @@ export default function WorldBookPanel() {
   // Debounce refs
   const bookNameTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const bookDescTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const panelScrollRef = useRef<HTMLDivElement>(null)
+  const [paginationContainer, setPaginationContainer] = useState<HTMLDivElement | null>(null)
 
   // Load books
   const loadBooks = useCallback(async () => {
@@ -649,130 +651,23 @@ export default function WorldBookPanel() {
 
   return (
     <div className={clsx(styles.panel, isMobile && styles.panelMobile)}>
-      {/* Global world books section */}
-      {isMobile ? (
-        <MobileAttachmentAccordion
-          icon={<Globe size={12} />}
-          label={t('worldBookPanel.alwaysActive')}
-          count={activeGlobalBooks.length}
-          collapsed={globalSectionCollapsed}
-          variant="global"
-          preview={renderAttachmentPreview(activeGlobalBooks, t('worldBookPanel.noGlobalActive'), 'global')}
-          onToggle={() => setGlobalSectionCollapsed((collapsed) => !collapsed)}
-        >
-          <div className={styles.attachmentAccordionActions}>
-            <SearchableSelect
-              multi
-              value={globalWorldBooks ?? []}
-              onChange={(ids) => { void setGlobalBooks(ids) }}
-              options={bookPickerOptions}
-              triggerLabel={t('worldBookPanel.add')}
-              triggerIcon={<Plus size={11} />}
-              searchPlaceholder={t('worldBookPanel.searchWorldBooks')}
-              emptyMessage={t('worldBookPanel.noWorldBooksAvailable')}
-              className={styles.bookPickerSelect}
-              portal
-              align="right"
-              minWidth={280}
-            />
-          </div>
-          {activeGlobalBooks.length > 0 ? (
-            <div className={styles.globalPills}>
-              {activeGlobalBooks.map((book) => (
-                <span key={book.id} className={styles.globalPill}>
-                  <button
-                    type="button"
-                    className={styles.globalPillName}
-                    onClick={() => setSelectedBookId(book.id)}
-                    title={t('worldBookPanel.editBook')}
-                  >
-                    {book.name}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.globalPillRemove}
-                    onClick={() => removeGlobalBook(book.id)}
-                    title={t('worldBookPanel.removeFromAlwaysActive')}
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <span className={styles.globalHint}>{t('worldBookPanel.noGlobalActive')}</span>
-          )}
-        </MobileAttachmentAccordion>
-      ) : (
-        <div className={styles.globalSection}>
-          <div className={styles.globalHeader}>
-            <Globe size={12} className={styles.globalIcon} />
-            <span className={styles.globalLabel}>{t('worldBookPanel.alwaysActive')}</span>
-            <SearchableSelect
-              multi
-              value={globalWorldBooks ?? []}
-              onChange={(ids) => { void setGlobalBooks(ids) }}
-              options={bookPickerOptions}
-              triggerLabel={t('worldBookPanel.add')}
-              triggerIcon={<Plus size={11} />}
-              searchPlaceholder={t('worldBookPanel.searchWorldBooks')}
-              emptyMessage={t('worldBookPanel.noWorldBooksAvailable')}
-              className={styles.bookPickerSelect}
-              portal
-              align="right"
-              minWidth={280}
-            />
-          </div>
-          {activeGlobalBooks.length > 0 ? (
-            <div className={styles.globalPills}>
-              {activeGlobalBooks.map((book) => (
-                <span key={book.id} className={styles.globalPill}>
-                  <button
-                    type="button"
-                    className={styles.globalPillName}
-                    onClick={() => setSelectedBookId(book.id)}
-                    title={t('worldBookPanel.editBook')}
-                  >
-                    {book.name}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.globalPillRemove}
-                    onClick={() => removeGlobalBook(book.id)}
-                    title={t('worldBookPanel.removeFromAlwaysActive')}
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <span className={styles.globalHint}>{t('worldBookPanel.noGlobalActive')}</span>
-          )}
-        </div>
-      )}
-
-      {/* Chat-scoped world books section */}
-      {isMobile ? (
-        <MobileAttachmentAccordion
-          icon={<MessageSquare size={12} />}
-          label={t('worldBookPanel.thisChatOnly')}
-          count={activeChatBooks.length}
-          collapsed={chatSectionCollapsed}
-          variant="chat"
-          preview={renderAttachmentPreview(
-            activeChatBooks,
-            activeChatId ? t('worldBookPanel.noChatActive') : t('worldBookPanel.openChatToAdd'),
-            'chat',
-          )}
-          onToggle={() => setChatSectionCollapsed((collapsed) => !collapsed)}
-        >
-          {activeChatId ? (
+      <div ref={panelScrollRef} className={styles.panelScroll}>
+        {/* Global world books section */}
+        {isMobile ? (
+          <MobileAttachmentAccordion
+            icon={<Globe size={12} />}
+            label={t('worldBookPanel.alwaysActive')}
+            count={activeGlobalBooks.length}
+            collapsed={globalSectionCollapsed}
+            variant="global"
+            preview={renderAttachmentPreview(activeGlobalBooks, t('worldBookPanel.noGlobalActive'), 'global')}
+            onToggle={() => setGlobalSectionCollapsed((collapsed) => !collapsed)}
+          >
             <div className={styles.attachmentAccordionActions}>
               <SearchableSelect
                 multi
-                value={chatWorldBookIds}
-                onChange={(ids) => { void handleChatBooksChange(ids) }}
+                value={globalWorldBooks ?? []}
+                onChange={(ids) => { void setGlobalBooks(ids) }}
                 options={bookPickerOptions}
                 triggerLabel={t('worldBookPanel.add')}
                 triggerIcon={<Plus size={11} />}
@@ -784,46 +679,42 @@ export default function WorldBookPanel() {
                 minWidth={280}
               />
             </div>
-          ) : null}
-          {!activeChatId ? (
-            <span className={styles.chatHint}>{t('worldBookPanel.openChatToAdd')}</span>
-          ) : activeChatBooks.length > 0 ? (
-            <div className={styles.chatPills}>
-              {activeChatBooks.map((book) => (
-                <span key={book.id} className={styles.chatPill}>
-                  <button
-                    type="button"
-                    className={styles.chatPillName}
-                    onClick={() => setSelectedBookId(book.id)}
-                    title={t('worldBookPanel.editBook')}
-                  >
-                    {book.name}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.chatPillRemove}
-                    onClick={() => removeChatBook(book.id)}
-                    title={t('worldBookPanel.removeFromChat')}
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <span className={styles.chatHint}>{t('worldBookPanel.noChatActive')}</span>
-          )}
-        </MobileAttachmentAccordion>
-      ) : (
-        <div className={clsx(styles.chatSection, !activeChatId && styles.chatSectionDisabled)}>
-          <div className={styles.chatHeader}>
-            <MessageSquare size={12} className={styles.chatIcon} />
-            <span className={styles.chatLabel}>{t('worldBookPanel.thisChatOnly')}</span>
-            {activeChatId ? (
+            {activeGlobalBooks.length > 0 ? (
+              <div className={styles.globalPills}>
+                {activeGlobalBooks.map((book) => (
+                  <span key={book.id} className={styles.globalPill}>
+                    <button
+                      type="button"
+                      className={styles.globalPillName}
+                      onClick={() => setSelectedBookId(book.id)}
+                      title={t('worldBookPanel.editBook')}
+                    >
+                      {book.name}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.globalPillRemove}
+                      onClick={() => removeGlobalBook(book.id)}
+                      title={t('worldBookPanel.removeFromAlwaysActive')}
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className={styles.globalHint}>{t('worldBookPanel.noGlobalActive')}</span>
+            )}
+          </MobileAttachmentAccordion>
+        ) : (
+          <div className={styles.globalSection}>
+            <div className={styles.globalHeader}>
+              <Globe size={12} className={styles.globalIcon} />
+              <span className={styles.globalLabel}>{t('worldBookPanel.alwaysActive')}</span>
               <SearchableSelect
                 multi
-                value={chatWorldBookIds}
-                onChange={(ids) => { void handleChatBooksChange(ids) }}
+                value={globalWorldBooks ?? []}
+                onChange={(ids) => { void setGlobalBooks(ids) }}
                 options={bookPickerOptions}
                 triggerLabel={t('worldBookPanel.add')}
                 triggerIcon={<Plus size={11} />}
@@ -834,167 +725,283 @@ export default function WorldBookPanel() {
                 align="right"
                 minWidth={280}
               />
-            ) : null}
-          </div>
-          {!activeChatId ? (
-            <span className={styles.chatHint}>{t('worldBookPanel.openChatToAdd')}</span>
-          ) : activeChatBooks.length > 0 ? (
-            <div className={styles.chatPills}>
-              {activeChatBooks.map((book) => (
-                <span key={book.id} className={styles.chatPill}>
-                  <button
-                    type="button"
-                    className={styles.chatPillName}
-                    onClick={() => setSelectedBookId(book.id)}
-                    title={t('worldBookPanel.editBook')}
-                  >
-                    {book.name}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.chatPillRemove}
-                    onClick={() => removeChatBook(book.id)}
-                    title={t('worldBookPanel.removeFromChat')}
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              ))}
             </div>
-          ) : (
-            <span className={styles.chatHint}>{t('worldBookPanel.noChatActive')}</span>
+            {activeGlobalBooks.length > 0 ? (
+              <div className={styles.globalPills}>
+                {activeGlobalBooks.map((book) => (
+                  <span key={book.id} className={styles.globalPill}>
+                    <button
+                      type="button"
+                      className={styles.globalPillName}
+                      onClick={() => setSelectedBookId(book.id)}
+                      title={t('worldBookPanel.editBook')}
+                    >
+                      {book.name}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.globalPillRemove}
+                      onClick={() => removeGlobalBook(book.id)}
+                      title={t('worldBookPanel.removeFromAlwaysActive')}
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className={styles.globalHint}>{t('worldBookPanel.noGlobalActive')}</span>
+            )}
+          </div>
+        )}
+
+        {/* Chat-scoped world books section */}
+        {isMobile ? (
+          <MobileAttachmentAccordion
+            icon={<MessageSquare size={12} />}
+            label={t('worldBookPanel.thisChatOnly')}
+            count={activeChatBooks.length}
+            collapsed={chatSectionCollapsed}
+            variant="chat"
+            preview={renderAttachmentPreview(
+              activeChatBooks,
+              activeChatId ? t('worldBookPanel.noChatActive') : t('worldBookPanel.openChatToAdd'),
+              'chat',
+            )}
+            onToggle={() => setChatSectionCollapsed((collapsed) => !collapsed)}
+          >
+            {activeChatId ? (
+              <div className={styles.attachmentAccordionActions}>
+                <SearchableSelect
+                  multi
+                  value={chatWorldBookIds}
+                  onChange={(ids) => { void handleChatBooksChange(ids) }}
+                  options={bookPickerOptions}
+                  triggerLabel={t('worldBookPanel.add')}
+                  triggerIcon={<Plus size={11} />}
+                  searchPlaceholder={t('worldBookPanel.searchWorldBooks')}
+                  emptyMessage={t('worldBookPanel.noWorldBooksAvailable')}
+                  className={styles.bookPickerSelect}
+                  portal
+                  align="right"
+                  minWidth={280}
+                />
+              </div>
+            ) : null}
+            {!activeChatId ? (
+              <span className={styles.chatHint}>{t('worldBookPanel.openChatToAdd')}</span>
+            ) : activeChatBooks.length > 0 ? (
+              <div className={styles.chatPills}>
+                {activeChatBooks.map((book) => (
+                  <span key={book.id} className={styles.chatPill}>
+                    <button
+                      type="button"
+                      className={styles.chatPillName}
+                      onClick={() => setSelectedBookId(book.id)}
+                      title={t('worldBookPanel.editBook')}
+                    >
+                      {book.name}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.chatPillRemove}
+                      onClick={() => removeChatBook(book.id)}
+                      title={t('worldBookPanel.removeFromChat')}
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className={styles.chatHint}>{t('worldBookPanel.noChatActive')}</span>
+            )}
+          </MobileAttachmentAccordion>
+        ) : (
+          <div className={clsx(styles.chatSection, !activeChatId && styles.chatSectionDisabled)}>
+            <div className={styles.chatHeader}>
+              <MessageSquare size={12} className={styles.chatIcon} />
+              <span className={styles.chatLabel}>{t('worldBookPanel.thisChatOnly')}</span>
+              {activeChatId ? (
+                <SearchableSelect
+                  multi
+                  value={chatWorldBookIds}
+                  onChange={(ids) => { void handleChatBooksChange(ids) }}
+                  options={bookPickerOptions}
+                  triggerLabel={t('worldBookPanel.add')}
+                  triggerIcon={<Plus size={11} />}
+                  searchPlaceholder={t('worldBookPanel.searchWorldBooks')}
+                  emptyMessage={t('worldBookPanel.noWorldBooksAvailable')}
+                  className={styles.bookPickerSelect}
+                  portal
+                  align="right"
+                  minWidth={280}
+                />
+              ) : null}
+            </div>
+            {!activeChatId ? (
+              <span className={styles.chatHint}>{t('worldBookPanel.openChatToAdd')}</span>
+            ) : activeChatBooks.length > 0 ? (
+              <div className={styles.chatPills}>
+                {activeChatBooks.map((book) => (
+                  <span key={book.id} className={styles.chatPill}>
+                    <button
+                      type="button"
+                      className={styles.chatPillName}
+                      onClick={() => setSelectedBookId(book.id)}
+                      title={t('worldBookPanel.editBook')}
+                    >
+                      {book.name}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.chatPillRemove}
+                      onClick={() => removeChatBook(book.id)}
+                      title={t('worldBookPanel.removeFromChat')}
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className={styles.chatHint}>{t('worldBookPanel.noChatActive')}</span>
+            )}
+          </div>
+        )}
+
+        {/* Activation Settings */}
+        <div className={styles.wiSettingsSection}>
+          <button
+            type="button"
+            className={styles.wiSettingsToggle}
+            onClick={() => setWiSettingsOpen((o) => !o)}
+          >
+            <Settings size={12} />
+            <span>{t('worldBookPanel.activationSettings')}</span>
+            <ChevronDown
+              size={10}
+              className={clsx(styles.chevron, wiSettingsOpen && styles.chevronOpen)}
+            />
+          </button>
+          {wiSettingsOpen && (
+            <WorldInfoSettingsForm
+              settings={worldInfoSettings}
+              onChange={(patch) => setSetting('worldInfoSettings', { ...worldInfoSettings, ...patch })}
+            />
           )}
         </div>
-      )}
 
-      {/* Activation Settings */}
-      <div className={styles.wiSettingsSection}>
-        <button
-          type="button"
-          className={styles.wiSettingsToggle}
-          onClick={() => setWiSettingsOpen((o) => !o)}
-        >
-          <Settings size={12} />
-          <span>{t('worldBookPanel.activationSettings')}</span>
-          <ChevronDown
-            size={10}
-            className={clsx(styles.chevron, wiSettingsOpen && styles.chevronOpen)}
+        {/* Top bar: Book selector + actions */}
+        <div className={clsx(styles.topBar, isMobile && styles.topBarMobile)}>
+          <SearchableSelect
+            value={selectedBookId || ''}
+            onChange={(v) => setSelectedBookId(v || null)}
+            options={bookPickerOptions}
+            placeholder={t('worldBookPanel.selectBook')}
+            searchPlaceholder={t('worldBookPanel.searchWorldBooks')}
+            emptyMessage={t('worldBookPanel.noWorldBooksAvailable')}
+            ariaLabel={t('worldBookPanel.selectWorldBookAria')}
+            className={styles.bookSelectWrapper}
+            clearable
+            clearLabel={t('worldBookPanel.none')}
           />
-        </button>
-        {wiSettingsOpen && (
-          <WorldInfoSettingsForm
-            settings={worldInfoSettings}
-            onChange={(patch) => setSetting('worldInfoSettings', { ...worldInfoSettings, ...patch })}
-          />
-        )}
-      </div>
-
-      {/* Top bar: Book selector + actions */}
-      <div className={clsx(styles.topBar, isMobile && styles.topBarMobile)}>
-        <SearchableSelect
-          value={selectedBookId || ''}
-          onChange={(v) => setSelectedBookId(v || null)}
-          options={bookPickerOptions}
-          placeholder={t('worldBookPanel.selectBook')}
-          searchPlaceholder={t('worldBookPanel.searchWorldBooks')}
-          emptyMessage={t('worldBookPanel.noWorldBooksAvailable')}
-          ariaLabel={t('worldBookPanel.selectWorldBookAria')}
-          className={styles.bookSelectWrapper}
-          clearable
-          clearLabel={t('worldBookPanel.none')}
-        />
-        {isMobile ? (
-          <div className={styles.mobileTopActions}>
-            {selectedBookId && (
+          {isMobile ? (
+            <div className={styles.mobileTopActions}>
+              {selectedBookId && (
+                <Button
+                  size="icon-sm"
+                  variant={bookFieldsOpen ? 'secondary' : 'ghost'}
+                  onClick={() => setBookFieldsOpen((open) => !open)}
+                  title={t('worldBookPanel.bookDetails')}
+                  icon={<BookOpen size={14} />}
+                />
+              )}
+              <Button size="icon-sm" variant="ghost" onClick={handleCreateBook} title={t('worldBookPanel.newBook')} icon={<Plus size={14} />} />
+              <Button size="icon-sm" variant="ghost" onClick={handleOpenBookActionMenu} title={t('moreActions')} icon={<MoreVertical size={14} />} />
+            </div>
+          ) : (
+            <>
               <Button
                 size="icon-sm"
-                variant={bookFieldsOpen ? 'secondary' : 'ghost'}
-                onClick={() => setBookFieldsOpen((open) => !open)}
-                title={t('worldBookPanel.bookDetails')}
-                icon={<BookOpen size={14} />}
+                variant="ghost"
+                onClick={toggleBookListSortDir}
+                title={worldBookListSortDir === 'asc' ? t('worldBookPanel.sortedAsc') : t('worldBookPanel.sortedDesc')}
+                icon={worldBookListSortDir === 'asc' ? <ArrowDownAZ size={14} /> : <ArrowDownZA size={14} />}
               />
-            )}
-            <Button size="icon-sm" variant="ghost" onClick={handleCreateBook} title={t('worldBookPanel.newBook')} icon={<Plus size={14} />} />
-            <Button size="icon-sm" variant="ghost" onClick={handleOpenBookActionMenu} title={t('moreActions')} icon={<MoreVertical size={14} />} />
-          </div>
-        ) : (
-          <>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              onClick={toggleBookListSortDir}
-              title={worldBookListSortDir === 'asc' ? t('worldBookPanel.sortedAsc') : t('worldBookPanel.sortedDesc')}
-              icon={worldBookListSortDir === 'asc' ? <ArrowDownAZ size={14} /> : <ArrowDownZA size={14} />}
-            />
-            {selectedBookSourceMeta && (
-              <span className={styles.sourceBadge} data-tooltip={selectedBookSourceMeta.label}>
-                {selectedBookSourceMeta.icon}
-              </span>
-            )}
-            <Button size="icon-sm" variant="ghost" onClick={handleCreateBook} title={t('worldBookPanel.newBook')} icon={<Plus size={14} />} />
-            <Button size="icon-sm" variant="ghost" onClick={() => setShowImport(true)} title={t('worldBookPanel.importBook')} icon={<Download size={14} />} />
-            {selectedBookId && (
-              <div className={styles.exportWrapper} ref={exportBtnRef}>
-                <Button size="icon-sm" variant="ghost" onClick={openExportPopover} title={t('worldBookPanel.exportBook')} icon={<Upload size={14} />} />
-                {exportPopoverOpen && exportPopoverPos && createPortal(
-                  <div
-                    ref={exportPopoverRef}
-                    className={styles.exportPopover}
-                    style={{ top: exportPopoverPos.top, left: exportPopoverPos.left }}
-                  >
-                    <button type="button" className={styles.exportPopoverItem} onClick={() => handleExport('lumiverse')}>
-                      {t('worldBookPanel.exportLumiverse')}
-                    </button>
-                    <button type="button" className={styles.exportPopoverItem} onClick={() => handleExport('character_book')}>
-                      {t('worldBookPanel.exportCharacterBook')}
-                    </button>
-                    <button type="button" className={styles.exportPopoverItem} onClick={() => handleExport('sillytavern')}>
-                      {t('worldBookPanel.exportSillyTavern')}
-                    </button>
-                  </div>,
-                  document.body
-                )}
-              </div>
-            )}
-            <Button size="icon-sm" variant="ghost" onClick={handlePopOut} title={t('worldBookPanel.popOut')} icon={<Maximize2 size={14} />} />
-          </>
-        )}
+              {selectedBookSourceMeta && (
+                <span className={styles.sourceBadge} data-tooltip={selectedBookSourceMeta.label}>
+                  {selectedBookSourceMeta.icon}
+                </span>
+              )}
+              <Button size="icon-sm" variant="ghost" onClick={handleCreateBook} title={t('worldBookPanel.newBook')} icon={<Plus size={14} />} />
+              <Button size="icon-sm" variant="ghost" onClick={() => setShowImport(true)} title={t('worldBookPanel.importBook')} icon={<Download size={14} />} />
+              {selectedBookId && (
+                <div className={styles.exportWrapper} ref={exportBtnRef}>
+                  <Button size="icon-sm" variant="ghost" onClick={openExportPopover} title={t('worldBookPanel.exportBook')} icon={<Upload size={14} />} />
+                  {exportPopoverOpen && exportPopoverPos && createPortal(
+                    <div
+                      ref={exportPopoverRef}
+                      className={styles.exportPopover}
+                      style={{ top: exportPopoverPos.top, left: exportPopoverPos.left }}
+                    >
+                      <button type="button" className={styles.exportPopoverItem} onClick={() => handleExport('lumiverse')}>
+                        {t('worldBookPanel.exportLumiverse')}
+                      </button>
+                      <button type="button" className={styles.exportPopoverItem} onClick={() => handleExport('character_book')}>
+                        {t('worldBookPanel.exportCharacterBook')}
+                      </button>
+                      <button type="button" className={styles.exportPopoverItem} onClick={() => handleExport('sillytavern')}>
+                        {t('worldBookPanel.exportSillyTavern')}
+                      </button>
+                    </div>,
+                    document.body
+                  )}
+                </div>
+              )}
+              <Button size="icon-sm" variant="ghost" onClick={handlePopOut} title={t('worldBookPanel.popOut')} icon={<Maximize2 size={14} />} />
+            </>
+          )}
+        </div>
+
+        <div className={styles.panelBody}>
+          {selectedBookId ? (
+            <>
+              {/* Book fields (collapsible) */}
+              {!isMobile && (
+                <button
+                  type="button"
+                  className={styles.bookFieldsToggle}
+                  onClick={() => setBookFieldsOpen((o) => !o)}
+                >
+                  <BookOpen size={12} />
+                  <span className={styles.bookFieldsLabel}>{bookName || t('worldBookPanel.bookDetails')}</span>
+                  <ChevronDown
+                    size={12}
+                    className={clsx(styles.chevron, bookFieldsOpen && styles.chevronOpen)}
+                  />
+                </button>
+              )}
+
+              {bookFieldsOpen && bookFieldsContent}
+
+              <WorldBookEntriesSection
+                books={books}
+                selectedBookId={selectedBookId}
+                onRefreshVectorSummary={loadVectorSummary}
+                scrollContainerRef={panelScrollRef}
+                paginationContainer={paginationContainer}
+              />
+
+            </>
+          ) : (
+            <div className={styles.emptyState}>
+              {t('worldBookPanel.selectOrCreate')}
+            </div>
+          )}
+        </div>
       </div>
-
-      <div className={styles.panelBody}>
-        {selectedBookId ? (
-          <>
-            {/* Book fields (collapsible) */}
-            {!isMobile && (
-              <button
-                type="button"
-                className={styles.bookFieldsToggle}
-                onClick={() => setBookFieldsOpen((o) => !o)}
-              >
-                <BookOpen size={12} />
-                <span className={styles.bookFieldsLabel}>{bookName || t('worldBookPanel.bookDetails')}</span>
-                <ChevronDown
-                  size={12}
-                  className={clsx(styles.chevron, bookFieldsOpen && styles.chevronOpen)}
-                />
-              </button>
-            )}
-
-            {bookFieldsOpen && bookFieldsContent}
-
-            <WorldBookEntriesSection
-              books={books}
-              selectedBookId={selectedBookId}
-              onRefreshVectorSummary={loadVectorSummary}
-            />
-
-          </>
-        ) : (
-          <div className={styles.emptyState}>
-            {t('worldBookPanel.selectOrCreate')}
-          </div>
-        )}
-      </div>
+      <div ref={setPaginationContainer} className={styles.panelFooter} />
 
       {/* Delete book confirmation */}
       {deleteBookConfirm && (

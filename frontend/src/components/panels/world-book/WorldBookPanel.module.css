@@ -1,27 +1,59 @@
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px 12px 0;
   height: 100%;
   min-height: 0;
   overflow: hidden;
 }
 
-.panelBody {
-  flex: 1;
+.panelScroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
   min-height: 0;
-  overflow-y: hidden;
+  overflow-y: auto;
   overflow-x: hidden;
+  padding: 12px 12px 0;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-block: 12px calc(96px + env(safe-area-inset-bottom, 0px) + var(--app-keyboard-inset-bottom, 0px));
+}
+
+.panelScroll > * {
+  flex-shrink: 0;
+}
+
+.panelBody {
   display: flex;
   flex-direction: column;
   gap: 10px;
   position: relative;
+  padding-bottom: calc(12px + var(--app-keyboard-inset-bottom, 0px));
 }
 
-.panelMobile {
+.panelMobile .panelScroll {
   gap: 10px;
   padding: 10px 10px 0;
+}
+
+.panelFooter {
+  flex-shrink: 0;
+  background: var(--lumiverse-bg-deep);
+  border-top: 1px solid color-mix(in srgb, var(--lumiverse-border) 55%, transparent);
+  padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.panelFooter::-webkit-scrollbar {
+  display: none;
+}
+
+.panelFooter:empty {
+  display: none;
 }
 
 .panelMobile .globalSection,

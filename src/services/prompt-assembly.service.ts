@@ -4887,7 +4887,8 @@ function mergeConsecutiveUserMessages(
 
 /**
  * Strip reasoning tags (and surrounding whitespace) from older assistant messages
- * in the chat history range based on reasoningSettings.keepInHistory.
+ * in the assembled prompt history range based on reasoningSettings.keepInHistory.
+ * This does not control how saved chat messages are rendered in the UI.
  *
  *   keepInHistory = -1  → keep all (no-op)
  *   keepInHistory =  0  → strip reasoning from every message

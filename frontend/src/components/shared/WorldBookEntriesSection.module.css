@@ -248,9 +248,16 @@
 .section {
   padding: 0 12px;
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+}
+
+.sectionStandaloneScroll {
+  flex: 1 1 auto;
+}
+
+.sectionSharedScroll {
+  flex: 0 0 auto;
 }
 
 .sectionMobile {
@@ -266,6 +273,15 @@
   scroll-padding-block: 10px calc(96px + var(--app-keyboard-inset-bottom, 0px));
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+.entryScrollShared {
+  flex: 0 0 auto;
+  overflow: visible;
+  padding-bottom: 0;
+  scroll-padding-block: 0;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: auto;
 }
 
 .entryList {
@@ -293,6 +309,12 @@
 }
 
 .entryPaginationControls {
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.entryPaginationDocked {
   width: max-content;
   max-width: 100%;
   margin: 0 auto;

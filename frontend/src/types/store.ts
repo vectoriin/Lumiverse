@@ -344,6 +344,7 @@ export interface ReasoningSettings {
   apiReasoning: boolean
   reasoningEffort: ReasoningEffort
   /** How many recent reasoning blocks to keep in assembled prompt history.
+   *  This only affects what gets sent back to the model, not message-bubble display.
    *  0 = strip all, -1 = keep all (unlimited), N = keep last N. */
   keepInHistory: number
   /** Anthropic-only. Maps to `thinking.display` in the Messages API request body.

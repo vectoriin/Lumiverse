@@ -217,13 +217,16 @@ export default function PresetManager() {
               integer
               onChange={(value) => updateReasoning({ keepInHistory: value ?? reasoningSettings.keepInHistory })}
             />
-            <span className={styles.historyHint}>
-              {reasoningSettings.keepInHistory === -1
-                ? t('presetManager.keepAllReasoning')
-                : reasoningSettings.keepInHistory === 0
-                  ? t('presetManager.stripAllReasoning')
-                  : t('presetManager.keepLastBlocks', { count: reasoningSettings.keepInHistory })}
-            </span>
+            <div className={styles.historyMeta}>
+              <span className={styles.historyHint}>
+                {reasoningSettings.keepInHistory === -1
+                  ? t('presetManager.keepAllReasoning')
+                  : reasoningSettings.keepInHistory === 0
+                    ? t('presetManager.stripAllReasoning')
+                    : t('presetManager.keepLastBlocks', { count: reasoningSettings.keepInHistory })}
+              </span>
+              <span className={styles.historySubHint}>{t('presetManager.keepInHistoryHint')}</span>
+            </div>
           </div>
         </div>
       </CollapsibleSection>

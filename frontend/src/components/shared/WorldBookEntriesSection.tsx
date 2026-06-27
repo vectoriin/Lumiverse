@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { createPortal } from 'react-dom'
 import { useWorldBookEntryLabels } from '@/lib/i18n/worldBookEntryLabels'
 import {
   ArrowDown,
@@ -343,12 +344,16 @@ interface WorldBookEntriesSectionProps {
   books: WorldBook[]
   selectedBookId: string
   onRefreshVectorSummary?: (bookId: string) => Promise<void> | void
+  scrollContainerRef?: { current: HTMLDivElement | null }
+  paginationContainer?: HTMLDivElement | null
 }
 
 export default function WorldBookEntriesSection({
   books,
   selectedBookId,
   onRefreshVectorSummary,
+  scrollContainerRef,
+  paginationContainer,
 }: WorldBookEntriesSectionProps) {
   const { t } = useTranslation('panels', { keyPrefix: 'worldBookPanel' })
   const { t: te } = useTranslation('panels', { keyPrefix: 'worldBookPanel.entries' })
@@ -389,12 +394,15 @@ export default function WorldBookEntriesSection({
   const [bulkDepth, setBulkDepth] = useState('4')
   const [pendingAction, setPendingAction] = useState(false)
   const entryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const localScrollRef = useRef<HTMLDivElement>(null)
   const entryListRef = useRef<HTMLDivElement>(null)
-  const entryScrollRef = useRef<HTMLDivElement>(null)
   const focusedEntryClearTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const [focusedEntryId, setFocusedEntryId] = useState<string | null>(null)
-  useScrollGate(entryScrollRef)
+  const [virtualScrollMargin, setVirtualScrollMargin] = useState(0)
+  const activeScrollRef = scrollContainerRef ?? localScrollRef
+  const usesSharedScroll = scrollContainerRef != null
+  useScrollGate(activeScrollRef)
 
   // ── Live-sync (WORLD_BOOK_ENTRY_* / WORLD_BOOK_CHANGED) ──
   // Mirror of `entries` for use inside WS handlers without re-subscribing.
@@ -496,11 +504,29 @@ export default function WorldBookEntriesSection({
     }, 160)
   }, [commitFocusedEntryId])
 
+  const updateVirtualScrollMargin = useCallback(() => {
+    const scrollEl = activeScrollRef.current
+    const listEl = entryListRef.current
+    if (!scrollEl || !listEl) return
+
+    const nextMargin = Math.max(
+      0,
+      listEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop,
+    )
+
+    setVirtualScrollMargin((current) => (Math.abs(current - nextMargin) < 1 ? current : nextMargin))
+  }, [activeScrollRef])
+
+  useLayoutEffect(() => {
+    updateVirtualScrollMargin()
+  })
+
   const entryVirtualizer = useVirtualizer({
     count: entries.length,
-    getScrollElement: () => entryScrollRef.current,
+    getScrollElement: () => activeScrollRef.current,
     estimateSize: () => 72,
     overscan: 6,
+    scrollMargin: virtualScrollMargin,
     getItemKey: (index) => entries[index]?.id ?? index,
     rangeExtractor,
     measureElement: (element) => {
@@ -519,6 +545,31 @@ export default function WorldBookEntriesSection({
       [bookId]: pref,
     })
   }, [setSetting, worldBookEntryViewPrefs])
+
+  useEffect(() => {
+    updateVirtualScrollMargin()
+    const scrollEl = activeScrollRef.current
+    const listEl = entryListRef.current
+    if (!scrollEl || !listEl || typeof ResizeObserver === 'undefined') return
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateVirtualScrollMargin()
+    })
+
+    resizeObserver.observe(scrollEl)
+    resizeObserver.observe(listEl)
+
+    return () => resizeObserver.disconnect()
+  }, [activeScrollRef, entries.length, loadingEntries, updateVirtualScrollMargin])
+
+  useEffect(() => {
+    window.addEventListener('resize', updateVirtualScrollMargin)
+    return () => window.removeEventListener('resize', updateVirtualScrollMargin)
+  }, [updateVirtualScrollMargin])
+
+  useEffect(() => {
+    entryVirtualizer.measure()
+  }, [entryVirtualizer, virtualScrollMargin])
 
   const refreshVectorSummary = useCallback(async () => {
     if (!selectedBookId || !onRefreshVectorSummary) return
@@ -1010,24 +1061,41 @@ export default function WorldBookEntriesSection({
         },
       }))
     : []
-  const pagination = entryPageSize !== 'all' && entryTotalPages > 1 ? (
+  const paginationControls = entryPageSize !== 'all' && entryTotalPages > 1 ? (
+    <Pagination
+      className={styles.entryPaginationControls}
+      currentPage={entryPage}
+      totalPages={entryTotalPages}
+      onPageChange={(page) => {
+        setEntryPage(page)
+        setSelectedEntryId(null)
+        setSelectedIds([])
+      }}
+      totalItems={entryTotal}
+    />
+  ) : null
+  const pagination = paginationControls && !paginationContainer ? (
     <div className={styles.entryPagination}>
-      <Pagination
-        className={styles.entryPaginationControls}
-        currentPage={entryPage}
-        totalPages={entryTotalPages}
-        onPageChange={(page) => {
-          setEntryPage(page)
-          setSelectedEntryId(null)
-          setSelectedIds([])
-        }}
-        totalItems={entryTotal}
-      />
+      {paginationControls}
     </div>
   ) : null
+  const dockedPagination = paginationControls && paginationContainer
+    ? createPortal(
+        <div className={styles.entryPaginationDocked}>
+          {paginationControls}
+        </div>,
+        paginationContainer,
+      )
+    : null
 
   return (
-    <div className={clsx(styles.section, isMobile && styles.sectionMobile)}>
+    <div
+      className={clsx(
+        styles.section,
+        usesSharedScroll ? styles.sectionSharedScroll : styles.sectionStandaloneScroll,
+        isMobile && styles.sectionMobile,
+      )}
+    >
       <div className={clsx(styles.entryListHeader, isMobile && styles.entryListHeaderMobile)}>
         <span className={styles.entryListTitle}>{te('entriesTitle', { count: entryTotal })}</span>
         <div className={clsx(styles.toolbarActions, isMobile && styles.toolbarActionsMobile)}>
@@ -1230,7 +1298,10 @@ export default function WorldBookEntriesSection({
         <>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <SortableContext items={entries.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
-              <div ref={entryScrollRef} className={styles.entryScroll}>
+              <div
+                ref={usesSharedScroll ? undefined : localScrollRef}
+                className={clsx(styles.entryScroll, usesSharedScroll && styles.entryScrollShared)}
+              >
                 <div
                   ref={entryListRef}
                   className={styles.entryList}
@@ -1263,7 +1334,7 @@ export default function WorldBookEntriesSection({
                               left: 0,
                               right: 0,
                               paddingBottom: 8,
-                              transform: `translateY(${virtualRow.start}px)`,
+                              transform: `translateY(${virtualRow.start - virtualScrollMargin}px)`,
                             }}
                           >
                             <SortableEntryRow
@@ -1378,6 +1449,7 @@ export default function WorldBookEntriesSection({
           </div>
         </ModalShell>
       )}
+      {dockedPagination}
 
       {renumberState && (
         <ModalShell isOpen={true} onClose={() => !pendingAction && setRenumberState(null)} maxWidth="520px">
