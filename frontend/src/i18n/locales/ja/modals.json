@@ -252,6 +252,8 @@
     "clipped": "、{{count}} クリップ ",
     "messageMeta": "{{chars}} 文字{{lines}}",
     "messageMetaLines": " • {{count}} 行",
+    "content": "内容",
+    "reasoning": "推論",
     "showLess": "一部表示しない",
     "showFull": "完全に表示 ({{count}} 文字)",
     "assistantPrefill": "Assistantプレフィル",

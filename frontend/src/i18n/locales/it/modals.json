@@ -252,6 +252,8 @@
     "clipped": ", {{count}} tagliato",
     "messageMeta": "{{chars}} caratteri{{lines}}",
     "messageMetaLines": " • {{count}} righe",
+    "content": "Contenuto",
+    "reasoning": "Ragionamento",
     "showLess": "Mostra meno",
     "showFull": "Mostra contenuto completo ({{count}} caratteri)",
     "assistantPrefill": "Precompilazione assistente",

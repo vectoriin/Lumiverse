@@ -256,6 +256,8 @@
     "clipBoundaryMarker": "first kept after clip",
     "messageMeta": "{{chars}} chars{{lines}}",
     "messageMetaLines": " • {{count}} lines",
+    "content": "Content",
+    "reasoning": "Reasoning",
     "showLess": "Show less",
     "showFull": "Show full ({{count}} chars)",
     "assistantPrefill": "Assistant Prefill",

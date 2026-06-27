@@ -3,12 +3,14 @@ import { getDb } from "../db/connection";
 import { scheduleChatMemoryRefresh } from "./chat-memory-cache.service";
 import {
   canUseChatChunkVectorizationSubprocess,
+  isChatChunkVectorizationSubprocessStartupError,
   processChatChunkVectorizationBatchInSubprocess,
   shutdownChatChunkVectorizationSubprocess,
   warnChatChunkVectorizationFallback,
 } from "./chat-chunk-vectorization-client";
 import {
   processChatChunkVectorizationBatch,
+  type ChatChunkVectorizationBatchResult,
   type ChatChunkVectorizationTask,
 } from "./chat-chunk-vectorization-runner";
 import type { WorldBookEntry, WorldBookVectorIndexStatus } from "../types/world-book";
@@ -181,12 +183,19 @@ class VectorizationQueue {
         }));
       if (tasks.length === 0) return;
 
-      const result = canUseChatChunkVectorizationSubprocess()
-        ? await processChatChunkVectorizationBatchInSubprocess(tasks)
-        : await (() => {
-            warnChatChunkVectorizationFallback();
-            return processChatChunkVectorizationBatch(tasks);
-          })();
+      let result: ChatChunkVectorizationBatchResult;
+      if (canUseChatChunkVectorizationSubprocess()) {
+        try {
+          result = await processChatChunkVectorizationBatchInSubprocess(tasks);
+        } catch (err) {
+          if (!isChatChunkVectorizationSubprocessStartupError(err)) throw err;
+          warnChatChunkVectorizationFallback();
+          result = await processChatChunkVectorizationBatch(tasks);
+        }
+      } else {
+        warnChatChunkVectorizationFallback();
+        result = await processChatChunkVectorizationBatch(tasks);
+      }
 
       const failedChunkIds = new Set(result.failedChunkIds);
 

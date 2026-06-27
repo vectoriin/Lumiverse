@@ -252,6 +252,8 @@
     "clipped": "，已裁剪 {{count}}",
     "messageMeta": "{{chars}} 字符{{lines}}",
     "messageMetaLines": " • {{count}} 行",
+    "content": "內容",
+    "reasoning": "推理",
     "showLess": "收起",
     "showFull": "顯示全文（{{count}} 字符）",
     "assistantPrefill": "助手預填",

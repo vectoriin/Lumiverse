@@ -14,7 +14,11 @@ function formatMessagesText(messages: DryRunMessage[]): string {
   return messages
     .map((m, i) => {
       const header = `### [${i + 1}] ${m.role.toUpperCase()}`
-      return `${header}\n${m.content}`
+      const sections = [header, m.content]
+      if (m.reasoning?.trim()) {
+        sections.push(`--- REASONING ---\n${m.reasoning}`)
+      }
+      return sections.join('\n\n')
     })
     .join('\n\n')
 }

@@ -102,6 +102,7 @@ export interface SummarizationPromptDefaults {
 export interface DryRunMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  reasoning?: string
   __chatHistorySource?: boolean
 }
 

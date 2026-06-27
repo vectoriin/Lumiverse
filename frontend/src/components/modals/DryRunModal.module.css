@@ -161,6 +161,17 @@
   text-overflow: ellipsis;
 }
 
+.messageReasoningBadge {
+  padding: 2px 6px;
+  border: 1px solid rgba(147, 112, 219, 0.28);
+  border-radius: 999px;
+  background: var(--lumiverse-primary-010);
+  color: var(--lumiverse-primary, #9370db);
+  font-size: calc(9px * var(--lumiverse-font-scale, 1));
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .messageMeta {
   margin-left: auto;
   font-size: calc(10px * var(--lumiverse-font-scale, 1));
@@ -216,9 +227,34 @@
 .messageInspectorContent {
   flex: 1;
   min-height: 0;
-  margin: 0;
   padding: 12px;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.messageInspectorSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.messageInspectorLabel {
+  margin: 0;
+  font-size: calc(10px * var(--lumiverse-font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--lumiverse-text-dim, rgba(230, 230, 240, 0.5));
+}
+
+.messageInspectorText {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--lumiverse-border, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  background: var(--lumiverse-fill);
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: calc(12px * var(--lumiverse-font-scale, 1));
   line-height: 1.6;

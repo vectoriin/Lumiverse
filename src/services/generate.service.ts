@@ -14,6 +14,7 @@ import {
   injectReasoningParams,
   collectVectorActivatedWorldInfo,
   mergeActivatedWorldInfoEntries,
+  getSourceMessageId,
   isChatHistoryMessage,
   type VectorActivatedEntry,
 } from "./prompt-assembly.service";
@@ -271,10 +272,121 @@ function omitChatHistoryTokenBreakdown(
   };
 }
 
+function normalizeReasoningText(reasoning: unknown): string | undefined {
+  return typeof reasoning === "string" && reasoning.trim().length > 0
+    ? reasoning
+    : undefined;
+}
+
+function extractThinkingBlockText(
+  blocks: LlmThinkingBlock[] | undefined,
+): string | undefined {
+  if (!Array.isArray(blocks) || blocks.length === 0) return undefined;
+  const combined = blocks
+    .map((block) =>
+      block.type === "thinking" && typeof block.thinking === "string"
+        ? block.thinking
+        : "",
+    )
+    .filter((text) => text.trim().length > 0)
+    .join("\n");
+  return combined.trim().length > 0 ? combined : undefined;
+}
+
+function extractReasoningDetailsText(
+  details: Record<string, unknown>[] | undefined,
+): string | undefined {
+  if (!Array.isArray(details) || details.length === 0) return undefined;
+  const combined = details
+    .map((detail) => {
+      if (!detail || typeof detail !== "object") return "";
+      if (typeof detail.text === "string") return detail.text;
+      if (typeof detail.summary === "string") return detail.summary;
+      return "";
+    })
+    .filter((text) => text.trim().length > 0)
+    .join("\n");
+  return combined.trim().length > 0 ? combined : undefined;
+}
+
+function resolveDryRunMessageReasoning(
+  message: LlmMessage,
+  sourceMessage?: Message,
+): string | undefined {
+  return (
+    normalizeReasoningText(sourceMessage?.extra?.reasoning) ??
+    normalizeReasoningText(message.reasoning_content) ??
+    extractThinkingBlockText(message.thinking_blocks) ??
+    extractReasoningDetailsText(message.reasoning_details)
+  );
+}
+
+function buildDryRunDisplayMessages(
+  messages: LlmMessage[],
+  sourceMessagesById?: Map<string, Message>,
+  reasoningSettings?: {
+    prefix?: string;
+    suffix?: string;
+    keepInHistory?: number;
+  } | null,
+): DryRunDisplayMessage[] {
+  const delimiters = resolveReasoningDelimiters(reasoningSettings);
+
+  const displayMessages = messages.map((message) => {
+    const flattenedContent = flattenContentForDisplay(message.content);
+    const extractedReasoning = extractDelimitedReasoning(
+      flattenedContent,
+      delimiters,
+    );
+    const sourceMessageId = getSourceMessageId(message);
+    const sourceMessage = sourceMessageId
+      ? sourceMessagesById?.get(sourceMessageId)
+      : undefined;
+    const reasoning =
+      normalizeReasoningText(extractedReasoning.reasoning) ??
+      resolveDryRunMessageReasoning(message, sourceMessage);
+
+    const displayMessage: DryRunDisplayMessage = {
+      ...(message as any),
+      content: extractedReasoning.cleaned,
+    };
+
+    if (
+      reasoning &&
+      extractedReasoning.cleaned.trim() !== reasoning.trim()
+    ) {
+      displayMessage.reasoning = reasoning;
+    }
+
+    return displayMessage;
+  });
+
+  const keepInHistory = reasoningSettings?.keepInHistory ?? -1;
+  if (keepInHistory !== -1) {
+    let keptReasoningMessages = 0;
+    for (let i = displayMessages.length - 1; i >= 0; i--) {
+      if (!isChatHistoryMessage(messages[i]) || messages[i].role !== "assistant") {
+        continue;
+      }
+      if (!displayMessages[i].reasoning) continue;
+      keptReasoningMessages++;
+      if (keptReasoningMessages > keepInHistory) {
+        delete displayMessages[i].reasoning;
+      }
+    }
+  }
+
+  return displayMessages;
+}
+
 export const __test__ = {
+  buildDryRunDisplayMessages,
+  extractReasoningDetailsText,
+  extractThinkingBlockText,
   injectConnectionMetadataFlags,
   omitChatHistoryBreakdownEntries,
   omitChatHistoryTokenBreakdown,
+  resolveDryRunMessageReasoning,
   sumChatHistoryBreakdownTokens,
 };
 
@@ -343,7 +455,7 @@ export interface SummarizeGenerateInput {
 }
 
 export interface DryRunResult {
-  messages: LlmMessage[];
+  messages: DryRunDisplayMessage[];
   breakdown: AssemblyBreakdownEntry[];
   parameters: Record<string, any>;
   assistantPrefill?: string;
@@ -397,6 +509,15 @@ export interface DryRunResult {
   memoryStats?: import("../llm/types").MemoryStats;
   databankStats?: import("../llm/types").DatabankStats;
   contextClipStats?: import("../llm/types").ContextClipStats;
+}
+
+export interface DryRunDisplayMessage
+  extends Omit<LlmMessage, "content"> {
+  content: string;
+  reasoning?: string;
+  __chatHistorySource?: boolean;
+  __sourceMessageId?: string;
+  __sourceIndexInChat?: number;
 }
 
 export interface BatchGenerateInput {
@@ -2706,6 +2827,13 @@ export async function dryRunGeneration(
   input: GenerateInput,
 ): Promise<DryRunResult> {
   const genType = input.generation_type || "normal";
+  const sourceMessagesById = new Map(
+    chatsSvc
+      .getMessages(input.userId, input.chat_id)
+      .map((message) => [message.id, message] as const),
+  );
+  const dryRunReasoningSettings =
+    settingsSvc.getSetting(input.userId, "reasoningSettings")?.value ?? null;
 
   // No-preset temp chats bypass preset resolution/assertion (same as
   // startGeneration); assembly falls back to raw message mapping.
@@ -2799,12 +2927,15 @@ export async function dryRunGeneration(
     // The dry-run viewer is display-only and assumes string content. Flatten
     // multimodal parts (image/audio/tool) to placeholder-annotated strings so
     // multipart turns don't crash the frontend (TypeError: e.replace is not a
-    // function) when a chat message carries an attachment. Token counts come
-    // from the breakdown above, which is already computed from the real parts.
-    messages: pipeline.messages.map((m) => ({
-      ...m,
-      content: flattenContentForDisplay(m.content),
-    })),
+    // function) when a chat message carries an attachment. When the source chat
+    // message preserved reasoning separately, attach it alongside the flattened
+    // content so the viewer can show both. Token counts come from the
+    // breakdown above, which is already computed from the real parts.
+    messages: buildDryRunDisplayMessages(
+      pipeline.messages,
+      sourceMessagesById,
+      dryRunReasoningSettings,
+    ),
     breakdown: omitChatHistoryBreakdownEntries(pipeline.breakdown || []),
     parameters: outboundParams,
     assistantPrefill: pipeline.assistantPrefill,

@@ -30,8 +30,13 @@ const MESSAGE_PREVIEW_CAP = 220
 // Memory chunk previews are clipped to this many characters by default.
 const CHUNK_PREVIEW_CAP = 500
 
-function summarizeMessage(content: string): string {
-  const normalized = content.replace(/\s+/g, ' ').trim()
+function normalizePreviewText(text?: string): string {
+  if (!text) return ''
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function summarizeMessage(message: DryRunMessage): string {
+  const normalized = normalizePreviewText(message.content) || normalizePreviewText(message.reasoning)
   if (!normalized) return i18n.t('shared.emptyMessage', { ns: 'modals' })
   return normalized.length > MESSAGE_PREVIEW_CAP
     ? `${normalized.slice(0, MESSAGE_PREVIEW_CAP - 1)}…`
@@ -54,8 +59,10 @@ interface MessageListItemProps {
 
 function MessageListItem({ msg, index, selected, clipBoundary, clipBoundaryLabel, onSelect }: MessageListItemProps) {
   const { t: ts } = useTranslation('modals', { keyPrefix: 'shared' })
-  const preview = summarizeMessage(msg.content)
+  const { t } = useTranslation('modals', { keyPrefix: 'dryRun' })
+  const preview = summarizeMessage(msg)
   const lineCount = countLines(msg.content)
+  const hasReasoning = normalizePreviewText(msg.reasoning).length > 0
 
   return (
     <button
@@ -74,6 +81,9 @@ function MessageListItem({ msg, index, selected, clipBoundary, clipBoundaryLabel
         <span className={styles.messageIndex}>#{index + 1}</span>
         {clipBoundary && clipBoundaryLabel && (
           <span className={styles.messageClipBadge}>{clipBoundaryLabel}</span>
+        )}
+        {hasReasoning && (
+          <span className={styles.messageReasoningBadge}>{t('reasoning')}</span>
         )}
         <span className={styles.messageMeta}>
           {ts('chars', { count: msg.content.length })}
@@ -255,6 +265,8 @@ export default function DryRunModal() {
 
   const selectedMessage = messages[selectedMessageIndex] ?? null
   const selectedMessageLineCount = selectedMessage ? countLines(selectedMessage.content) : 0
+  const selectedMessageHasReasoning =
+    normalizePreviewText(selectedMessage?.reasoning).length > 0
   const clippedMessagesText = contextClipStats?.enabled && contextClipStats.messagesDropped > 0
     ? t('clipped', { count: contextClipStats.messagesDropped }).trim()
     : ''
@@ -350,7 +362,22 @@ export default function DryRunModal() {
                             {selectedMessageLineCount > 0 && ` • ${ts('lines', { count: selectedMessageLineCount })}`}
                           </span>
                         </div>
-                        <pre className={styles.messageInspectorContent}>{selectedMessage.content}</pre>
+                        <div className={styles.messageInspectorContent}>
+                          <div className={styles.messageInspectorSection}>
+                            <p className={styles.messageInspectorLabel}>{t('content')}</p>
+                            <pre className={styles.messageInspectorText}>
+                              {selectedMessage.content || ts('emptyMessage')}
+                            </pre>
+                          </div>
+                          {selectedMessageHasReasoning && (
+                            <div className={styles.messageInspectorSection}>
+                              <p className={styles.messageInspectorLabel}>{t('reasoning')}</p>
+                              <pre className={styles.messageInspectorText}>
+                                {selectedMessage.reasoning}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>
