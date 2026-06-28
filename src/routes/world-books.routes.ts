@@ -8,13 +8,16 @@ import * as settingsSvc from "../services/settings.service";
 import { parsePagination } from "../services/pagination";
 import { REVALIDATE_PRIVATE, ifNoneMatchSatisfies } from "../utils/http-cache";
 import {
-  collectWorldInfoSources,
   collectVectorActivatedWorldInfoDetailed,
   getWorldInfoVectorQueryPreview,
   mergeActivatedWorldInfoEntries,
   applyVectorPriorityBoost,
-  type BookSource,
 } from "../services/prompt-assembly.service";
+import {
+  collectWorldInfoSources,
+  resolveWorldInfoCharacters,
+  type BookSource,
+} from "../services/world-info-sources.service";
 import { deduplicateWorldInfoEntries } from "../services/world-info-dedup.service";
 import { activateWorldInfo, finalizeActivatedWorldInfoEntries, normalizeWorldInfoSettings, type WiState, type WorldInfoSettings } from "../services/world-info-activation.service";
 import type { WorldBookEntry } from "../types/world-book";
@@ -492,8 +495,11 @@ app.post("/:id/diagnostics", async (c) => {
   const chatWorldBookIds = (chat.metadata?.chat_world_book_ids as string[] | undefined) ?? [];
   const messages = chatsSvc.getMessages(userId, chat.id);
   const vectorSummary = svc.getWorldBookVectorSummary(userId, bookId)!;
+  const worldInfoCharacters = resolveWorldInfoCharacters(userId, character, chat);
   const attachmentSources = {
-    character: getCharacterWorldBookIds(character.extensions).includes(bookId),
+    character: worldInfoCharacters.some((sourceCharacter) =>
+      getCharacterWorldBookIds(sourceCharacter.extensions).includes(bookId)
+    ),
     persona: persona?.attached_world_book_id === bookId,
     global: globalWorldBooks.includes(bookId),
     chat: chatWorldBookIds.includes(bookId),
@@ -508,7 +514,7 @@ app.post("/:id/diagnostics", async (c) => {
   const blockerMessages: string[] = [];
 
   if (!isAttached) {
-    blockerMessages.push("This world book is not attached to the current character, active persona, global world books, or this chat's world books.");
+    blockerMessages.push("This world book is not attached to the active group lorebook scope, active persona, global world books, or this chat's world books.");
   }
 
   const worldInfoSettings = (settingsSvc.getSetting(userId, "worldInfoSettings")?.value as Partial<WorldInfoSettings> | undefined) ?? {};
@@ -519,6 +525,7 @@ app.post("/:id/diagnostics", async (c) => {
     persona,
     globalWorldBooks,
     chatWorldBookIds,
+    { chat },
   );
   const bookEntries = wiSources.entries.filter((entry) => entry.world_book_id === bookId);
   const selectedEligibleEntries = bookEntries.filter((entry) =>

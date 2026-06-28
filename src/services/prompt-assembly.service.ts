@@ -85,7 +85,6 @@ import * as presetProfilesSvc from "./preset-profiles.service";
 import * as councilProfilesSvc from "./council/council-profiles.service";
 import { readCachedChatMemory } from "./chat-memory-cache.service";
 import { deduplicateWorldInfoEntries } from "./world-info-dedup.service";
-import { getCharacterWorldBookIds } from "../utils/character-world-books";
 import * as memoryCortex from "./memory-cortex";
 import { buildEmotionalContext } from "./memory-cortex";
 import {
@@ -105,6 +104,11 @@ import {
   type VectorRetrievalTraceEntry,
   type VectorWorldInfoRetrievalResult,
 } from "./world-info-vector-ranking";
+import {
+  collectWorldInfoSources,
+  getGroupCardMode,
+  type BookSource,
+} from "./world-info-sources.service";
 
 export type {
   VectorActivatedEntry,
@@ -505,8 +509,6 @@ const ALTERNATE_FIELD_NAMES = [
   "scenario",
 ] as const;
 
-type GroupCardMode = "swap" | "merge_ignore_muted" | "merge";
-
 const GROUP_CARD_FIELDS = [
   "description",
   "personality",
@@ -516,11 +518,6 @@ const GROUP_CARD_FIELDS = [
   "post_history_instructions",
   "creator_notes",
 ] as const;
-
-function getGroupCardMode(chat: Chat): GroupCardMode {
-  const raw = chat.metadata?.group_card_mode;
-  return raw === "merge_ignore_muted" || raw === "merge" ? raw : "swap";
-}
 
 function replaceCharPlaceholders(text: string, character: Character): string {
   if (!text) return "";
@@ -1471,6 +1468,7 @@ export async function assemblePrompt(
       persona,
       globalWorldBooks,
       chatWorldBookIds,
+      { chat, groupCharacters: pf?.groupCharacters },
     );
   let wiEntries = wiSources.entries;
   // Multiplayer: splice in active peers' attached persona lorebooks (relayed
@@ -3429,97 +3427,6 @@ export function populateLumiaLoomContext(
 // Helpers
 // ---------------------------------------------------------------------------
 
-export type BookSource = "character" | "persona" | "chat" | "global" | "peer";
-
-/**
- * Collect all WorldBookEntry[] from character extensions + persona attached book.
- */
-function collectWorldInfoEntries(
-  userId: string,
-  character: Character,
-  persona: Persona | null,
-  globalWorldBookIds?: string[],
-  chatWorldBookIds?: string[],
-): import("../types/world-book").WorldBookEntry[] {
-  return collectWorldInfoSources(
-    userId,
-    character,
-    persona,
-    globalWorldBookIds,
-    chatWorldBookIds,
-  ).entries;
-}
-
-export function collectWorldInfoSources(
-  userId: string,
-  character: Character,
-  persona: Persona | null,
-  globalWorldBookIds?: string[],
-  chatWorldBookIds?: string[],
-): {
-  entries: import("../types/world-book").WorldBookEntry[];
-  worldBookIds: string[];
-  bookSourceMap: Map<string, BookSource>;
-} {
-  const worldBookIds: string[] = [];
-  const bookSourceMap = new Map<string, BookSource>();
-  const seen = new Set<string>();
-
-  const pushBook = (id: string | null | undefined, source: BookSource) => {
-    if (!id || seen.has(id)) return;
-    seen.add(id);
-    worldBookIds.push(id);
-    bookSourceMap.set(id, source);
-  };
-
-  // Collect in priority order: character → persona → chat → global.
-  // Source attribution keeps the first (narrowest) winner.
-  for (const charBookId of getCharacterWorldBookIds(character.extensions)) {
-    pushBook(charBookId, "character");
-  }
-  pushBook(persona?.attached_world_book_id, "persona");
-  for (const cId of chatWorldBookIds ?? []) pushBook(cId, "chat");
-  for (const gId of globalWorldBookIds ?? []) pushBook(gId, "global");
-
-  // Batch-load all books in a single pair of queries. With large books
-  // (thousands of entries each), this avoids the N+1 round-trip cost of
-  // calling listEntries() once per attached book.
-  const entries: import("../types/world-book").WorldBookEntry[] = [];
-  if (worldBookIds.length > 0) {
-    const entryMap = worldBooksSvc.listEntriesForBooks(userId, worldBookIds);
-    const embeddedCharacterBook = character.extensions?.character_book;
-    // Preserve original per-book ordering (character → persona → chat → global).
-    for (const id of worldBookIds) {
-      const bookEntries = entryMap.get(id);
-      if (bookEntries && bookEntries.length > 0) {
-        entries.push(...bookEntries);
-        continue;
-      }
-
-      if (!embeddedCharacterBook) continue;
-
-      const book = worldBooksSvc.getWorldBook(userId, id);
-      if (
-        book?.metadata?.source === "character" &&
-        book.metadata?.source_character_id === character.id
-      ) {
-        entries.push(
-          ...worldBooksSvc.materializeCharacterBookEntriesForRuntime(
-            id,
-            embeddedCharacterBook,
-          ),
-        );
-      }
-    }
-  }
-
-  return {
-    entries,
-    worldBookIds,
-    bookSourceMap,
-  };
-}
-
 type WorldBookEntryModel = import("../types/world-book").WorldBookEntry;
 
 export interface MergedWorldInfoEntriesResult {
@@ -4353,6 +4260,7 @@ export async function getActivatedWorldInfoForChat(
     persona,
     globalWorldBookIds,
     chatWorldBookIds,
+    { chat },
   );
   const wiState: WiState = (chat.metadata?.wi_state as WiState) ?? {};
   const worldInfoSettings =

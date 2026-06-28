@@ -13,10 +13,10 @@ import * as charactersSvc from "../characters.service";
 import * as personasSvc from "../personas.service";
 import * as packsSvc from "../packs.service";
 import * as connectionsSvc from "../connections.service";
-import * as worldBooksSvc from "../world-books.service";
 import * as settingsSvc from "../settings.service";
 import { activateWorldInfo } from "../world-info-activation.service";
-import { getCharacterWorldBookIds } from "../../utils/character-world-books";
+import { makeAssistantCharacter } from "../../types/character";
+import { collectWorldInfoSources } from "../world-info-sources.service";
 import { getCouncilSettings, getAvailableTools } from "./council-settings.service";
 import { parseMcpToolName } from "./mcp-tools";
 import { getMcpClientManager } from "../mcp-client-manager";
@@ -1300,40 +1300,19 @@ export function collectWorldInfoForCouncil(
   persona: ReturnType<typeof personasSvc.resolvePersonaOrDefault>,
   chatId?: string,
 ): { entries: import("../../types/world-book").WorldBookEntry[]; worldBookIds: string[] } {
-  const entries: import("../../types/world-book").WorldBookEntry[] = [];
-  const seen = new Set<string>();
-
-  const charBookIds = getCharacterWorldBookIds(character?.extensions);
-  for (const charBookId of charBookIds) {
-    if (seen.has(charBookId)) continue;
-    seen.add(charBookId);
-    entries.push(...worldBooksSvc.listEntries(userId, charBookId));
-  }
-  if (persona?.attached_world_book_id && !seen.has(persona.attached_world_book_id)) {
-    seen.add(persona.attached_world_book_id);
-    entries.push(...worldBooksSvc.listEntries(userId, persona.attached_world_book_id));
-  }
-
-  // Chat-scoped world books (active for this chat only)
-  if (chatId) {
-    const chat = chatsSvc.getChat(userId, chatId);
-    const chatBookIds = (chat?.metadata?.chat_world_book_ids as string[] | undefined) ?? [];
-    for (const cId of chatBookIds) {
-      if (seen.has(cId)) continue;
-      seen.add(cId);
-      entries.push(...worldBooksSvc.listEntries(userId, cId));
-    }
-  }
-
-  // Global world books (user-wide, always active)
+  const chat = chatId ? chatsSvc.getChat(userId, chatId) : null;
+  const chatBookIds = (chat?.metadata?.chat_world_book_ids as string[] | undefined) ?? [];
   const globalWorldBooks = (settingsSvc.getSetting(userId, "globalWorldBooks")?.value as string[] | undefined) ?? [];
-  for (const gId of globalWorldBooks) {
-    if (seen.has(gId)) continue;
-    seen.add(gId);
-    entries.push(...worldBooksSvc.listEntries(userId, gId));
-  }
+  const sources = collectWorldInfoSources(
+    userId,
+    character ?? makeAssistantCharacter(),
+    persona,
+    globalWorldBooks,
+    chatBookIds,
+    chat ? { chat } : undefined,
+  );
 
-  return { entries, worldBookIds: Array.from(seen) };
+  return { entries: sources.entries, worldBookIds: sources.worldBookIds };
 }
 
 const DELIBERATION_INSTRUCTIONS = `## Council Deliberation Instructions

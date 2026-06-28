@@ -270,7 +270,7 @@ export interface PrefetchedData {
   worldInfoSources: {
     entries: import("../types/world-book").WorldBookEntry[];
     worldBookIds: string[];
-    bookSourceMap: Map<string, import("../services/prompt-assembly.service").BookSource>;
+    bookSourceMap: Map<string, import("../services/world-info-sources.service").BookSource>;
   };
   /** Group chat members, batch-loaded. */
   groupCharacters?: Map<string, import("../types/character").Character>;

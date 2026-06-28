@@ -458,7 +458,13 @@
     "scenarioFromMember": "Use scenario from member",
     "scenarioFromMemberNamed": "Use {{name}}'s scenario",
     "noGreetings": "None of the selected characters have greetings defined.",
-    "cardMacrosHint": "Controls how character-card macros like {{description}}, {{personality}}, and {{scenario}} resolve during generation."
+    "cardMacrosHint": "Controls how character-card macros like {{description}}, {{personality}}, and {{scenario}} resolve during generation.",
+    "groupLorebooks": "Group Lorebooks",
+    "lorebookModeFollow": "Follow character card mode",
+    "lorebookModeActive": "Active speaker only",
+    "lorebookModeAllUnmuted": "All unmuted members",
+    "lorebookModeAll": "All members",
+    "groupLorebooksHint": "Controls which member-attached world books are active during generation."
   },
   "groupSettings": {
     "title": "Group Settings",
@@ -485,6 +491,12 @@
     "scenarioFromMemberNamed": "Use {{name}}'s scenario",
     "scenarioCustom": "Custom scenario",
     "cardMacrosHint": "Controls how character-card macros like {{description}}, {{personality}}, and {{scenario}} resolve during generation.",
+    "groupLorebooks": "Group Lorebooks",
+    "lorebookModeFollow": "Follow character card mode",
+    "lorebookModeActive": "Active speaker only",
+    "lorebookModeAllUnmuted": "All unmuted members",
+    "lorebookModeAll": "All members",
+    "groupLorebooksHint": "Controls which member-attached world books are active during generation.",
     "impersonationHint": "When set, input-bar one-liner impersonation uses this preset's impersonation prompt, assistant impersonation prefill, and parameters without changing the main preset for the chat.",
     "deletedPreset": "Deleted preset ({{id}})",
     "voiceHintWithDefault": "Overrides {{name}}'s voice for this chat only. Leave unset to use the character's default voice.",

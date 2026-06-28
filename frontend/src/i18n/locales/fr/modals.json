@@ -448,7 +448,13 @@
     "scenarioFromMember": "Utiliser le scénario du membre",
     "scenarioFromMemberNamed": "Utiliser le scénario de {{name}}",
     "noGreetings": "Aucun des personnages sélectionnés n'a de message d'accueil défini.",
-    "cardMacrosHint": "Contrôle la façon dont les macros de carte de personnage telles que {{description}}, {{personality}} et {{scenario}} sont résolues pendant la génération."
+    "cardMacrosHint": "Contrôle la façon dont les macros de carte de personnage telles que {{description}}, {{personality}} et {{scenario}} sont résolues pendant la génération.",
+    "groupLorebooks": "Lorebooks du groupe",
+    "lorebookModeFollow": "Suivre le mode des cartes",
+    "lorebookModeActive": "Intervenant actif uniquement",
+    "lorebookModeAllUnmuted": "Tous les membres non muets",
+    "lorebookModeAll": "Tous les membres",
+    "groupLorebooksHint": "Contrôle quels livres du monde attachés aux membres sont actifs pendant la génération."
   },
   "groupSettings": {
     "title": "Paramètres de groupe",
@@ -475,6 +481,12 @@
     "scenarioFromMemberNamed": "Utiliser le scénario de {{name}}",
     "scenarioCustom": "Scénario personnalisé",
     "cardMacrosHint": "Contrôle la façon dont les macros de carte de personnage telles que {{description}}, {{personality}} et {{scenario}} sont résolues pendant la génération.",
+    "groupLorebooks": "Lorebooks du groupe",
+    "lorebookModeFollow": "Suivre le mode des cartes",
+    "lorebookModeActive": "Intervenant actif uniquement",
+    "lorebookModeAllUnmuted": "Tous les membres non muets",
+    "lorebookModeAll": "Tous les membres",
+    "groupLorebooksHint": "Contrôle quels livres du monde attachés aux membres sont actifs pendant la génération.",
     "impersonationHint": "Lorsque cette option est définie, l'usurpation d'identité d'une seule ligne dans la barre de saisie utilise l'invite d'usurpation d'identité de ce préréglage, le pré-remplissage de l'assistant et les paramètres sans modifier le préréglage principal du chat.",
     "deletedPreset": "Préréglage supprimé ({{id}}) ",
     "voiceHintWithDefault": " Remplace la voix de {{name}} pour cette discussion uniquement. Laissez cette option désactivée pour utiliser la voix par défaut du personnage. ",

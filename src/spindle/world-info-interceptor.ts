@@ -1,5 +1,5 @@
 import type { WorldBookEntry } from "../types/world-book";
-import type { BookSource } from "../services/prompt-assembly.service";
+import type { BookSource } from "../services/world-info-sources.service";
 
 export interface WorldInfoInterceptorEntryDTO {
   readonly id: string;

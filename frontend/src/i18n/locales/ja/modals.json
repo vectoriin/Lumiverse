@@ -448,7 +448,13 @@
     "scenarioFromMember": "メンバーのシナリオを使用",
     "scenarioFromMemberNamed": "{{name}} のシナリオを使用",
     "noGreetings": "選択したキャラクターはいずれも挨拶が定義されています。",
-    "cardMacrosHint": "{{description}}、{{personality}}、{{scenario}} などのキャラクタ カード マクロが生成中にどのように解決されるかを制御します。"
+    "cardMacrosHint": "{{description}}、{{personality}}、{{scenario}} などのキャラクタ カード マクロが生成中にどのように解決されるかを制御します。",
+    "groupLorebooks": "グループ Lorebook",
+    "lorebookModeFollow": "キャラクターカードモードに従う",
+    "lorebookModeActive": "現在の発話者のみ",
+    "lorebookModeAllUnmuted": "ミュートされていない全メンバー",
+    "lorebookModeAll": "全メンバー",
+    "groupLorebooksHint": "生成中に有効になるメンバー紐づけのワールドブックを制御します。"
   },
   "groupSettings": {
     "title": "グループ設定",
@@ -475,6 +481,12 @@
     "scenarioFromMemberNamed": "{{name}} のシナリオを使用",
     "scenarioCustom": "カスタム シナリオ",
     "cardMacrosHint": "{{description}}、{{personality}}、{{scenario}} などのキャラクタ カード マクロが生成中にどのように解決されるかを制御します。",
+    "groupLorebooks": "グループ Lorebook",
+    "lorebookModeFollow": "キャラクターカードモードに従う",
+    "lorebookModeActive": "現在の発話者のみ",
+    "lorebookModeAllUnmuted": "ミュートされていない全メンバー",
+    "lorebookModeAll": "全メンバー",
+    "groupLorebooksHint": "生成中に有効になるメンバー紐づけのワールドブックを制御します。",
     "impersonationHint": "設定すると、入力バーのワンライナー偽装では、チャットのメイン プリセットを変更せずに、このプリセットの偽装プロンプト、アシスタント偽装プレフィル、およびパラメーターが使用されます。",
     "deletedPreset": "削除されたプリセット ({{id}})",
     "voiceHintWithDefault": "このチャットのみ {{name}} の音声をオーバーライドします。キャラクターのデフォルトの音声を使用するには、未設定のままにしておきます。",

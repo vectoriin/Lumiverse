@@ -448,7 +448,13 @@
     "scenarioFromMember": "使用成员的场景",
     "scenarioFromMemberNamed": "使用 {{name}} 的场景",
     "noGreetings": "所选角色均未定义问候语。",
-    "cardMacrosHint": "控制生成时角色卡片宏（如 {{description}}、{{personality}}、{{scenario}}）如何解析。"
+    "cardMacrosHint": "控制生成时角色卡片宏（如 {{description}}、{{personality}}、{{scenario}}）如何解析。",
+    "groupLorebooks": "群组 Lorebook",
+    "lorebookModeFollow": "跟随角色卡片模式",
+    "lorebookModeActive": "仅当前发言者",
+    "lorebookModeAllUnmuted": "所有未静音成员",
+    "lorebookModeAll": "所有成员",
+    "groupLorebooksHint": "控制生成时哪些成员关联的世界书会启用。"
   },
   "groupSettings": {
     "title": "群组设置",
@@ -475,6 +481,12 @@
     "scenarioFromMemberNamed": "使用 {{name}} 的场景",
     "scenarioCustom": "自定义场景",
     "cardMacrosHint": "控制生成时角色卡片宏（如 {{description}}、{{personality}}、{{scenario}}）如何解析。",
+    "groupLorebooks": "群组 Lorebook",
+    "lorebookModeFollow": "跟随角色卡片模式",
+    "lorebookModeActive": "仅当前发言者",
+    "lorebookModeAllUnmuted": "所有未静音成员",
+    "lorebookModeAll": "所有成员",
+    "groupLorebooksHint": "控制生成时哪些成员关联的世界书会启用。",
     "impersonationHint": "设置后，输入栏单行扮演将使用该预设的扮演提示、助手扮演预填与参数，而不会改变聊天的主预设。",
     "deletedPreset": "已删除的预设（{{id}}）",
     "voiceHintWithDefault": "仅为此聊天覆盖 {{name}} 的语音。留空则使用角色默认语音。",

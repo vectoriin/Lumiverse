@@ -1646,7 +1646,7 @@
       "noDataTitle": "No diagnostics available yet",
       "noDataBody": "Run diagnostics again to inspect this chat.",
       "notAttachedTitle": "This lorebook is not attached to the current chat",
-      "notAttachedBody": "Vector retrieval cannot inject anything until the book is attached through the character, persona, or global books.",
+      "notAttachedBody": "Vector retrieval cannot inject anything until the book is attached through the active character or group lorebook scope, persona, chat, or global books.",
       "embeddingsNotReadyTitle": "Embeddings are not fully ready",
       "embeddingsNotReadyBody": "Vector search is gated until embeddings are enabled, a key is configured, dimensions are known, and world-book vectorization is on.",
       "noEligibleTitle": "This book has no vector-ready entries",

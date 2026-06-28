@@ -15,6 +15,7 @@ import clsx from 'clsx'
 
 type Step = 'characters' | 'greeting' | 'settings'
 type GroupCardMode = 'swap' | 'merge_ignore_muted' | 'merge'
+type GroupLorebookMode = 'follow_card_mode' | 'active_character' | 'all_unmuted' | 'all'
 
 interface GreetingOption {
   characterId: string
@@ -40,6 +41,7 @@ export default function GroupChatCreatorModal() {
   const [groupName, setGroupName] = useState('')
   const [talkativenessOverrides, setTalkativenessOverrides] = useState<Record<string, number>>({})
   const [groupCardMode, setGroupCardMode] = useState<GroupCardMode>('swap')
+  const [groupLorebookMode, setGroupLorebookMode] = useState<GroupLorebookMode>('follow_card_mode')
   const [scenarioMode, setScenarioMode] = useState<'individual' | 'member' | 'custom'>('individual')
   const [scenarioMemberId, setScenarioMemberId] = useState<string>('')
   const [scenarioCustom, setScenarioCustom] = useState('')
@@ -156,6 +158,9 @@ export default function GroupChatCreatorModal() {
       if (groupCardMode !== 'swap') {
         extraMeta.group_card_mode = groupCardMode
       }
+      if (groupLorebookMode !== 'follow_card_mode') {
+        extraMeta.group_lorebook_mode = groupLorebookMode
+      }
       if (scenarioMode !== 'individual') {
         extraMeta.group_scenario_override = {
           mode: scenarioMode,
@@ -180,7 +185,7 @@ export default function GroupChatCreatorModal() {
     } finally {
       setCreating(false)
     }
-  }, [creating, selectedIds, groupName, selectedGreeting, talkativenessOverrides, groupCardMode, scenarioMode, scenarioMemberId, scenarioCustom, closeModal, navigate])
+  }, [creating, selectedIds, groupName, selectedGreeting, talkativenessOverrides, groupCardMode, groupLorebookMode, scenarioMode, scenarioMemberId, scenarioCustom, closeModal, navigate])
 
   const canProceed =
     step === 'characters'
@@ -362,6 +367,23 @@ export default function GroupChatCreatorModal() {
                   </select>
                   <div style={{ fontSize: 'calc(11px * var(--lumiverse-font-scale, 1))', color: 'var(--lumiverse-text-dim)', lineHeight: 1.45 }}>
                     {t('cardMacrosHint')}
+                  </div>
+                </div>
+
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>{t('groupLorebooks')}</label>
+                  <select
+                    className={styles.fieldInput}
+                    value={groupLorebookMode}
+                    onChange={(e) => setGroupLorebookMode(e.target.value as GroupLorebookMode)}
+                  >
+                    <option value="follow_card_mode">{t('lorebookModeFollow')}</option>
+                    <option value="active_character">{t('lorebookModeActive')}</option>
+                    <option value="all_unmuted">{t('lorebookModeAllUnmuted')}</option>
+                    <option value="all">{t('lorebookModeAll')}</option>
+                  </select>
+                  <div style={{ fontSize: 'calc(11px * var(--lumiverse-font-scale, 1))', color: 'var(--lumiverse-text-dim)', lineHeight: 1.45 }}>
+                    {t('groupLorebooksHint')}
                   </div>
                 </div>
 
