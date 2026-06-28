@@ -1,4 +1,4 @@
-export type RegexPlacement = "user_input" | "ai_output" | "world_info" | "reasoning";
+export type RegexPlacement = "user_input" | "ai_output" | "world_info" | "reasoning" | "memory";
 export type RegexScope = "global" | "character" | "chat";
 export type RegexTarget = "prompt" | "response" | "display";
 export type RegexMacroMode = "none" | "raw" | "escaped" | "after";

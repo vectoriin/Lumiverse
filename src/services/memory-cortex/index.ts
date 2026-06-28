@@ -43,6 +43,7 @@ import { processChunkFontColors, formatColorMapForPrompt, deleteColorMapForChat,
 import { extractRelationshipsHeuristic } from "./relationship-extractor";
 import { extractNPsFromChunk } from "./np-chunker";
 import { stripNonProseTags } from "../../utils/content-sanitizer";
+import * as regexScriptsSvc from "../regex-scripts.service";
 import { getLinkedCortexData, reindexVault, getVaultRow } from "./vault";
 import { eventBus } from "../../ws/bus";
 import { EventType } from "../../ws/events";
@@ -1090,7 +1091,14 @@ export async function processChunk(
     let sidecarDiscoveredAliases: Array<{ canonicalName: string; alias: string; evidence?: string }> = [];
     let sidecarGrading: import("./types").SidecarGradedHeuristics | undefined;
 
-    const rawChunkContent = hydrateChunkContentFromMessages(data.messageIds, data.content);
+    const hydratedChunkContent = hydrateChunkContentFromMessages(data.messageIds, data.content);
+    // Cortex re-hydrates raw messages rather than reusing the sanitized vector
+    // chunk, so the memory strip must run on this path too.
+    const rawChunkContent = await regexScriptsSvc.applyMemoryIngestionRegex(
+      data.userId,
+      hydratedChunkContent,
+      { characterId: data.characterId, chatId: data.chatId },
+    );
     // Strip non-prose markup (HTML, <details>, <lumia_ooc>, scaffold blocks,
     // user-defined HUD tags, etc.) before any evaluator sees the chunk —
     // keeps font tags so attribution still works.
@@ -1868,6 +1876,10 @@ export async function rebuildCortex(
     throw signal.reason ?? new DOMException("Cortex rebuild aborted", "AbortError");
   }
   const db = getDb();
+  // Character scope for memory-strip scripts; matches the live ingestion path.
+  const characterId = (db
+    .query("SELECT character_id FROM chats WHERE id = ?")
+    .get(chatId) as { character_id: string | null } | undefined)?.character_id ?? null;
 
   console.info(
     `[memory-cortex] ${resumable ? "Warming" : "Rebuilding"} cortex for chat ${chatId} (sidecar: ${sidecarAvailable ? "yes" : "heuristic only"})`,
@@ -1935,6 +1947,7 @@ export async function rebuildCortex(
           chunks[i],
           chatId,
           userId,
+          characterId,
           characterNames,
           sidecarAvailable ? generateRawFn : undefined,
           sidecarAvailable ? sidecarConnectionId : undefined,
@@ -2127,15 +2140,15 @@ export async function rebuildCortex(
               const sidecarResult = sidecarResults[i];
               if (sidecarResult) {
                 await processChunkWithPrecomputedSidecar(
-                  chunk, chatId, userId, characterNames, sidecarResult, descriptionAliases,
+                  chunk, chatId, userId, characterId, characterNames, sidecarResult, descriptionAliases,
                   perChunkHeuristic[i] ?? undefined,
                 );
               } else {
-                await processChunkFromRaw(chunk, chatId, userId, characterNames, undefined, undefined, descriptionAliases);
+                await processChunkFromRaw(chunk, chatId, userId, characterId, characterNames, undefined, undefined, descriptionAliases);
               }
             } catch {
               // fall back to heuristic on ingest failure
-              await processChunkFromRaw(chunk, chatId, userId, characterNames, undefined, undefined, descriptionAliases);
+              await processChunkFromRaw(chunk, chatId, userId, characterId, characterNames, undefined, undefined, descriptionAliases);
             }
             tickProgress();
           }
@@ -2188,6 +2201,7 @@ async function processChunkFromRaw(
   chunk: any,
   chatId: string,
   userId: string,
+  characterId: string | null,
   characterNames: string[],
   generateRawFn?: any,
   sidecarConnectionId?: string,
@@ -2198,6 +2212,7 @@ async function processChunkFromRaw(
       chunkId: chunk.id,
       chatId: chunk.chat_id || chatId,
       userId,
+      characterId,
       content: chunk.content,
       messageIds: safeJsonArray(chunk.message_ids),
       startMessageIndex: 0,
@@ -2220,6 +2235,7 @@ async function processChunkWithPrecomputedSidecar(
   chunk: any,
   chatId: string,
   userId: string,
+  characterId: string | null,
   characterNames: string[],
   sidecarResult: import("./types").SidecarExtractionResult,
   descriptionAliases?: Map<string, string>,
@@ -2296,6 +2312,7 @@ async function processChunkWithPrecomputedSidecar(
       chunkId: chunk.id,
       chatId: chunk.chat_id || chatId,
       userId,
+      characterId,
       content: chunk.content,
       messageIds: safeJsonArray(chunk.message_ids),
       startMessageIndex: 0,

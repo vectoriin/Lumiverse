@@ -768,6 +768,7 @@
     "targetAi": "AI",
     "targetWi": "WI",
     "targetCot": "CoT",
+    "targetMemory": "Memory",
     "allOptions": "All options..."
   },
   "personaEditor": {

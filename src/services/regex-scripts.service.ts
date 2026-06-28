@@ -61,7 +61,7 @@ interface ApplyRegexScriptOptions {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const VALID_PLACEMENTS = new Set(["user_input", "ai_output", "world_info", "reasoning"]);
+const VALID_PLACEMENTS = new Set(["user_input", "ai_output", "world_info", "reasoning", "memory"]);
 const VALID_SCOPES = new Set(["global", "character", "chat"]);
 const VALID_TARGETS = new Set(["prompt", "response", "display"]);
 const VALID_FLAGS = new Set(["d", "g", "i", "m", "s", "u", "v", "y"]);
@@ -879,25 +879,19 @@ export function getRegexScriptByScriptId(
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
 /**
- * Get active (enabled) scripts matching the given context, properly ordered by
- * scope resolution: global → character → chat, within each tier by sort_order ASC, created_at ASC.
+ * Active scripts for a chat context, ordered global → character → chat then
+ * sort_order, created_at. matchConditions/matchParams are the caller's column
+ * filter; bind order is userId, matchParams, scope ids.
  */
-export function getActiveScripts(
+function getScopedScripts(
   userId: string,
-  opts: { characterId?: string; chatId?: string; target: RegexTarget }
+  opts: { characterId?: string | null; chatId?: string | null },
+  matchConditions: string[],
+  matchParams: any[],
 ): RegexScript[] {
-  const db = getDb();
+  const conditions = ["user_id = ?", "disabled = 0", ...matchConditions];
+  const params: any[] = [userId, ...matchParams];
 
-  // target is stored as a JSON array (e.g. '["prompt","display"]'). Match scripts
-  // whose array contains the requested target using instr on the serialized form.
-  const conditions = [
-    "user_id = ?",
-    "disabled = 0",
-    `instr(target, '"' || ? || '"') > 0`,
-  ];
-  const params: any[] = [userId, opts.target];
-
-  // Scope filter: include global + character-scoped + chat-scoped matching the current context
   const scopeConditions: string[] = ["scope = 'global'"];
   if (opts.characterId) {
     scopeConditions.push("(scope = 'character' AND scope_id = ?)");
@@ -909,11 +903,9 @@ export function getActiveScripts(
   }
   conditions.push(`(${scopeConditions.join(" OR ")})`);
 
-  const where = conditions.join(" AND ");
-
-  const rows = db
+  const rows = getDb()
     .query(
-      `SELECT * FROM regex_scripts WHERE ${where}
+      `SELECT * FROM regex_scripts WHERE ${conditions.join(" AND ")}
        ORDER BY
          CASE scope WHEN 'global' THEN 0 WHEN 'character' THEN 1 WHEN 'chat' THEN 2 END ASC,
          sort_order ASC, created_at ASC`
@@ -921,6 +913,52 @@ export function getActiveScripts(
     .all(...params) as any[];
 
   return rows.map(rowToRegexScript);
+}
+
+/** Active scripts whose `target` array contains opts.target. */
+export function getActiveScripts(
+  userId: string,
+  opts: { characterId?: string; chatId?: string; target: RegexTarget }
+): RegexScript[] {
+  // target stored as a JSON array; instr matches the quoted needle.
+  return getScopedScripts(userId, opts, [`instr(target, '"' || ? || '"') > 0`], [opts.target]);
+}
+
+/**
+ * Active scripts carrying the "memory" placement, for stripping content at
+ * ingestion. Filters by placement, not target — a memory script applies
+ * whenever memory is written, regardless of prompt/response/display target.
+ */
+export function getActiveMemoryScripts(
+  userId: string,
+  opts: { characterId?: string | null; chatId?: string | null }
+): RegexScript[] {
+  // placement stored as a JSON array; instr matches the quoted needle.
+  return getScopedScripts(userId, opts, [`instr(placement, '"' || ? || '"') > 0`], ["memory"]);
+}
+
+/**
+ * Apply "memory"-placement scripts to text before it's persisted/embedded.
+ * No macro env at ingestion, so find/replace macros aren't resolved — memory
+ * scripts must use literal patterns.
+ */
+export async function applyMemoryIngestionRegex(
+  userId: string,
+  content: string,
+  opts: { characterId?: string | null; chatId?: string | null },
+): Promise<string> {
+  if (!content) return content;
+  const scripts = getActiveMemoryScripts(userId, opts);
+  if (scripts.length === 0) return content;
+  return applyRegexScripts(
+    content,
+    scripts,
+    "memory",
+    undefined,
+    undefined,
+    undefined,
+    { source: "prompt_backend" },
+  );
 }
 
 /**
@@ -931,39 +969,12 @@ export function getRunOnEditScripts(
   userId: string,
   opts: { characterId?: string; chatId?: string }
 ): RegexScript[] {
-  const db = getDb();
-
-  const conditions = [
-    "user_id = ?",
-    "disabled = 0",
-    "run_on_edit = 1",
-    `instr(target, '"response"') > 0`,
-  ];
-  const params: any[] = [userId];
-
-  const scopeConditions: string[] = ["scope = 'global'"];
-  if (opts.characterId) {
-    scopeConditions.push("(scope = 'character' AND scope_id = ?)");
-    params.push(opts.characterId);
-  }
-  if (opts.chatId) {
-    scopeConditions.push("(scope = 'chat' AND scope_id = ?)");
-    params.push(opts.chatId);
-  }
-  conditions.push(`(${scopeConditions.join(" OR ")})`);
-
-  const where = conditions.join(" AND ");
-
-  const rows = db
-    .query(
-      `SELECT * FROM regex_scripts WHERE ${where}
-       ORDER BY
-         CASE scope WHEN 'global' THEN 0 WHEN 'character' THEN 1 WHEN 'chat' THEN 2 END ASC,
-         sort_order ASC, created_at ASC`
-    )
-    .all(...params) as any[];
-
-  return rows.map(rowToRegexScript);
+  return getScopedScripts(
+    userId,
+    opts,
+    ["run_on_edit = 1", `instr(target, '"response"') > 0`],
+    [],
+  );
 }
 
 /**
