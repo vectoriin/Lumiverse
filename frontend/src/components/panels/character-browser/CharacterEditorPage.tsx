@@ -26,6 +26,7 @@ import { IconNotebook } from '@tabler/icons-react'
 import { CloseButton } from '@/components/shared/CloseButton'
 import { Spinner } from '@/components/shared/Spinner'
 import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
+import TokenCountButton from '@/components/shared/TokenCountButton'
 import { charactersApi, type CharacterPerspectiveLayerInput } from '@/api/characters'
 import { characterGalleryApi } from '@/api/character-gallery'
 import { imagesApi } from '@/api/images'
@@ -1465,6 +1466,7 @@ export default function CharacterEditorPage() {
                         value={fields.system_prompt || ''}
                         onChange={(v) => handleFieldChange('system_prompt', v)}
                         rows={6}
+                        showTokenCount
                       />
                       <Field
                         label={t('characterEditor.postHistory')}
@@ -1472,6 +1474,7 @@ export default function CharacterEditorPage() {
                         value={fields.post_history_instructions || ''}
                         onChange={(v) => handleFieldChange('post_history_instructions', v)}
                         rows={4}
+                        showTokenCount
                       />
                     </>
                   )}
@@ -1484,6 +1487,7 @@ export default function CharacterEditorPage() {
                         value={fields.first_mes || ''}
                         onChange={(v) => handleFieldChange('first_mes', v)}
                         rows={5}
+                        showTokenCount
                       />
                       <Field
                         label={t('characterEditor.messageExamples')}
@@ -1491,6 +1495,7 @@ export default function CharacterEditorPage() {
                         value={fields.mes_example || ''}
                         onChange={(v) => handleFieldChange('mes_example', v)}
                         rows={5}
+                        showTokenCount
                       />
                       <div className={styles.fieldGroup}>
                         <span className={styles.fieldLabel}>{t('characterEditor.alternateGreetings')}</span>
@@ -1501,14 +1506,17 @@ export default function CharacterEditorPage() {
                           <div key={i} className={styles.greetingItem}>
                             <div className={styles.greetingHeader}>
                               <span className={styles.greetingLabel}>{t('characterEditor.greetingNumber', { n: i + 1 })}</span>
-                              <button
-                                type="button"
-                                className={styles.removeBtn}
-                                onClick={() => handleRemoveGreeting(i)}
-                                title={t('characterEditor.remove')}
-                              >
-                                <X size={12} />
-                              </button>
+                              <div className={styles.greetingActions}>
+                                <TokenCountButton text={greeting} />
+                                <button
+                                  type="button"
+                                  className={styles.removeBtn}
+                                  onClick={() => handleRemoveGreeting(i)}
+                                  title={t('characterEditor.remove')}
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
                             </div>
                             <ExpandableTextarea
                               className={styles.fieldTextarea}
@@ -2007,6 +2015,7 @@ function Field({
   onChange,
   rows = 4,
   multiline = true,
+  showTokenCount = false,
 }: {
   label: string
   helper: string
@@ -2014,10 +2023,16 @@ function Field({
   onChange: (v: string) => void
   rows?: number
   multiline?: boolean
+  showTokenCount?: boolean
 }) {
   return (
     <div className={styles.fieldGroup}>
-      <span className={styles.fieldLabel}>{label}</span>
+      <div className={styles.fieldLabelRow}>
+        <span className={styles.fieldLabel}>{label}</span>
+        {multiline && showTokenCount && (
+          <TokenCountButton text={value} />
+        )}
+      </div>
       <span className={styles.fieldHelper}>{helper}</span>
       {multiline ? (
         <ExpandableTextarea

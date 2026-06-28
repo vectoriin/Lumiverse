@@ -256,6 +256,13 @@
   gap: 4px;
 }
 
+.fieldLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .fieldLabel {
   font-size: calc(12px * var(--lumiverse-font-scale, 1));
   font-weight: 600;
@@ -605,12 +612,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .greetingLabel {
   font-size: calc(11px * var(--lumiverse-font-scale, 1));
   font-weight: 600;
   color: var(--lumiverse-text-dim);
+}
+
+.greetingActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .removeBtn {
