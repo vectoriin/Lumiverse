@@ -544,6 +544,8 @@
     "qwenInstruct": "Speaker style instruction",
     "qwenInstructHint": "Optional style guidance for built-in speakers. Saved cloned prompts ignore this field.",
     "qwenInstructPlaceholder": "Warm, whispered, close-mic...",
+    "qwenUseStreaming": "Use streaming endpoint when possible",
+    "qwenUseStreamingHint": "Prevents long generations from timing out. Saved cloned prompt voices still fall back to buffered generation when the upstream API has no stream variant.",
     "qwenCloneTitle": "Saved clone voices",
     "qwenCloneHintSaved": "After saving the connection, use the More menu on this card to create and manage reusable cloned voices.",
     "qwenCloneHintUnsaved": "Create the connection first, then use the More menu on its card to add reusable cloned voices from reference audio.",

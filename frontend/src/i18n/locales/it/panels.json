@@ -477,6 +477,8 @@
     "qwenInstruct": "Istruzione di stile della voce",
     "qwenInstructHint": "Indicazione di stile facoltativa per le voci integrate. I prompt clonati salvati ignorano questo campo.",
     "qwenInstructPlaceholder": "Caldo, sussurrato, molto vicino al microfono...",
+    "qwenUseStreaming": "Usa l'endpoint di streaming quando possibile",
+    "qwenUseStreamingHint": "Evita i timeout nelle generazioni lunghe. Le voci clonate salvate basate su prompt continueranno a usare la generazione bufferizzata se l'API a monte non offre una variante streaming.",
     "qwenCloneTitle": "Voci clonate salvate",
     "qwenCloneHintSaved": "Dopo aver salvato la connessione, usa il menu Altro su questa scheda per creare e gestire voci clonate riutilizzabili.",
     "qwenCloneHintUnsaved": "Crea prima la connessione, poi usa il menu Altro sulla sua scheda per aggiungere voci clonate riutilizzabili da un audio di riferimento.",

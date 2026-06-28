@@ -477,6 +477,8 @@
     "qwenInstruct": "说话风格指令",
     "qwenInstructHint": "内置说话人可选的风格提示。已保存的克隆提示不会使用此字段。",
     "qwenInstructPlaceholder": "温暖、低声、贴近麦克风...",
+    "qwenUseStreaming": "尽可能使用流式端点",
+    "qwenUseStreamingHint": "可避免长文本生成超时。若上游 API 没有流式版本，已保存的克隆提示音色仍会回退到缓冲式生成。",
     "qwenCloneTitle": "已保存的克隆音色",
     "qwenCloneHintSaved": "保存连接后，可在这张卡片的更多菜单中创建和管理可复用的克隆音色。",
     "qwenCloneHintUnsaved": "请先创建连接，然后在其卡片的更多菜单中通过参考音频添加可复用的克隆音色。",

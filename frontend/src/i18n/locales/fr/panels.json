@@ -477,6 +477,8 @@
     "qwenInstruct": "Instruction de style du locuteur",
     "qwenInstructHint": "Consigne de style facultative pour les voix intégrées. Les prompts clonés enregistrés n'utilisent pas ce champ.",
     "qwenInstructPlaceholder": "Chaleureux, chuchoté, très proche du micro...",
+    "qwenUseStreaming": "Utiliser l’endpoint de streaming quand c’est possible",
+    "qwenUseStreamingHint": "Évite les expirations sur les générations longues. Les voix clonées enregistrées basées sur un prompt repassent quand même en génération tamponnée si l’API amont n’a pas de variante streaming.",
     "qwenCloneTitle": "Voix clonées enregistrées",
     "qwenCloneHintSaved": "Après avoir enregistré la connexion, utilisez le menu Plus sur cette carte pour créer et gérer des voix clonées réutilisables.",
     "qwenCloneHintUnsaved": "Créez d'abord la connexion, puis utilisez le menu Plus sur sa carte pour ajouter des voix clonées réutilisables à partir d'un audio de référence.",

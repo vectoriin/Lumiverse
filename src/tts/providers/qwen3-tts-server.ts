@@ -1,6 +1,6 @@
 import type { TtsProvider } from "../provider";
 import type { TtsProviderCapabilities } from "../param-schema";
-import type { TtsRequest, TtsResponse, TtsVoice } from "../types";
+import type { TtsRequest, TtsResponse, TtsStreamChunk, TtsVoice } from "../types";
 import {
   QWEN_TTS_PROVIDER,
   parseQwenVoice,
@@ -31,6 +31,58 @@ interface QwenSpeakersResponse {
   }>;
 }
 
+interface ParsedSseEvent {
+  event: string;
+  data: string;
+}
+
+function parseSseEventBlock(rawBlock: string): ParsedSseEvent | null {
+  const lines = rawBlock.replace(/\r/g, "").split("\n");
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (!line || line.startsWith(":")) continue;
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim() || "message";
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (event === "message" && dataLines.length === 0) return null;
+  return {
+    event,
+    data: dataLines.join("\n"),
+  };
+}
+
+function parseQwenStreamEvent(rawBlock: string): ParsedSseEvent | null {
+  const outer = parseSseEventBlock(rawBlock);
+  if (!outer) return null;
+  if (!outer.data) return outer;
+  if (!/(?:^|\n)(?:event|data):/.test(outer.data)) return outer;
+  return parseSseEventBlock(outer.data) || outer;
+}
+
+function parseQwenStreamError(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "Qwen3-TTS Server streaming failed";
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const data = JSON.parse(trimmed) as any;
+      if (typeof data?.error === "string" && data.error.trim()) return data.error.trim();
+      if (typeof data?.detail === "string" && data.detail.trim()) return data.detail.trim();
+      if (typeof data?.message === "string" && data.message.trim()) return data.message.trim();
+    } catch {
+      // Fall through to the raw payload.
+    }
+  }
+  return trimmed;
+}
+
 export class Qwen3TtsServerProvider implements TtsProvider {
   readonly name = QWEN_TTS_PROVIDER;
   readonly displayName = "Qwen3-TTS Server";
@@ -55,7 +107,7 @@ export class Qwen3TtsServerProvider implements TtsProvider {
     staticModels: [
       { id: "auto", label: "Auto (speakers + saved clones)" },
     ],
-    supportsStreaming: false,
+    supportsStreaming: true,
     supportedFormats: ["wav", "base64"],
     defaultUrl: "http://localhost:8000",
     defaultFormat: "wav",
@@ -132,8 +184,106 @@ export class Qwen3TtsServerProvider implements TtsProvider {
     };
   }
 
-  async *synthesizeStream(): AsyncGenerator<never, void, unknown> {
-    throw new Error("Qwen3-TTS Server does not support streaming in Lumiverse yet");
+  async *synthesizeStream(
+    apiKey: string,
+    apiUrl: string,
+    request: TtsRequest,
+  ): AsyncGenerator<TtsStreamChunk, void, unknown> {
+    const parsedVoice = parseQwenVoice(request.voice || "");
+    if (!parsedVoice) {
+      throw new Error("Qwen3-TTS Server requires a voice selection");
+    }
+    if (parsedVoice.kind === "prompt") {
+      throw new Error("Qwen3-TTS Server does not support streaming for saved cloned prompt voices");
+    }
+
+    const baseUrl = qwenApiBaseUrl(apiUrl);
+    const body: Record<string, any> = {
+      text: request.text,
+      language: request.parameters.language || "Auto",
+      speaker: parsedVoice.speaker,
+      speed: request.parameters.speed ?? 1.0,
+      // The upstream stream endpoint yields standalone WAV chunks. Force WAV so
+      // the frontend can decode or persist each chunk independently.
+      response_format: "wav",
+    };
+    if (request.parameters.instruct) {
+      body.instruct = request.parameters.instruct;
+    }
+
+    const res = await fetch(`${baseUrl}/api/v1/custom-voice/generate-stream`, {
+      method: "POST",
+      headers: this.headers(apiKey),
+      body: JSON.stringify(body),
+      signal: request.signal,
+    });
+
+    if (!res.ok) await throwProviderResponseError(this.displayName, "tts stream", res);
+    if (!res.body) {
+      throw new Error("Qwen3-TTS Server: no response body for streaming");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const yieldBlock = async function* (block: string): AsyncGenerator<TtsStreamChunk, void, unknown> {
+      const event = parseQwenStreamEvent(block);
+      if (!event) return;
+
+      if (event.event === "audio") {
+        const encoded = event.data.trim();
+        if (!encoded) return;
+        const chunk = Buffer.from(encoded, "base64");
+        if (chunk.byteLength === 0) return;
+        yield {
+          data: new Uint8Array(chunk),
+          done: false,
+          kind: "audio_file",
+          mimeType: "audio/wav",
+        };
+        return;
+      }
+
+      if (event.event === "error") {
+        throw new Error(parseQwenStreamError(event.data));
+      }
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true }).replace(/\r/g, "");
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseQwenStreamEvent(block);
+          if (parsed?.event === "done") {
+            yield { data: new Uint8Array(0), done: true, kind: "audio_file", mimeType: "audio/wav" };
+            return;
+          }
+          yield* yieldBlock(block);
+          boundary = buffer.indexOf("\n\n");
+        }
+      }
+
+      buffer += decoder.decode().replace(/\r/g, "");
+      if (buffer.trim()) {
+        const parsed = parseQwenStreamEvent(buffer);
+        if (parsed?.event === "done") {
+          yield { data: new Uint8Array(0), done: true, kind: "audio_file", mimeType: "audio/wav" };
+          return;
+        }
+        yield* yieldBlock(buffer);
+      }
+
+      yield { data: new Uint8Array(0), done: true, kind: "audio_file", mimeType: "audio/wav" };
+    } finally {
+      reader.cancel().catch(() => {});
+    }
   }
 
   async validateKey(apiKey: string, apiUrl: string): Promise<boolean> {

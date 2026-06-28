@@ -47,6 +47,7 @@ export default function TTSConnectionForm({ providers, profile, onSave, onCancel
   const qwenInstruct = typeof defaultParameters.instruct === 'string'
     ? defaultParameters.instruct
     : ''
+  const qwenUseStreaming = defaultParameters.use_streaming_endpoint !== false
 
   const modelOptions = useMemo(() => {
     const options = models.length > 0 ? models : capabilities?.staticModels || []
@@ -155,6 +156,18 @@ export default function TTSConnectionForm({ providers, profile, onSave, onCancel
     })
   }, [])
 
+  const setQwenUseStreaming = useCallback((next: boolean) => {
+    setDefaultParameters((prev) => {
+      const updated = { ...prev }
+      if (next) {
+        delete updated.use_streaming_endpoint
+      } else {
+        updated.use_streaming_endpoint = false
+      }
+      return updated
+    })
+  }, [])
+
   const handleSubmit = useCallback(() => {
     if (!name.trim()) return
     const qwenDefaults: Record<string, any> = {}
@@ -163,6 +176,9 @@ export default function TTSConnectionForm({ providers, profile, onSave, onCancel
     }
     if (isQwen && typeof defaultParameters.instruct === 'string' && defaultParameters.instruct.trim()) {
       qwenDefaults.instruct = defaultParameters.instruct.trim()
+    }
+    if (isQwen && defaultParameters.use_streaming_endpoint === false) {
+      qwenDefaults.use_streaming_endpoint = false
     }
     onSave({
       name: name.trim(),
@@ -256,6 +272,15 @@ export default function TTSConnectionForm({ providers, profile, onSave, onCancel
               onChange={setQwenInstruct}
               placeholder={t('ttsConnectionForm.qwenInstructPlaceholder')}
               rows={3}
+            />
+          </FormField>
+
+          <FormField label="">
+            <Toggle.Checkbox
+              checked={qwenUseStreaming}
+              onChange={setQwenUseStreaming}
+              label={t('ttsConnectionForm.qwenUseStreaming')}
+              hint={t('ttsConnectionForm.qwenUseStreamingHint')}
             />
           </FormField>
 

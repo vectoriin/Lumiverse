@@ -36,7 +36,10 @@ export const ttsApi = {
   ): Promise<Response> {
     return fetch(`${BASE_URL}/tts/synthesize/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
       credentials: 'include',
       signal: options?.signal,
       body: JSON.stringify({
