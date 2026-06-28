@@ -104,6 +104,8 @@ import * as vectorizationQueueSvc from "../services/vectorization-queue.service"
 import * as tokenizerSvc from "../services/tokenizer.service";
 import * as imageGenConnSvc from "../services/image-gen-connections.service";
 import * as imagesSvc from "../services/images.service";
+import * as audioSvc from "../services/audio.service";
+import * as mediaSvc from "../services/media.service";
 import { spawnAsync } from "./spawn-async";
 import { getImageProvider, getImageProviderList } from "../image-gen/registry";
 import "../image-gen/index";
@@ -143,13 +145,15 @@ import {
   unlinkSync,
   readdirSync,
   mkdirSync,
+  mkdtempSync,
   statSync,
   renameSync,
   rmSync,
 } from "fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "crypto";
-import { join, resolve, relative, sep } from "path";
+import { join, resolve, relative, sep, extname } from "path";
+import { tmpdir } from "os";
 
 const EPHEMERAL_MAX_FILES = 250;
 const sharedRpcPermissionScope = new AsyncLocalStorage<string | undefined>();
@@ -182,6 +186,10 @@ type TokenCountResult = {
   tokenizer_id: string | null;
   tokenizer_name: string;
   approximate: boolean;
+};
+
+type ResolvedWorkerMediaSource = mediaSvc.ResolvedMediaSourceDTO & {
+  cleanup?: () => void;
 };
 
 type FrontendProcessState =
@@ -464,6 +472,12 @@ type RuntimeWorkerToHost =
       userId?: string;
     }
   | { type: "images_delete"; requestId: string; imageId: string; userId?: string }
+  | { type: "media_audio_convert"; requestId: string; input: mediaSvc.MediaConvertAudioRequestDTO }
+  | { type: "media_video_convert"; requestId: string; input: mediaSvc.MediaConvertVideoRequestDTO }
+  | { type: "media_video_transcode"; requestId: string; input: mediaSvc.MediaTranscodeVideoRequestDTO }
+  | { type: "media_video_remove_audio"; requestId: string; input: mediaSvc.MediaRemoveAudioFromVideoRequestDTO }
+  | { type: "media_video_add_audio"; requestId: string; input: mediaSvc.MediaAddAudioToVideoRequestDTO }
+  | { type: "media_video_from_image_audio"; requestId: string; input: mediaSvc.MediaCreateVideoFromImageAndAudioRequestDTO }
   | { type: "register_message_content_processor"; priority?: number }
   | {
       type: "message_content_processor_result";
@@ -2864,6 +2878,24 @@ export class WorkerHost {
         break;
       case "images_delete":
         this.handleImagesDelete(msg.requestId, msg.imageId, msg.userId);
+        break;
+      case "media_audio_convert":
+        this.handleMediaAudioConvert(msg.requestId, msg.input);
+        break;
+      case "media_video_convert":
+        this.handleMediaVideoConvert(msg.requestId, msg.input);
+        break;
+      case "media_video_transcode":
+        this.handleMediaVideoTranscode(msg.requestId, msg.input);
+        break;
+      case "media_video_remove_audio":
+        this.handleMediaVideoRemoveAudio(msg.requestId, msg.input);
+        break;
+      case "media_video_add_audio":
+        this.handleMediaVideoAddAudio(msg.requestId, msg.input);
+        break;
+      case "media_video_from_image_audio":
+        this.handleMediaVideoFromImageAudio(msg.requestId, msg.input);
         break;
       // ─── Personas (gated: "personas") ──────────────────────────────────
       case "personas_list":
@@ -6807,6 +6839,288 @@ export class WorkerHost {
     } catch (err: any) {
       this.postToWorker({ type: "response", requestId, error: err.message });
     }
+  }
+
+  private tempExtensionForMediaSource(filename?: string, mimeType?: string): string {
+    const explicit = extname(filename || "").trim().toLowerCase();
+    if (/^\.[a-z0-9]{1,8}$/.test(explicit)) return explicit;
+
+    switch ((mimeType || "").trim().toLowerCase()) {
+      case "video/mp4":
+        return ".mp4";
+      case "video/webm":
+        return ".webm";
+      case "video/quicktime":
+        return ".mov";
+      case "video/x-m4v":
+        return ".m4v";
+      case "video/x-matroska":
+        return ".mkv";
+      case "audio/mpeg":
+      case "audio/mp3":
+        return ".mp3";
+      case "audio/wav":
+      case "audio/x-wav":
+        return ".wav";
+      case "audio/ogg":
+      case "audio/ogg; codecs=opus":
+      case "audio/opus":
+        return ".ogg";
+      case "audio/aac":
+        return ".aac";
+      case "audio/flac":
+        return ".flac";
+      case "audio/mp4":
+        return ".m4a";
+      case "audio/webm":
+        return ".webm";
+      case "image/png":
+        return ".png";
+      case "image/jpeg":
+        return ".jpg";
+      case "image/webp":
+        return ".webp";
+      case "image/gif":
+        return ".gif";
+      case "image/avif":
+        return ".avif";
+      case "image/svg+xml":
+        return ".svg";
+      default:
+        return ".bin";
+    }
+  }
+
+  private async resolveMediaSource(
+    source: mediaSvc.MediaSourceDTO,
+    resolvedUserId: string,
+  ): Promise<ResolvedWorkerMediaSource> {
+    if (!source || typeof source !== "object") {
+      throw new Error("input.source is required");
+    }
+
+    switch (source.kind) {
+      case "inline": {
+        if (!(source.data instanceof Uint8Array) || source.data.byteLength === 0) {
+          throw new Error("inline media source data must be a non-empty Uint8Array");
+        }
+        const workdir = mkdtempSync(join(tmpdir(), "lumiverse-spindle-media-src-"));
+        const filename = typeof source.filename === "string" && source.filename.trim()
+          ? source.filename.trim()
+          : `inline${this.tempExtensionForMediaSource(undefined, source.mime_type)}`;
+        const ext = this.tempExtensionForMediaSource(filename, source.mime_type);
+        const path = join(workdir, `input${ext}`);
+        await Bun.write(path, source.data);
+        return {
+          path,
+          filename,
+          mime_type: typeof source.mime_type === "string" && source.mime_type.trim()
+            ? source.mime_type.trim()
+            : undefined,
+          cleanup: () => {
+            try {
+              rmSync(workdir, { recursive: true, force: true });
+            } catch {
+              /* ignore cleanup failure */
+            }
+          },
+        };
+      }
+      case "upload": {
+        const uploadId = typeof source.upload_id === "string" ? source.upload_id.trim() : "";
+        if (!uploadId) throw new Error("upload media source requires upload_id");
+        const rec = spindleUploads.getUpload(uploadId);
+        if (!rec || rec.ownerUserId !== resolvedUserId || rec.extensionIdentifier !== this.manifest.identifier) {
+          throw new Error("upload media source not found");
+        }
+        return {
+          path: rec.path,
+          filename: (typeof source.filename === "string" && source.filename.trim()) ? source.filename.trim() : rec.fileName,
+          mime_type: typeof source.mime_type === "string" && source.mime_type.trim()
+            ? source.mime_type.trim()
+            : undefined,
+        };
+      }
+      case "image": {
+        const imageId = typeof source.image_id === "string" ? source.image_id.trim() : "";
+        if (!imageId) throw new Error("image media source requires image_id");
+        const image = imagesSvc.getImage(resolvedUserId, imageId);
+        if (!image) throw new Error("image media source not found");
+        const path = await imagesSvc.getImageFilePath(resolvedUserId, imageId);
+        if (!path) throw new Error("image media source file not found");
+        return {
+          path,
+          filename: image.original_filename || image.id,
+          mime_type: image.mime_type || undefined,
+        };
+      }
+      case "audio": {
+        const audioId = typeof source.audio_id === "string" ? source.audio_id.trim() : "";
+        if (!audioId) throw new Error("audio media source requires audio_id");
+        const audio = audioSvc.getAudio(resolvedUserId, audioId);
+        if (!audio) throw new Error("audio media source not found");
+        const path = audioSvc.getAudioFilePath(resolvedUserId, audioId);
+        if (!path) throw new Error("audio media source file not found");
+        return {
+          path,
+          filename: audio.original_filename || audio.filename,
+          mime_type: audio.mime_type || undefined,
+        };
+      }
+      default:
+        throw new Error("unsupported media source kind");
+    }
+  }
+
+  private cleanupResolvedMediaSource(source: ResolvedWorkerMediaSource | null | undefined): void {
+    try {
+      source?.cleanup?.();
+    } catch {
+      /* ignore cleanup failure */
+    }
+  }
+
+  private handleMediaAudioConvert(requestId: string, input: mediaSvc.MediaConvertAudioRequestDTO): void {
+    (async () => {
+      let source: ResolvedWorkerMediaSource | null = null;
+      try {
+        if (!this.hasPermission("media")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} media — Media permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(input?.userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        source = await this.resolveMediaSource(input?.source as mediaSvc.MediaSourceDTO, resolvedUserId);
+        const result = await mediaSvc.convertAudio(source, input);
+        this.postToWorker({ type: "response", requestId, result });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err?.message || String(err) });
+      } finally {
+        this.cleanupResolvedMediaSource(source);
+      }
+    })();
+  }
+
+  private handleMediaVideoConvert(requestId: string, input: mediaSvc.MediaConvertVideoRequestDTO): void {
+    (async () => {
+      let source: ResolvedWorkerMediaSource | null = null;
+      try {
+        if (!this.hasPermission("media")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} media — Media permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(input?.userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        source = await this.resolveMediaSource(input?.source as mediaSvc.MediaSourceDTO, resolvedUserId);
+        mediaSvc.assertLikelyVideoSource(source);
+        const result = await mediaSvc.convertVideo(source, input);
+        this.postToWorker({ type: "response", requestId, result });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err?.message || String(err) });
+      } finally {
+        this.cleanupResolvedMediaSource(source);
+      }
+    })();
+  }
+
+  private handleMediaVideoTranscode(requestId: string, input: mediaSvc.MediaTranscodeVideoRequestDTO): void {
+    (async () => {
+      let source: ResolvedWorkerMediaSource | null = null;
+      try {
+        if (!this.hasPermission("media")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} media — Media permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(input?.userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        source = await this.resolveMediaSource(input?.source as mediaSvc.MediaSourceDTO, resolvedUserId);
+        mediaSvc.assertLikelyVideoSource(source);
+        const result = await mediaSvc.transcodeVideo(source, input);
+        this.postToWorker({ type: "response", requestId, result });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err?.message || String(err) });
+      } finally {
+        this.cleanupResolvedMediaSource(source);
+      }
+    })();
+  }
+
+  private handleMediaVideoRemoveAudio(requestId: string, input: mediaSvc.MediaRemoveAudioFromVideoRequestDTO): void {
+    (async () => {
+      let source: ResolvedWorkerMediaSource | null = null;
+      try {
+        if (!this.hasPermission("media")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} media — Media permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(input?.userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        source = await this.resolveMediaSource(input?.source as mediaSvc.MediaSourceDTO, resolvedUserId);
+        mediaSvc.assertLikelyVideoSource(source);
+        const result = await mediaSvc.removeAudioFromVideo(source, input);
+        this.postToWorker({ type: "response", requestId, result });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err?.message || String(err) });
+      } finally {
+        this.cleanupResolvedMediaSource(source);
+      }
+    })();
+  }
+
+  private handleMediaVideoAddAudio(requestId: string, input: mediaSvc.MediaAddAudioToVideoRequestDTO): void {
+    (async () => {
+      let video: ResolvedWorkerMediaSource | null = null;
+      let audio: ResolvedWorkerMediaSource | null = null;
+      try {
+        if (!this.hasPermission("media")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} media — Media permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(input?.userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        video = await this.resolveMediaSource(input?.video as mediaSvc.MediaSourceDTO, resolvedUserId);
+        audio = await this.resolveMediaSource(input?.audio as mediaSvc.MediaSourceDTO, resolvedUserId);
+        mediaSvc.assertLikelyVideoSource(video, "video");
+        const result = await mediaSvc.addAudioToVideo(video, audio, input);
+        this.postToWorker({ type: "response", requestId, result });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err?.message || String(err) });
+      } finally {
+        this.cleanupResolvedMediaSource(video);
+        this.cleanupResolvedMediaSource(audio);
+      }
+    })();
+  }
+
+  private handleMediaVideoFromImageAudio(requestId: string, input: mediaSvc.MediaCreateVideoFromImageAndAudioRequestDTO): void {
+    (async () => {
+      let image: ResolvedWorkerMediaSource | null = null;
+      let audio: ResolvedWorkerMediaSource | null = null;
+      try {
+        if (!this.hasPermission("media")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} media — Media permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(input?.userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        image = await this.resolveMediaSource(input?.image as mediaSvc.MediaSourceDTO, resolvedUserId);
+        audio = await this.resolveMediaSource(input?.audio as mediaSvc.MediaSourceDTO, resolvedUserId);
+        mediaSvc.assertLikelyImageSource(image, "image");
+        const result = await mediaSvc.createVideoFromImageAndAudio(image, audio, input);
+        this.postToWorker({ type: "response", requestId, result });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err?.message || String(err) });
+      } finally {
+        this.cleanupResolvedMediaSource(image);
+        this.cleanupResolvedMediaSource(audio);
+      }
+    })();
   }
 
   // ─── Chats CRUD (gated: "chats") ──────────────────────────────────

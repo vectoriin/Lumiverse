@@ -23,7 +23,8 @@ declare const spindle: import('lumiverse-spindle-types').SpindleAPI
 | [LLM Tools](llm-tools.md) | `tools` | Register function-calling tools + Council-eligible tools |
 | [Generation](generation.md) | `generation` | Fire LLM generations + inspect connections |
 | [Image Generation](image-generation.md) | `image_gen` | Generate images via image gen connection profiles |
-| [Images](images.md) | `images` | Read, upload, filter, and delete stored images |
+| [Images](images.md) | `images` | Read, upload, filter, and delete stored image/video assets |
+| [Media](media.md) | `media` | Convert audio/video, transcode with custom parameters, mux tracks, and compose still-image videos |
 | [Theme](theme.md) | `app_manipulation` | Apply CSS variable overrides on top of the user's theme |
 | [Storage](storage.md) | Free | Scoped file storage (extension + per-user) |
 | [Shared RPC Pool](shared-rpc-pool.md) | Free | Cross-extension latest-state and on-demand reads across the worker isolation boundary |

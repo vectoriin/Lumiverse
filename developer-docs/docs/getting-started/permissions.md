@@ -45,6 +45,8 @@ These are always available:
 | `"oauth"` | Register an OAuth callback handler to receive authorization redirects from external services |
 | `"push_notification"` | Send OS-level push notifications to users' devices even when the app is closed or backgrounded |
 | `"image_gen"` | Generate images via image gen connection profiles. Also grants access to list providers, connections, and models |
+| `"images"` | Read, upload, filter, and delete stored image/video assets on behalf of the user |
+| `"media"` | Invoke the backend media pipeline for audio/video conversion, transcoding, muxing, audio stripping, and image+audio composition |
 | `"web_search"` | Run searches against the user's configured web search provider (currently SearXNG) and read the safe view of their web search settings. The host enforces all upstream limits — extensions cannot supply their own endpoint or API key |
 
 Users grant permissions individually from the Extensions panel. Your extension should degrade gracefully if a permission isn't granted.

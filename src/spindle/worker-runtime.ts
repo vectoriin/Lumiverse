@@ -77,6 +77,15 @@ import type {
   VaultReindexResultDTO,
   VaultWithContentsDTO,
 } from "lumiverse-spindle-types";
+import type {
+  MediaConvertAudioRequestDTO,
+  MediaConvertVideoRequestDTO,
+  MediaTranscodeVideoRequestDTO,
+  MediaRemoveAudioFromVideoRequestDTO,
+  MediaAddAudioToVideoRequestDTO,
+  MediaCreateVideoFromImageAndAudioRequestDTO,
+  MediaTransformResultDTO,
+} from "../services/media.service";
 import { initializeSandbox } from "./worker-runtime-sandbox";
 import {
   assertValidSharedRpcEndpoint,
@@ -347,6 +356,12 @@ type RuntimeWorkerToHost =
   | { type: "images_upload"; requestId: string; input: ImageUploadDTO; userId?: string }
   | { type: "images_upload_from_data_url"; requestId: string; dataUrl: string; originalFilename?: string; userId?: string }
   | { type: "images_delete"; requestId: string; imageId: string; userId?: string }
+  | { type: "media_audio_convert"; requestId: string; input: MediaConvertAudioRequestDTO }
+  | { type: "media_video_convert"; requestId: string; input: MediaConvertVideoRequestDTO }
+  | { type: "media_video_transcode"; requestId: string; input: MediaTranscodeVideoRequestDTO }
+  | { type: "media_video_remove_audio"; requestId: string; input: MediaRemoveAudioFromVideoRequestDTO }
+  | { type: "media_video_add_audio"; requestId: string; input: MediaAddAudioToVideoRequestDTO }
+  | { type: "media_video_from_image_audio"; requestId: string; input: MediaCreateVideoFromImageAndAudioRequestDTO }
   | { type: "register_message_content_processor"; priority?: number }
   | {
       type: "message_content_processor_result";
@@ -596,6 +611,14 @@ type RuntimeSpindleAPI = Omit<SpindleAPI, "presets"> & {
   uploads: {
     get(uploadId: string, userId?: string): Promise<{ fileName: string; size: number; data: Uint8Array } | null>;
     delete(uploadId: string, userId?: string): Promise<boolean>;
+  };
+  media: {
+    convertAudio(input: MediaConvertAudioRequestDTO): Promise<MediaTransformResultDTO>;
+    convertVideo(input: MediaConvertVideoRequestDTO): Promise<MediaTransformResultDTO>;
+    transcodeVideo(input: MediaTranscodeVideoRequestDTO): Promise<MediaTransformResultDTO>;
+    removeAudioFromVideo(input: MediaRemoveAudioFromVideoRequestDTO): Promise<MediaTransformResultDTO>;
+    addAudioToVideo(input: MediaAddAudioToVideoRequestDTO): Promise<MediaTransformResultDTO>;
+    createVideoFromImageAndAudio(input: MediaCreateVideoFromImageAndAudioRequestDTO): Promise<MediaTransformResultDTO>;
   };
   tokens: {
     countText(text: string, options?: { model?: string; modelSource?: TokenModelSource; userId?: string }): Promise<TokenCountResult>;
@@ -1947,6 +1970,45 @@ const spindleApi: RuntimeSpindleAPI = {
       const requestId = crypto.randomUUID();
       const result = await request({ type: "images_delete", requestId, imageId, userId });
       return result as boolean;
+    },
+  },
+
+  media: {
+    async convertAudio(input: MediaConvertAudioRequestDTO): Promise<MediaTransformResultDTO> {
+      assertMutationAllowed("spindle.media.convertAudio()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "media_audio_convert", requestId, input });
+      return result as MediaTransformResultDTO;
+    },
+    async convertVideo(input: MediaConvertVideoRequestDTO): Promise<MediaTransformResultDTO> {
+      assertMutationAllowed("spindle.media.convertVideo()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "media_video_convert", requestId, input });
+      return result as MediaTransformResultDTO;
+    },
+    async transcodeVideo(input: MediaTranscodeVideoRequestDTO): Promise<MediaTransformResultDTO> {
+      assertMutationAllowed("spindle.media.transcodeVideo()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "media_video_transcode", requestId, input });
+      return result as MediaTransformResultDTO;
+    },
+    async removeAudioFromVideo(input: MediaRemoveAudioFromVideoRequestDTO): Promise<MediaTransformResultDTO> {
+      assertMutationAllowed("spindle.media.removeAudioFromVideo()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "media_video_remove_audio", requestId, input });
+      return result as MediaTransformResultDTO;
+    },
+    async addAudioToVideo(input: MediaAddAudioToVideoRequestDTO): Promise<MediaTransformResultDTO> {
+      assertMutationAllowed("spindle.media.addAudioToVideo()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "media_video_add_audio", requestId, input });
+      return result as MediaTransformResultDTO;
+    },
+    async createVideoFromImageAndAudio(input: MediaCreateVideoFromImageAndAudioRequestDTO): Promise<MediaTransformResultDTO> {
+      assertMutationAllowed("spindle.media.createVideoFromImageAndAudio()");
+      const requestId = crypto.randomUUID();
+      const result = await request({ type: "media_video_from_image_audio", requestId, input });
+      return result as MediaTransformResultDTO;
     },
   },
 

@@ -28,10 +28,8 @@ import { normalizeSpindleHttpsUrl } from "./url-safety";
 import { bunCmd } from "../utils/bun-cmd";
 
 export type InstallScope = "operator" | "user";
-type ManagedSpindlePermission = SpindlePermission | "databanks" | "presets";
-
-function isManagedPermission(permission: string): permission is ManagedSpindlePermission {
-  return permission === "databanks" || permission === "presets" || isValidPermission(permission);
+function isManagedPermission(permission: string): permission is SpindlePermission {
+  return isValidPermission(permission);
 }
 
 type BackendSafetyCheck = {
@@ -1426,7 +1424,7 @@ export function revokePermission(
   );
 }
 
-export function getGrantedPermissions(identifier: string): ManagedSpindlePermission[] {
+export function getGrantedPermissions(identifier: string): SpindlePermission[] {
   const db = getDb();
   const ext = db
     .query("SELECT id FROM extensions WHERE identifier = ?")
@@ -1437,12 +1435,12 @@ export function getGrantedPermissions(identifier: string): ManagedSpindlePermiss
     .query("SELECT permission FROM extension_grants WHERE extension_id = ?")
     .all(ext.id) as { permission: string }[];
 
-  return rows.map((r) => r.permission as ManagedSpindlePermission);
+  return rows.map((r) => r.permission as SpindlePermission);
 }
 
 export function hasPermission(
   identifier: string,
-  permission: ManagedSpindlePermission
+  permission: SpindlePermission
 ): boolean {
   return getGrantedPermissions(identifier).includes(permission);
 }
@@ -1865,7 +1863,7 @@ export async function switchBranch(
 
 async function rowToExtensionInfo(row: any): Promise<ExtensionInfo> {
   const identifier = row.identifier;
-  const permissions: ManagedSpindlePermission[] = parsePermissionsSafe<ManagedSpindlePermission>(row.permissions);
+  const permissions: SpindlePermission[] = parsePermissionsSafe<SpindlePermission>(row.permissions);
   const granted = getGrantedPermissions(identifier);
 
   let hasFrontend = false;

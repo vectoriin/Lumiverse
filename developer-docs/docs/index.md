@@ -28,6 +28,7 @@ Spindle is Lumiverse's extension framework. It lets you add custom functionality
 - **UI placements** — drawer tabs, floating widgets, dock panels, input bar actions
 - **CORS proxy** — make HTTP requests through the server, bypassing browser restrictions
 - **OAuth support** — full OAuth PKCE flow with callback handler registration
+- **Host media pipeline** — convert audio/video, mux tracks, strip audio, and build simple video clips from still images + audio
 
 ## Quick Links
 

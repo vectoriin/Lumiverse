@@ -4,6 +4,8 @@ Receive large files from your extension's frontend without the WebSocket frame-s
 
 The browser streams the file to a resumable [tus](https://tus.io) endpoint on the host, which writes it straight to disk. The worker then pulls the bytes with `spindle.uploads.get(uploadId)`. This avoids base64-over-WebSocket inflation, the 4 MB `SPINDLE_BACKEND_MSG` cap, and buffering the whole file in browser memory at send time.
 
+If your next step is a [`spindle.media.*`](media.md) transform, you usually do **not** need to call `spindle.uploads.get()` first. Pass `{ kind: "upload", upload_id }` directly to the media API and let the host read the staged file in place.
+
 No permission is required. Each upload is scoped to the extension that created it and the user who was signed in.
 
 ## Flow

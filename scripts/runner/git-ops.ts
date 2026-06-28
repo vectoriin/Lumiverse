@@ -53,27 +53,11 @@ function getChangedFilesBetween(fromRef: string, toRef: string): string[] {
     .filter(Boolean);
 }
 
-// Lockfiles graduated from gitignored to committed so the dependency tree is
-// pinned for everyone (a drifting bun.lock is what pulled an incompatible
-// kysely/better-auth combo and crashed startup). Existing installs still carry
-// an *untracked* bun.lock on disk from the gitignored era. A fast-forward pull
-// usually overwrites it silently — git treats a still-ignored file as
-// expendable — but if the user's ignore state has drifted, git aborts with
-// "untracked working tree files would be overwritten by merge." The runner's
-// stash uses no -u, so it never covers untracked files. Removing any untracked
-// lockfile before pull/checkout makes the transition deterministic: the
-// committed lockfile lands cleanly and the bun install below restores it.
-// Self-cleaning — once bun.lock is tracked, ls-files matches and this is a no-op.
-const COMMITTED_LOCKFILES = ["bun.lock", "frontend/bun.lock"];
-
-function clearUntrackedLockfiles(): void {
-  for (const rel of COMMITTED_LOCKFILES) {
-    const abs = join(PROJECT_ROOT, rel);
-    if (!existsSync(abs)) continue;
-    if (runGit("ls-files", "--error-unmatch", rel).ok) continue; // tracked — leave it
-    log(`Removing untracked ${rel} so the committed lockfile can land...`);
-    try { rmSync(abs, { force: true }); } catch {}
-  }
+function getCommitsAhead(branchRef: string, upstreamRef: string): number {
+  const revList = runGit("rev-list", "--count", `${upstreamRef}..${branchRef}`);
+  if (!revList.ok || !revList.out) return 0;
+  const ahead = parseInt(revList.out, 10);
+  return Number.isFinite(ahead) ? ahead : 0;
 }
 
 function isFrontendBuildInput(filePath: string): boolean {
@@ -142,6 +126,60 @@ async function runCommandOrThrow(
   throw new Error(reason);
 }
 
+function getUpstreamRefForSync(branchName: string): string {
+  return getUpstreamRef(branchName) || `origin/${branchName}`;
+}
+
+function assertNoLocalCommitsBeforeHardSync(branchRef: string, branchName: string, upstreamRef: string): void {
+  const ahead = getCommitsAhead(branchRef, upstreamRef);
+  if (ahead > 0) {
+    throw new Error(
+      `Refusing to hard-sync '${branchName}': it is ${ahead} commit${ahead === 1 ? "" : "s"} ahead of ${upstreamRef}`
+    );
+  }
+}
+
+async function stashLocalChanges(label: string): Promise<void> {
+  const status = runGit("status", "--porcelain", "--untracked-files=all");
+  if (!status.ok || !status.out) return;
+
+  log("Stashing local changes and untracked files...");
+  await runCommandOrThrow(["git", "stash", "push", "-u", "-m", label], {
+    cwd: PROJECT_ROOT,
+    timeoutMs: TIMEOUT_GIT_CHECKOUT_MS,
+    label: "git stash push",
+  });
+}
+
+async function resetTrackedFiles(ref: string): Promise<void> {
+  log(`Resetting tracked files to '${ref}'...`);
+  await runCommandOrThrow(["git", "reset", "--hard", ref], {
+    cwd: PROJECT_ROOT,
+    timeoutMs: TIMEOUT_GIT_PULL_MS,
+    label: `git reset --hard ${ref}`,
+  });
+}
+
+async function checkoutBranch(target: string): Promise<void> {
+  log(`Checking out '${target}'...`);
+  await runCommandOrThrow(["git", "checkout", target], {
+    cwd: PROJECT_ROOT,
+    timeoutMs: TIMEOUT_GIT_CHECKOUT_MS,
+    label: `git checkout ${target}`,
+  });
+}
+
+async function syncBranchToUpstream(branchName: string, upstreamRef: string): Promise<void> {
+  log(`Fetching latest changes for '${branchName}'...`);
+  await runCommandOrThrow(["git", "fetch", "--quiet"], {
+    cwd: PROJECT_ROOT,
+    timeoutMs: TIMEOUT_GIT_FETCH_MS,
+    label: "git fetch",
+  });
+  log(`Resetting '${branchName}' to '${upstreamRef}'...`);
+  await resetTrackedFiles(upstreamRef);
+}
+
 /**
  * Run git fetch and check how many commits we're behind upstream.
  */
@@ -183,8 +221,8 @@ export async function checkForUpdates(): Promise<UpdateState> {
 }
 
 /**
- * Apply update: stash → clear cache → pull → install deps → conditional
- * frontend build → restart
+ * Apply update: stash → hard reset tracked files → fetch → hard reset to
+ * upstream head → install deps → conditional frontend build → restart
  */
 export async function applyUpdate(
   stopServer: () => Promise<void>,
@@ -193,13 +231,12 @@ export async function applyUpdate(
 ): Promise<void> {
   log("Preparing update...");
   const previousHead = getHeadRef();
-
-  // Stash local changes
-  const status = runGit("status", "--porcelain");
-  if (status.ok && status.out) {
-    log("Stashing local changes...");
-    runGit("stash", "push", "-m", "lumiverse-runner-auto-stash");
+  const currentBranch = getCurrentBranch();
+  if (!currentBranch || currentBranch === "HEAD") {
+    throw new Error("Unable to resolve current git branch");
   }
+  const currentUpstream = getUpstreamRefForSync(currentBranch);
+  assertNoLocalCommitsBeforeHardSync("HEAD", currentBranch, currentUpstream);
 
   // Stop server before destructive operations
   await stopServer();
@@ -214,27 +251,16 @@ export async function applyUpdate(
 
   const frontendDir = join(PROJECT_ROOT, "frontend");
 
-  // Drop any untracked lockfile so the committed one can fast-forward in cleanly.
-  clearUntrackedLockfiles();
-
-  // Pull latest
-  log("Pulling latest changes...");
-  const pull = await spawnAsync(["git", "pull", "--ff-only"], {
-    cwd: PROJECT_ROOT,
-    timeoutMs: TIMEOUT_GIT_PULL_MS,
-  });
-
-  if (pull.exitCode !== 0) {
-    const reason = pull.timedOut
-      ? `git pull timed out after ${TIMEOUT_GIT_PULL_MS / 1000}s`
-      : pull.stderr.trim() || pull.stdout.trim();
-    log(`Update failed: ${reason}`);
+  reportProgress?.("Syncing repository to upstream branch head...");
+  try {
+    await stashLocalChanges("lumiverse-runner-auto-stash");
+    await resetTrackedFiles("HEAD");
+    await syncBranchToUpstream(currentBranch, currentUpstream);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`Update failed: ${message}`);
     await recoverFrontendAndStart(frontendDir, startServer);
-    throw new Error(`git pull failed: ${reason}`);
-  }
-
-  for (const line of pull.stdout.trim().split("\n")) {
-    if (line.trim()) log(`  ${line.trim()}`);
+    throw error;
   }
 
   const currentHead = getHeadRef();
@@ -259,8 +285,9 @@ export async function applyUpdate(
 }
 
 /**
- * Switch branch: stash → stop → clear cache → checkout → pull → install deps
- * → conditional frontend build → restart
+ * Switch branch: stash → hard reset tracked files → checkout → fetch →
+ * hard reset target branch to upstream head → install deps → conditional
+ * frontend build → restart
  */
 export async function switchBranch(
   target: string,
@@ -275,13 +302,7 @@ export async function switchBranch(
   const currentBranch = getCurrentBranch();
   log(`Switching from '${currentBranch}' to '${target}'...`);
   const previousHead = getHeadRef();
-
-  // Stash local changes
-  const status = runGit("status", "--porcelain");
-  if (status.ok && status.out) {
-    log("Stashing local changes...");
-    runGit("stash", "push", "-m", `lumiverse-branch-switch-${currentBranch}`);
-  }
+  const targetUpstream = getUpstreamRefForSync(target);
 
   // Stop server
   await stopServer();
@@ -296,42 +317,18 @@ export async function switchBranch(
 
   const frontendDir = join(PROJECT_ROOT, "frontend");
 
-  // Drop any untracked lockfile so a committed one can't block the checkout.
-  clearUntrackedLockfiles();
-
-  // Checkout (bounded — a dirty working tree shouldn't have survived the
-  // stash above, but a stuck index lock or slow disk could still hang).
-  const checkout = await spawnAsync(["git", "checkout", target], {
-    cwd: PROJECT_ROOT,
-    timeoutMs: TIMEOUT_GIT_CHECKOUT_MS,
-  });
-  if (checkout.exitCode !== 0) {
-    const reason = checkout.timedOut
-      ? `git checkout timed out after ${TIMEOUT_GIT_CHECKOUT_MS / 1000}s`
-      : checkout.stderr.trim() || checkout.stdout.trim();
-    log(`Failed to checkout '${target}': ${reason}`);
+  reportProgress?.(`Syncing '${target}' to upstream branch head...`);
+  try {
+    await stashLocalChanges(`lumiverse-branch-switch-${currentBranch || "detached-head"}`);
+    await resetTrackedFiles("HEAD");
+    await checkoutBranch(target);
+    assertNoLocalCommitsBeforeHardSync("HEAD", target, targetUpstream);
+    await syncBranchToUpstream(target, targetUpstream);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`Failed to switch to '${target}': ${message}`);
     await recoverFrontendAndStart(frontendDir, startServer);
-    throw new Error(`git checkout failed: ${reason}`);
-  }
-
-  log(`Checked out '${target}'.`);
-
-  // Pull latest (non-fatal — checkout already succeeded)
-  log("Pulling latest changes...");
-  const pull = await spawnAsync(["git", "pull", "--ff-only"], {
-    cwd: PROJECT_ROOT,
-    timeoutMs: TIMEOUT_GIT_PULL_MS,
-  });
-
-  if (pull.exitCode !== 0) {
-    const reason = pull.timedOut
-      ? `git pull timed out after ${TIMEOUT_GIT_PULL_MS / 1000}s`
-      : pull.stderr.trim() || pull.stdout.trim();
-    log(`Pull failed (non-fatal): ${reason}`);
-  } else {
-    for (const line of pull.stdout.trim().split("\n").filter((l: string) => l.trim())) {
-      log(`  ${line.trim()}`);
-    }
+    throw error;
   }
 
   const currentHead = getHeadRef();
