@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Trash2, Edit3, Zap, Check, Loader, Star, Copy, MoreVertical } from 'lucide-react'
+import { Trash2, Edit3, Zap, Star, Copy, MoreVertical, Volume2 } from 'lucide-react'
 import { ttsConnectionsApi } from '@/api/tts-connections'
+import QwenCustomVoiceManager from './QwenCustomVoiceManager'
+import { formatTtsConnectionVoiceLabel, isQwenTtsProvider } from '@/lib/qwenTts'
 import type { TtsConnectionProfile, TtsProviderInfo, CreateTtsConnectionInput } from '@/types/api'
 import TTSConnectionForm from './TTSConnectionForm'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
@@ -26,6 +28,9 @@ export default function TTSConnectionItem({
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [menuPos, setMenuPos] = useState<ContextMenuPos | null>(null)
+  const [cloneManagerOpen, setCloneManagerOpen] = useState(false)
+  const isQwen = isQwenTtsProvider(profile.provider)
+  const voiceLabel = formatTtsConnectionVoiceLabel(profile)
 
   useEffect(() => {
     if (!testResult) return
@@ -82,7 +87,7 @@ export default function TTSConnectionItem({
             <span className={styles.itemMeta}>
               {profile.provider}
               {profile.model ? ` / ${profile.model}` : ''}
-              {profile.voice ? ` / ${profile.voice}` : ''}
+              {voiceLabel ? ` / ${voiceLabel}` : ''}
             </span>
           </div>
         </div>
@@ -106,6 +111,9 @@ export default function TTSConnectionItem({
             onClose={() => setMenuPos(null)}
             items={[
               { key: 'test', label: testing ? t('connectionItem.testing') : t('connectionItem.testConnection'), icon: <Zap size={14} />, onClick: () => { setMenuPos(null); handleTest() }, disabled: testing },
+              ...(isQwen
+                ? [{ key: 'qwen-clones', label: t('qwenCustomVoiceManager.menuAction'), icon: <Volume2 size={14} />, onClick: () => { setMenuPos(null); setCloneManagerOpen((open) => !open) } }]
+                : []),
               { key: 'duplicate', label: t('connectionItem.duplicate'), icon: <Copy size={14} />, onClick: () => { setMenuPos(null); onDuplicate() } },
               { key: 'div', type: 'divider' as const },
               { key: 'delete', label: t('connectionItem.delete'), icon: <Trash2 size={14} />, onClick: () => { setMenuPos(null); onDelete() }, danger: true },
@@ -113,6 +121,13 @@ export default function TTSConnectionItem({
           />
         </div>
       </div>
+      {cloneManagerOpen && isQwen && (
+        <QwenCustomVoiceManager
+          profile={profile}
+          onUpdate={onUpdate}
+          onClose={() => setCloneManagerOpen(false)}
+        />
+      )}
       {testResult && (
         <div className={clsx(styles.testMessage, testResult.success ? styles.testMessageSuccess : styles.testMessageFail)}>
           {testResult.message}

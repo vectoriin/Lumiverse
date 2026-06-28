@@ -19,6 +19,7 @@ export const PROVIDER_COLORS: Record<string, string> = {
   elevenlabs: '#8b5cf6',
   kokoro: '#f59e0b',
   cartesia: '#5046e5',
+  qwen3_tts_server: '#f97316',
   // fallback
   custom: 'var(--lumiverse-text-dim)',
 }

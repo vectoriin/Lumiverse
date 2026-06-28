@@ -9,6 +9,7 @@ import { Toggle } from '@/components/shared/Toggle'
 import ConnectionSelect from '@/components/shared/ConnectionSelect'
 import VoicePicker from '@/components/shared/VoicePicker'
 import { speak, stop, setTTSVolume, setTTSSpeed, isSpeaking } from '@/lib/ttsAudio'
+import { formatTtsConnectionVoiceLabel } from '@/lib/qwenTts'
 import { isWebSpeechAvailable } from '@/lib/sttEngine'
 import styles from './VoiceSettings.module.css'
 import clsx from 'clsx'
@@ -45,6 +46,10 @@ export default function VoiceSettings() {
   const activeConnection = useMemo(
     () => ttsProfiles.find((p) => p.id === voiceSettings.ttsConnectionId) || null,
     [ttsProfiles, voiceSettings.ttsConnectionId]
+  )
+  const activeVoiceLabel = useMemo(
+    () => (activeConnection ? formatTtsConnectionVoiceLabel(activeConnection) : ''),
+    [activeConnection],
   )
 
   const handleTestTTS = async () => {
@@ -146,7 +151,7 @@ export default function VoiceSettings() {
           <div className={styles.infoBox}>
             {t('voice.provider')}: <strong>{activeConnection.provider}</strong>
             {activeConnection.model && <> &middot; {t('voice.model')}: <strong>{activeConnection.model}</strong></>}
-            {activeConnection.voice && <> &middot; {t('voice.voiceLabel')}: <strong>{activeConnection.voice}</strong></>}
+            {activeVoiceLabel && <> &middot; {t('voice.voiceLabel')}: <strong>{activeVoiceLabel}</strong></>}
           </div>
         )}
 

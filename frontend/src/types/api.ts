@@ -534,6 +534,25 @@ export interface TtsConnectionModelsPreviewInput {
   api_key?: string;
 }
 
+export interface QwenCustomVoice {
+  id: string;
+  name: string;
+  prompt_id: string;
+  transcript?: string;
+  source_filename?: string;
+  created_at: number;
+}
+
+export interface QwenCustomVoiceCreateResult {
+  profile: TtsConnectionProfile;
+  voice: QwenCustomVoice;
+}
+
+export interface QwenCustomVoiceDeleteResult {
+  success: boolean;
+  profile: TtsConnectionProfile | null;
+}
+
 /**
  * Reference to a specific TTS voice on a specific connection. Used wherever
  * a "voice choice" needs to persist beyond the global default: a character's

@@ -9,4 +9,8 @@ describe("isLargeUploadBodyLimitExemptPath", () => {
   test("still rejects unrelated image routes", () => {
     expect(isLargeUploadBodyLimitExemptPath("/api/v1/images/rebuild-thumbnails")).toBe(false);
   });
+
+  test("allows Qwen custom voice uploads through the global 10MB guard", () => {
+    expect(isLargeUploadBodyLimitExemptPath("/api/v1/tts-connections/abc/qwen/custom-voices")).toBe(true);
+  });
 });
