@@ -49,7 +49,7 @@ function createStartupError(message: string, stack?: string): Error {
   return err;
 }
 
-export function isChatChunkVectorizationSubprocessStartupError(err: unknown): boolean {
+export function isChatChunkVectorizationSubprocessStartupError(err: unknown): err is Error {
   return err instanceof Error && err.name === CHAT_CHUNK_VECTORIZATION_SUBPROCESS_STARTUP_ERROR_NAME;
 }
 

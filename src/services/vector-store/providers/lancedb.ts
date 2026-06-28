@@ -1195,6 +1195,7 @@ export async function runStartupVectorMaintenance(): Promise<void> {
       });
       const idxType = vectorIdx ? ((vectorIdx as any).indexType || (vectorIdx as any).type || "") : "";
       const needsMigration = vectorIdx && /hnsw/i.test(idxType);
+      let activeTable: Table = table;
 
       try {
         console.info(`[embeddings] Running startup compaction for ${tableName}...`);
@@ -1203,26 +1204,26 @@ export async function runStartupVectorMaintenance(): Promise<void> {
         await withMaintenanceExclusive(async () => {
           try {
             await withRetryableLanceWriteConflictRetry(`${tableName}: startup optimize`, tableName, async () => {
-              table = await reopenTableForWrite(tableName);
-              await table.optimize({ cleanupOlderThan: new Date(Date.now() - CLEANUP_GRACE_PERIOD_MS) });
+              activeTable = await reopenTableForWrite(tableName);
+              await activeTable.optimize({ cleanupOlderThan: new Date(Date.now() - CLEANUP_GRACE_PERIOD_MS) });
             });
           } catch (err) {
             console.warn(`[embeddings] Startup compaction failed for ${tableName}:`, err);
           }
 
           try {
-            table = await reopenTableForWrite(tableName);
+            activeTable = await reopenTableForWrite(tableName);
           } catch {}
 
           if (needsMigration) {
-            const rowCount = await table.countRows();
+            const rowCount = await activeTable.countRows();
             const indexConfig = getVectorIndexConfig(rowCount);
             if (indexConfig !== null) {
               console.info(`[embeddings] Migrating vector index for ${tableName} from HNSW_PQ → IVF (${rowCount} rows)...`);
               try {
                 await withRetryableLanceWriteConflictRetry(`${tableName}: startup vector index migration`, tableName, async () => {
-                  table = await reopenTableForWrite(tableName);
-                  await table.createIndex("vector", {
+                  activeTable = await reopenTableForWrite(tableName);
+                  await activeTable.createIndex("vector", {
                     config: indexConfig,
                     replace: true,
                   } as any);
@@ -1236,9 +1237,9 @@ export async function runStartupVectorMaintenance(): Promise<void> {
             }
           }
 
-          table = await ensureScalarIndexes(tableName, table, true);
-          table = await ensureFtsIndex(tableName, table, true);
-          table = await ensureVectorIndex(tableName, table);
+          activeTable = await ensureScalarIndexes(tableName, activeTable, true);
+          activeTable = await ensureFtsIndex(tableName, activeTable, true);
+          activeTable = await ensureVectorIndex(tableName, activeTable);
         });
       } catch (err) {
         console.warn(`[embeddings] Startup maintenance failed for ${tableName}:`, err);
@@ -1258,19 +1259,20 @@ export async function optimizeTable(tableNames?: string[]): Promise<void> {
       try {
         let table = await getTableIfExists(tableName, true);
         if (!table) continue;
+        let activeTable: Table = table;
 
         // Block new reads and drain in-flight ones, then compact: optimize()
         // unlinks superseded version files and the forced index rebuilds rewrite
         // index files — either is fatal to a read scanning them concurrently.
         await withMaintenanceExclusive(async () => {
           await withRetryableLanceWriteConflictRetry(`${tableName}: optimize`, tableName, async () => {
-            table = await reopenTableForWrite(tableName);
-            await table.optimize({
+            activeTable = await reopenTableForWrite(tableName);
+            await activeTable.optimize({
               cleanupOlderThan: new Date(Date.now() - CLEANUP_GRACE_PERIOD_MS),
             });
           });
-          table = await ensureScalarIndexes(tableName, table, true);
-          table = await ensureFtsIndex(tableName, table, true);
+          activeTable = await ensureScalarIndexes(tableName, activeTable, true);
+          activeTable = await ensureFtsIndex(tableName, activeTable, true);
         });
       } catch (err) {
         console.warn(`[embeddings] Optimize failed for ${tableName}:`, err);

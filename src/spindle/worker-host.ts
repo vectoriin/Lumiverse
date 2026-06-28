@@ -8166,12 +8166,9 @@ export class WorkerHost {
         parameters: input.parameters,
       });
 
-      // Map LlmMessage[] to LlmMessageDTO[] (flatten multipart content to string)
       const messagesDTO: LlmMessageDTO[] = dryRunResult.messages.map((m) => ({
         role: m.role,
-        content: typeof m.content === "string"
-          ? m.content
-          : m.content.map((p: any) => p.text || "").join(""),
+        content: m.content,
         name: m.name,
       }));
 

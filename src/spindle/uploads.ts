@@ -88,8 +88,9 @@ export async function appendUpload(
     // pipeline propagates source/transform/sink errors as a rejection and
     // destroys every stream, so a write fault never becomes an unhandled
     // 'error' event (process crash) or a hung promise.
+    const bodyStream = body as unknown as Parameters<typeof Readable.fromWeb>[0];
     await pipeline(
-      Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0]),
+      Readable.fromWeb(bodyStream),
       cap,
       createWriteStream(rec.path, { flags: "a" }),
     );
