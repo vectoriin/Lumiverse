@@ -1447,7 +1447,7 @@ export function useWebSocket() {
         toastFn(payload.message, { title: attributedTitle, duration: payload.duration })
       }),
 
-      wsClient.on(EventType.SYSTEM_DISK_LOW, (payload: { path: string; usagePercent: number; freeBytes: number; totalBytes: number; thresholdPercent: number }) => {
+      wsClient.on(EventType.SYSTEM_DISK_LOW, (payload: { path: string; usagePercent: number; freeBytes: number; totalBytes: number; thresholdPercent: number; thresholdFreeBytes: number }) => {
         // Backend re-emits this on every 5-min interval while the disk is
         // over threshold so late-connecting admins still get notified. Dedupe
         // here so existing sessions only see one toast per page-load.
@@ -1463,7 +1463,7 @@ export function useWebSocket() {
         const pct = (payload.usagePercent * 100).toFixed(0)
         const free = formatBytes(payload.freeBytes)
         toast.warning(
-          `The disk hosting Lumiverse is ${pct}% full (${free} free). Free up space to avoid crashes — writes to memory-mapped files may fault if the disk fills.`,
+          `The disk hosting Lumiverse is ${pct}% full with ${free} free remaining. Free up space to avoid crashes — writes to memory-mapped files may fault if the disk fills.`,
           { title: 'Storage almost full', duration: 30_000 },
         )
       }),

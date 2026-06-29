@@ -180,6 +180,7 @@ export interface SystemDiskLowPayload {
   totalBytes: number
   /** 0..1, the threshold that was crossed */
   thresholdPercent: number
+  thresholdFreeBytes: number
 }
 
 export interface WallpaperUploadProgressPayload {

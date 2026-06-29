@@ -14,8 +14,9 @@ import { getDb } from "../db/connection";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 
-const DISK_USAGE_WARNING_THRESHOLD = 0.9;
 const DISK_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const DISK_WARNING_USAGE_THRESHOLD = env.diskWarningUsageThreshold;
+const DISK_WARNING_MIN_FREE_BYTES = env.diskWarningMinFreeBytes;
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -27,6 +28,17 @@ export interface DiskUsage {
   /** 0..1; e.g. 0.93 = 93% full. */
   usagePercent: number;
 }
+
+export interface DiskWarningThresholds {
+  /** 0..1; e.g. 0.9 = 90% full. */
+  usagePercentThreshold: number;
+  minFreeBytesThreshold: number;
+}
+
+const DEFAULT_WARNING_THRESHOLDS: DiskWarningThresholds = {
+  usagePercentThreshold: DISK_WARNING_USAGE_THRESHOLD,
+  minFreeBytesThreshold: DISK_WARNING_MIN_FREE_BYTES,
+};
 
 // Tracks whether the last check found the disk over threshold. Used purely
 // for console-log gating — we don't want to spam logs every 5 min while the
@@ -62,12 +74,21 @@ function describe(usage: DiskUsage): string {
   return `${pct}% used (${formatBytes(usage.freeBytes)} free of ${formatBytes(usage.totalBytes)})`;
 }
 
+export function shouldWarnForDiskUsage(
+  usage: Pick<DiskUsage, "usagePercent" | "freeBytes">,
+  thresholds: DiskWarningThresholds = DEFAULT_WARNING_THRESHOLDS,
+): boolean {
+  return usage.usagePercent >= thresholds.usagePercentThreshold
+    && usage.freeBytes <= thresholds.minFreeBytesThreshold;
+}
+
 function runDiskUsageCheck(reason: "startup" | "interval"): void {
   const usage = getDiskUsage();
   if (!usage) return;
 
-  const over = usage.usagePercent >= DISK_USAGE_WARNING_THRESHOLD;
-  const thresholdPct = (DISK_USAGE_WARNING_THRESHOLD * 100).toFixed(0);
+  const over = shouldWarnForDiskUsage(usage);
+  const thresholdPct = (DISK_WARNING_USAGE_THRESHOLD * 100).toFixed(0);
+  const thresholdFree = formatBytes(DISK_WARNING_MIN_FREE_BYTES);
 
   // Console log: on startup always, plus on state transitions (so a sustained
   // over-threshold condition doesn't spam server logs every 5 min).
@@ -75,14 +96,14 @@ function runDiskUsageCheck(reason: "startup" | "interval"): void {
   if (reason === "startup" || transitioned) {
     if (over) {
       console.warn(
-        `[disk-monitor] WARNING: disk hosting ${usage.path} is over ${thresholdPct}% full — ${describe(usage)}. ` +
+        `[disk-monitor] WARNING: disk hosting ${usage.path} is over ${thresholdPct}% full and under ${thresholdFree} free — ${describe(usage)}. ` +
         `Writes to mmap'd files (SQLite, LanceDB, transpiler cache) may fault with SIGBUS if it fills further. Consider freeing space.`,
       );
     } else if (reason === "startup") {
       console.info(`[disk-monitor] Disk hosting ${usage.path}: ${describe(usage)}.`);
     } else {
       // transitioned back under threshold during interval
-      console.info(`[disk-monitor] Disk hosting ${usage.path} is back under ${thresholdPct}% — ${describe(usage)}.`);
+      console.info(`[disk-monitor] Disk hosting ${usage.path} is back out of the warning range — ${describe(usage)}.`);
     }
   }
   warningActive = over;
@@ -97,7 +118,8 @@ function runDiskUsageCheck(reason: "startup" | "interval"): void {
       usagePercent: usage.usagePercent,
       freeBytes: usage.freeBytes,
       totalBytes: usage.totalBytes,
-      thresholdPercent: DISK_USAGE_WARNING_THRESHOLD,
+      thresholdPercent: DISK_WARNING_USAGE_THRESHOLD,
+      thresholdFreeBytes: DISK_WARNING_MIN_FREE_BYTES,
     };
     // Restrict the toast to owner + admin users — disk pressure is an ops
     // concern, not something every signed-in user needs to act on. The

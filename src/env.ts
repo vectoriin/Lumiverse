@@ -20,6 +20,13 @@ export interface EnvConfig {
   /** @deprecated Use resolveEncryptionKey() instead. Kept for migration only. */
   encryptionKey: string;
   dataDir: string;
+  /**
+   * Disk warning usage threshold as a 0..1 ratio. The warning fires only when
+   * this AND diskWarningMinFreeBytes are both crossed.
+   */
+  diskWarningUsageThreshold: number;
+  /** Absolute free-space floor for low-disk warnings. */
+  diskWarningMinFreeBytes: number;
   frontendDir: string;
   ownerUsername: string;
   /** @deprecated Only used for legacy migration to owner.credentials. */
@@ -94,6 +101,16 @@ function parseOptionalNonNegativeIntEnv(name: string): number | undefined {
   return parsed;
 }
 
+function parseRatioOrPercentEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  if (parsed <= 1) return parsed;
+  if (parsed <= 100) return parsed / 100;
+  return fallback;
+}
+
 function parseEphemeralOverrides(raw?: string): Record<string, number> {
   if (!raw) return {};
   const out: Record<string, number> = {};
@@ -123,6 +140,14 @@ export function loadEnv(): EnvConfig {
   // Resolve to absolute path at startup so file operations are immune to
   // CWD changes — critical on Termux where proot/grun wrappers can shift CWD.
   const dataDir = resolve(process.env.DATA_DIR || "./data");
+  const diskWarningUsageThreshold = parseRatioOrPercentEnv(
+    "LUMIVERSE_DISK_WARNING_USAGE_PERCENT",
+    0.9,
+  );
+  const diskWarningMinFreeBytes = parsePositiveIntEnv(
+    "LUMIVERSE_DISK_WARNING_MIN_FREE_BYTES",
+    100 * 1024 * 1024 * 1024,
+  );
 
   const frontendDir = process.env.FRONTEND_DIR || "";
 
@@ -197,6 +222,8 @@ export function loadEnv(): EnvConfig {
     port,
     encryptionKey,
     dataDir,
+    diskWarningUsageThreshold,
+    diskWarningMinFreeBytes,
     frontendDir,
     ownerUsername,
     ownerPassword,
