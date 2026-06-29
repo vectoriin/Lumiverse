@@ -9,6 +9,7 @@ import { chatsApi } from '@/api/chats'
 import { presetsApi } from '@/api/presets'
 import { ttsConnectionsApi } from '@/api/tts-connections'
 import { getCharacterAvatarThumbUrl } from '@/lib/avatarUrls'
+import type { GroupResponseOrder } from '@/lib/groupResponseOrder'
 import type { Character, Chat, PresetRegistryItem, VoiceRef } from '@/types/api'
 import styles from './GroupChatCreatorModal.module.css'
 
@@ -89,6 +90,9 @@ export default function GroupSettingsModal() {
       ? metadata.group_lorebook_mode
       : 'follow_card_mode'
   )
+  const [groupResponseOrder, setGroupResponseOrder] = useState<GroupResponseOrder>(
+    metadata.group_response_order === 'random' ? 'random' : 'sequential'
+  )
 
   const existingOverride = metadata.group_scenario_override ?? {}
   const [scenarioMode, setScenarioMode] = useState<'individual' | 'member' | 'custom'>(
@@ -163,6 +167,7 @@ export default function GroupSettingsModal() {
         metadataPatch.talkativeness_overrides = talkativenessOverrides
         metadataPatch.group_card_mode = groupCardMode === 'swap' ? null : groupCardMode
         metadataPatch.group_lorebook_mode = groupLorebookMode === 'follow_card_mode' ? null : groupLorebookMode
+        metadataPatch.group_response_order = groupResponseOrder === 'sequential' ? null : groupResponseOrder
         metadataPatch.group_scenario_override = scenarioMode !== 'individual'
           ? {
               mode: scenarioMode,
@@ -203,7 +208,7 @@ export default function GroupSettingsModal() {
     } finally {
       setSaving(false)
     }
-  }, [saving, chatId, groupName, impersonationPresetId, isGroup, talkativenessOverrides, groupCardMode, groupLorebookMode, scenarioMode, scenarioMemberId, scenarioCustom, chatCharacter, characterOverride, narratorOverride, initialVoiceOverrides, setActiveChatMetadata, modalProps, closeModal])
+  }, [saving, chatId, groupName, impersonationPresetId, isGroup, talkativenessOverrides, groupCardMode, groupLorebookMode, groupResponseOrder, scenarioMode, scenarioMemberId, scenarioCustom, chatCharacter, characterOverride, narratorOverride, initialVoiceOverrides, setActiveChatMetadata, modalProps, closeModal])
 
   return (
     <ModalShell isOpen={true} onClose={closeModal} maxWidth={520}>
@@ -317,6 +322,21 @@ export default function GroupSettingsModal() {
                 </select>
                 <div style={{ fontSize: 'calc(11px * var(--lumiverse-font-scale, 1))', color: 'var(--lumiverse-text-dim)', lineHeight: 1.45 }}>
                   {t('groupLorebooksHint')}
+                </div>
+              </div>
+
+              <div className={styles.fieldGroup}>
+                <label className={styles.fieldLabel}>{t('groupResponseOrder')}</label>
+                <select
+                  className={styles.fieldInput}
+                  value={groupResponseOrder}
+                  onChange={(e) => setGroupResponseOrder(e.target.value as GroupResponseOrder)}
+                >
+                  <option value="sequential">{t('responseOrderSequential')}</option>
+                  <option value="random">{t('responseOrderRandom')}</option>
+                </select>
+                <div style={{ fontSize: 'calc(11px * var(--lumiverse-font-scale, 1))', color: 'var(--lumiverse-text-dim)', lineHeight: 1.45 }}>
+                  {t('groupResponseOrderHint')}
                 </div>
               </div>
 

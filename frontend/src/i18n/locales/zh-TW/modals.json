@@ -454,7 +454,11 @@
     "lorebookModeActive": "僅目前發言者",
     "lorebookModeAllUnmuted": "所有未靜音成員",
     "lorebookModeAll": "所有成員",
-    "groupLorebooksHint": "控制生成時哪些成員關聯的世界書會啟用。"
+    "groupLorebooksHint": "控制生成時哪些成員關聯的世界書會啟用。",
+    "groupResponseOrder": "群組回覆順序",
+    "responseOrderSequential": "順序",
+    "responseOrderRandom": "隨機",
+    "groupResponseOrderHint": "控制群組回覆時如何選擇未靜音成員。直接提及的角色仍會優先回覆。"
   },
   "groupSettings": {
     "title": "群組設置",
@@ -487,6 +491,10 @@
     "lorebookModeAllUnmuted": "所有未靜音成員",
     "lorebookModeAll": "所有成員",
     "groupLorebooksHint": "控制生成時哪些成員關聯的世界書會啟用。",
+    "groupResponseOrder": "群組回覆順序",
+    "responseOrderSequential": "順序",
+    "responseOrderRandom": "隨機",
+    "groupResponseOrderHint": "控制群組回覆時如何選擇未靜音成員。直接提及的角色仍會優先回覆。",
     "impersonationHint": "設置後，輸入欄單行扮演將使用該預設的扮演提示、助手扮演預填與參數，而不會改變聊天的主預設。",
     "deletedPreset": "已刪除的預設（{{id}}）",
     "voiceHintWithDefault": "僅為此聊天覆蓋 {{name}} 的語音。留空則使用角色默認語音。",

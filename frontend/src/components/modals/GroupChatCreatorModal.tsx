@@ -8,6 +8,7 @@ import { ModalShell } from '@/components/shared/ModalShell'
 import { useStore } from '@/store'
 import { chatsApi } from '@/api/chats'
 import { getCharacterAvatarThumbUrl } from '@/lib/avatarUrls'
+import type { GroupResponseOrder } from '@/lib/groupResponseOrder'
 import Pagination from '@/components/shared/Pagination'
 import type { Character } from '@/types/api'
 import styles from './GroupChatCreatorModal.module.css'
@@ -42,6 +43,7 @@ export default function GroupChatCreatorModal() {
   const [talkativenessOverrides, setTalkativenessOverrides] = useState<Record<string, number>>({})
   const [groupCardMode, setGroupCardMode] = useState<GroupCardMode>('swap')
   const [groupLorebookMode, setGroupLorebookMode] = useState<GroupLorebookMode>('follow_card_mode')
+  const [groupResponseOrder, setGroupResponseOrder] = useState<GroupResponseOrder>('sequential')
   const [scenarioMode, setScenarioMode] = useState<'individual' | 'member' | 'custom'>('individual')
   const [scenarioMemberId, setScenarioMemberId] = useState<string>('')
   const [scenarioCustom, setScenarioCustom] = useState('')
@@ -161,6 +163,9 @@ export default function GroupChatCreatorModal() {
       if (groupLorebookMode !== 'follow_card_mode') {
         extraMeta.group_lorebook_mode = groupLorebookMode
       }
+      if (groupResponseOrder !== 'sequential') {
+        extraMeta.group_response_order = groupResponseOrder
+      }
       if (scenarioMode !== 'individual') {
         extraMeta.group_scenario_override = {
           mode: scenarioMode,
@@ -185,7 +190,7 @@ export default function GroupChatCreatorModal() {
     } finally {
       setCreating(false)
     }
-  }, [creating, selectedIds, groupName, selectedGreeting, talkativenessOverrides, groupCardMode, groupLorebookMode, scenarioMode, scenarioMemberId, scenarioCustom, closeModal, navigate])
+  }, [creating, selectedIds, groupName, selectedGreeting, talkativenessOverrides, groupCardMode, groupLorebookMode, groupResponseOrder, scenarioMode, scenarioMemberId, scenarioCustom, closeModal, navigate])
 
   const canProceed =
     step === 'characters'
@@ -384,6 +389,21 @@ export default function GroupChatCreatorModal() {
                   </select>
                   <div style={{ fontSize: 'calc(11px * var(--lumiverse-font-scale, 1))', color: 'var(--lumiverse-text-dim)', lineHeight: 1.45 }}>
                     {t('groupLorebooksHint')}
+                  </div>
+                </div>
+
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>{t('groupResponseOrder')}</label>
+                  <select
+                    className={styles.fieldInput}
+                    value={groupResponseOrder}
+                    onChange={(e) => setGroupResponseOrder(e.target.value as GroupResponseOrder)}
+                  >
+                    <option value="sequential">{t('responseOrderSequential')}</option>
+                    <option value="random">{t('responseOrderRandom')}</option>
+                  </select>
+                  <div style={{ fontSize: 'calc(11px * var(--lumiverse-font-scale, 1))', color: 'var(--lumiverse-text-dim)', lineHeight: 1.45 }}>
+                    {t('groupResponseOrderHint')}
                   </div>
                 </div>
 

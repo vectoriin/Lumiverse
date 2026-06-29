@@ -33,6 +33,7 @@ import { didMobileQueueHoldReachThreshold, getMobileQueueHoldPreviewState } from
 import { getMobileQueueHintKey, type MobileQueueHoldState } from './mobileQueueHint'
 import { unlockNotificationAudio } from '@/lib/notificationAudio'
 import { unlockTTSAudio } from '@/lib/ttsAudio'
+import { orderGroupResponseIds, readGroupResponseOrder } from '@/lib/groupResponseOrder'
 import { createSTTEngine, getSupportedSTTAudioFormat, isWebSpeechAvailable, type STTAudioFrame, type STTEngine } from '@/lib/sttEngine'
 
 interface InputAreaProps {
@@ -285,6 +286,7 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
   const isGroupChat = useStore((s) => s.isGroupChat)
   const groupCharacterIds = useStore((s) => s.groupCharacterIds)
   const mutedCharacterIds = useStore((s) => s.mutedCharacterIds)
+  const activeChatMetadata = useStore((s) => s.activeChatMetadata)
   const characters = useStore((s) => s.characters)
   const setMentionQueue = useStore((s) => s.setMentionQueue)
   const expressionDisplay = useStore((s) => s.expressionDisplay)
@@ -296,6 +298,10 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
   const localGenerationInChat = isStreaming && activeChatId === chatId
   const isGeneratingInChat = !!liveChatGenerationId || localGenerationInChat
   const generationIdForChat = liveChatGenerationId || (localGenerationInChat ? activeGenerationId : null)
+  const groupResponseOrder = useMemo(
+    () => readGroupResponseOrder(activeChatMetadata),
+    [activeChatMetadata],
+  )
 
   // Track whether the active character has expressions configured
   const [hasExpressions, setHasExpressions] = useState(false)
@@ -1390,18 +1396,25 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
         })
       }
 
-      // Initial speaker: first mention → first unmuted → undefined.
+      const orderedMentionedIds = mentionedIds.length > 0
+        ? orderGroupResponseIds(mentionedIds, groupResponseOrder, { priorityIds: [mentionedIds[0]] })
+        : []
+
+      // Initial speaker: first mention → configured unmuted member order → undefined.
       if (isGroupChat && groupCharacterIds.length > 0) {
-        if (mentionedIds.length > 0) {
-          genOpts.target_character_id = mentionedIds[0]
+        if (orderedMentionedIds.length > 0) {
+          genOpts.target_character_id = orderedMentionedIds[0]
         } else {
-          const firstUnmuted = groupCharacterIds.find((id) => !mutedCharacterIds.includes(id))
+          const firstUnmuted = orderGroupResponseIds(
+            groupCharacterIds.filter((id) => !mutedCharacterIds.includes(id)),
+            groupResponseOrder,
+          )[0]
           if (firstUnmuted) genOpts.target_character_id = firstUnmuted
         }
       }
 
-      // Queue remaining mentioned members to speak in order after the first.
-      const remainingMentions = mentionedIds.slice(1)
+      // Queue remaining mentioned members after the direct-mention lead.
+      const remainingMentions = orderedMentionedIds.slice(1)
       if (isGroupChat && remainingMentions.length > 0) {
         setMentionQueue({
           chatId,
@@ -1462,7 +1475,7 @@ export default function InputArea({ chatId, onNavigateHome }: InputAreaProps) {
     } finally {
       sendingRef.current = false
     }
-  }, [text, chatId, isGeneratingInChat, isTemporaryChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, personas, sendPersonaId, pendingAttachments, addMessage, startStreaming, setStreamingError, consumeOneshotGuides, saveDraftInput, hasQueuedMessages, isGroupChat, groupCharacterIds, mutedCharacterIds, characters, setMentionQueue, resizeTextarea, attemptRoomSend])
+  }, [text, chatId, isGeneratingInChat, isTemporaryChat, activeProfileId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, personas, sendPersonaId, pendingAttachments, addMessage, startStreaming, setStreamingError, consumeOneshotGuides, saveDraftInput, hasQueuedMessages, isGroupChat, groupCharacterIds, mutedCharacterIds, groupResponseOrder, characters, setMentionQueue, resizeTextarea, attemptRoomSend])
 
   const finalizeSTTTranscript = useCallback(() => {
     const transcript = sttNormalizedFinalSegmentsRef.current.join(' ').trim()

@@ -464,7 +464,11 @@
     "lorebookModeActive": "Active speaker only",
     "lorebookModeAllUnmuted": "All unmuted members",
     "lorebookModeAll": "All members",
-    "groupLorebooksHint": "Controls which member-attached world books are active during generation."
+    "groupLorebooksHint": "Controls which member-attached world books are active during generation.",
+    "groupResponseOrder": "Group Response Order",
+    "responseOrderSequential": "Sequential",
+    "responseOrderRandom": "Random",
+    "groupResponseOrderHint": "Controls how unmuted members are selected for group replies. Direct mentions still respond first."
   },
   "groupSettings": {
     "title": "Group Settings",
@@ -497,6 +501,10 @@
     "lorebookModeAllUnmuted": "All unmuted members",
     "lorebookModeAll": "All members",
     "groupLorebooksHint": "Controls which member-attached world books are active during generation.",
+    "groupResponseOrder": "Group Response Order",
+    "responseOrderSequential": "Sequential",
+    "responseOrderRandom": "Random",
+    "groupResponseOrderHint": "Controls how unmuted members are selected for group replies. Direct mentions still respond first.",
     "impersonationHint": "When set, input-bar one-liner impersonation uses this preset's impersonation prompt, assistant impersonation prefill, and parameters without changing the main preset for the chat.",
     "deletedPreset": "Deleted preset ({{id}})",
     "voiceHintWithDefault": "Overrides {{name}}'s voice for this chat only. Leave unset to use the character's default voice.",

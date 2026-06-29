@@ -454,7 +454,11 @@
     "lorebookModeActive": "Intervenant actif uniquement",
     "lorebookModeAllUnmuted": "Tous les membres non muets",
     "lorebookModeAll": "Tous les membres",
-    "groupLorebooksHint": "Contrôle quels livres du monde attachés aux membres sont actifs pendant la génération."
+    "groupLorebooksHint": "Contrôle quels livres du monde attachés aux membres sont actifs pendant la génération.",
+    "groupResponseOrder": "Ordre des réponses du groupe",
+    "responseOrderSequential": "Séquentiel",
+    "responseOrderRandom": "Aléatoire",
+    "groupResponseOrderHint": "Contrôle comment les membres non muets sont sélectionnés pour les réponses de groupe. Les mentions directes répondent toujours en premier."
   },
   "groupSettings": {
     "title": "Paramètres de groupe",
@@ -487,6 +491,10 @@
     "lorebookModeAllUnmuted": "Tous les membres non muets",
     "lorebookModeAll": "Tous les membres",
     "groupLorebooksHint": "Contrôle quels livres du monde attachés aux membres sont actifs pendant la génération.",
+    "groupResponseOrder": "Ordre des réponses du groupe",
+    "responseOrderSequential": "Séquentiel",
+    "responseOrderRandom": "Aléatoire",
+    "groupResponseOrderHint": "Contrôle comment les membres non muets sont sélectionnés pour les réponses de groupe. Les mentions directes répondent toujours en premier.",
     "impersonationHint": "Lorsque cette option est définie, l'usurpation d'identité d'une seule ligne dans la barre de saisie utilise l'invite d'usurpation d'identité de ce préréglage, le pré-remplissage de l'assistant et les paramètres sans modifier le préréglage principal du chat.",
     "deletedPreset": "Préréglage supprimé ({{id}}) ",
     "voiceHintWithDefault": " Remplace la voix de {{name}} pour cette discussion uniquement. Laissez cette option désactivée pour utiliser la voix par défaut du personnage. ",

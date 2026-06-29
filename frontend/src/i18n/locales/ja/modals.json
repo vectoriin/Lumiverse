@@ -454,7 +454,11 @@
     "lorebookModeActive": "現在の発話者のみ",
     "lorebookModeAllUnmuted": "ミュートされていない全メンバー",
     "lorebookModeAll": "全メンバー",
-    "groupLorebooksHint": "生成中に有効になるメンバー紐づけのワールドブックを制御します。"
+    "groupLorebooksHint": "生成中に有効になるメンバー紐づけのワールドブックを制御します。",
+    "groupResponseOrder": "グループ応答順",
+    "responseOrderSequential": "順番",
+    "responseOrderRandom": "ランダム",
+    "groupResponseOrderHint": "グループ返信でミュートされていないメンバーを選ぶ方法を制御します。直接メンションされたキャラクターは常に先に応答します。"
   },
   "groupSettings": {
     "title": "グループ設定",
@@ -487,6 +491,10 @@
     "lorebookModeAllUnmuted": "ミュートされていない全メンバー",
     "lorebookModeAll": "全メンバー",
     "groupLorebooksHint": "生成中に有効になるメンバー紐づけのワールドブックを制御します。",
+    "groupResponseOrder": "グループ応答順",
+    "responseOrderSequential": "順番",
+    "responseOrderRandom": "ランダム",
+    "groupResponseOrderHint": "グループ返信でミュートされていないメンバーを選ぶ方法を制御します。直接メンションされたキャラクターは常に先に応答します。",
     "impersonationHint": "設定すると、入力バーのワンライナー偽装では、チャットのメイン プリセットを変更せずに、このプリセットの偽装プロンプト、アシスタント偽装プレフィル、およびパラメーターが使用されます。",
     "deletedPreset": "削除されたプリセット ({{id}})",
     "voiceHintWithDefault": "このチャットのみ {{name}} の音声をオーバーライドします。キャラクターのデフォルトの音声を使用するには、未設定のままにしておきます。",

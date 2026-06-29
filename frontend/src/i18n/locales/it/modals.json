@@ -454,7 +454,11 @@
     "lorebookModeActive": "Solo parlante attivo",
     "lorebookModeAllUnmuted": "Tutti i membri non muti",
     "lorebookModeAll": "Tutti i membri",
-    "groupLorebooksHint": "Controlla quali libri mondo collegati ai membri sono attivi durante la generazione."
+    "groupLorebooksHint": "Controlla quali libri mondo collegati ai membri sono attivi durante la generazione.",
+    "groupResponseOrder": "Ordine risposte gruppo",
+    "responseOrderSequential": "Sequenziale",
+    "responseOrderRandom": "Casuale",
+    "groupResponseOrderHint": "Controlla come vengono selezionati i membri non muti per le risposte di gruppo. Le menzioni dirette rispondono comunque per prime."
   },
   "groupSettings": {
     "title": "Impostazioni gruppo",
@@ -487,6 +491,10 @@
     "lorebookModeAllUnmuted": "Tutti i membri non muti",
     "lorebookModeAll": "Tutti i membri",
     "groupLorebooksHint": "Controlla quali libri mondo collegati ai membri sono attivi durante la generazione.",
+    "groupResponseOrder": "Ordine risposte gruppo",
+    "responseOrderSequential": "Sequenziale",
+    "responseOrderRandom": "Casuale",
+    "groupResponseOrderHint": "Controlla come vengono selezionati i membri non muti per le risposte di gruppo. Le menzioni dirette rispondono comunque per prime.",
     "impersonationHint": "Quando impostato, l'impersonificazione one-liner nella barra di input usa il prompt di impersonificazione di questo preset, la precompilazione assistente e le impostazioni senza modificare il preset principale della chat.",
     "deletedPreset": "Preset eliminato ({{id}}) ",
     "voiceHintWithDefault": " Sovrascrive la voce di {{name}} solo per questa chat. Lascia disabilitato per usare la voce predefinita del personaggio. ",
