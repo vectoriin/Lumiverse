@@ -13,10 +13,9 @@ import { env } from "../env";
 import { getDb } from "../db/connection";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
+import { getEffectiveDiskWarningSettings } from "./disk-warning-settings.service";
 
 const DISK_CHECK_INTERVAL_MS = 5 * 60 * 1000;
-const DISK_WARNING_USAGE_THRESHOLD = env.diskWarningUsageThreshold;
-const DISK_WARNING_MIN_FREE_BYTES = env.diskWarningMinFreeBytes;
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -35,10 +34,13 @@ export interface DiskWarningThresholds {
   minFreeBytesThreshold: number;
 }
 
-const DEFAULT_WARNING_THRESHOLDS: DiskWarningThresholds = {
-  usagePercentThreshold: DISK_WARNING_USAGE_THRESHOLD,
-  minFreeBytesThreshold: DISK_WARNING_MIN_FREE_BYTES,
-};
+function getCurrentWarningThresholds(): DiskWarningThresholds {
+  const settings = getEffectiveDiskWarningSettings();
+  return {
+    usagePercentThreshold: settings.usagePercentThreshold,
+    minFreeBytesThreshold: settings.minFreeBytesThreshold,
+  };
+}
 
 // Tracks whether the last check found the disk over threshold. Used purely
 // for console-log gating — we don't want to spam logs every 5 min while the
@@ -76,7 +78,7 @@ function describe(usage: DiskUsage): string {
 
 export function shouldWarnForDiskUsage(
   usage: Pick<DiskUsage, "usagePercent" | "freeBytes">,
-  thresholds: DiskWarningThresholds = DEFAULT_WARNING_THRESHOLDS,
+  thresholds: DiskWarningThresholds = getCurrentWarningThresholds(),
 ): boolean {
   return usage.usagePercent >= thresholds.usagePercentThreshold
     && usage.freeBytes <= thresholds.minFreeBytesThreshold;
@@ -86,9 +88,10 @@ function runDiskUsageCheck(reason: "startup" | "interval"): void {
   const usage = getDiskUsage();
   if (!usage) return;
 
-  const over = shouldWarnForDiskUsage(usage);
-  const thresholdPct = (DISK_WARNING_USAGE_THRESHOLD * 100).toFixed(0);
-  const thresholdFree = formatBytes(DISK_WARNING_MIN_FREE_BYTES);
+  const thresholds = getCurrentWarningThresholds();
+  const over = shouldWarnForDiskUsage(usage, thresholds);
+  const thresholdPct = (thresholds.usagePercentThreshold * 100).toFixed(0);
+  const thresholdFree = formatBytes(thresholds.minFreeBytesThreshold);
 
   // Console log: on startup always, plus on state transitions (so a sustained
   // over-threshold condition doesn't spam server logs every 5 min).
@@ -118,8 +121,8 @@ function runDiskUsageCheck(reason: "startup" | "interval"): void {
       usagePercent: usage.usagePercent,
       freeBytes: usage.freeBytes,
       totalBytes: usage.totalBytes,
-      thresholdPercent: DISK_WARNING_USAGE_THRESHOLD,
-      thresholdFreeBytes: DISK_WARNING_MIN_FREE_BYTES,
+      thresholdPercent: thresholds.usagePercentThreshold,
+      thresholdFreeBytes: thresholds.minFreeBytesThreshold,
     };
     // Restrict the toast to owner + admin users — disk pressure is an ops
     // concern, not something every signed-in user needs to act on. The

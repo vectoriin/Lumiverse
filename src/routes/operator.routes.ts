@@ -16,6 +16,10 @@ import {
   getDnsSettingsStatus,
   putDnsSettings,
 } from "../services/dns-settings.service";
+import {
+  getDiskWarningSettingsStatus,
+  putDiskWarningSettings,
+} from "../services/disk-warning-settings.service";
 import { InvalidSettingError } from "../services/settings.service";
 
 const app = new Hono();
@@ -62,6 +66,23 @@ app.put("/dns", async (c) => {
   const body = await c.req.json().catch(() => null);
   try {
     return c.json(putDnsSettings(userId, body ?? {}));
+  } catch (err) {
+    if (err instanceof InvalidSettingError) {
+      return c.json({ error: err.message }, 400);
+    }
+    return c.json({ error: err instanceof Error ? err.message : "Unknown error" }, 500);
+  }
+});
+
+app.get("/disk-warning", (c) => {
+  return c.json(getDiskWarningSettingsStatus());
+});
+
+app.put("/disk-warning", async (c) => {
+  const userId = c.get("userId");
+  const body = await c.req.json().catch(() => null);
+  try {
+    return c.json(putDiskWarningSettings(userId, body ?? {}));
   } catch (err) {
     if (err instanceof InvalidSettingError) {
       return c.json({ error: err.message }, 400);

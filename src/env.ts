@@ -15,17 +15,20 @@ function getLanIPs(): string[] {
   return ips;
 }
 
+export const DEFAULT_DISK_WARNING_USAGE_THRESHOLD = 0.9;
+export const DEFAULT_DISK_WARNING_MIN_FREE_BYTES = 100 * 1024 * 1024 * 1024;
+
 export interface EnvConfig {
   port: number;
   /** @deprecated Use resolveEncryptionKey() instead. Kept for migration only. */
   encryptionKey: string;
   dataDir: string;
   /**
-   * Disk warning usage threshold as a 0..1 ratio. The warning fires only when
-   * this AND diskWarningMinFreeBytes are both crossed.
+   * Default disk warning usage threshold as a 0..1 ratio. The warning fires
+   * only when this AND diskWarningMinFreeBytes are both crossed.
    */
   diskWarningUsageThreshold: number;
-  /** Absolute free-space floor for low-disk warnings. */
+  /** Default absolute free-space floor for low-disk warnings. */
   diskWarningMinFreeBytes: number;
   frontendDir: string;
   ownerUsername: string;
@@ -142,11 +145,11 @@ export function loadEnv(): EnvConfig {
   const dataDir = resolve(process.env.DATA_DIR || "./data");
   const diskWarningUsageThreshold = parseRatioOrPercentEnv(
     "LUMIVERSE_DISK_WARNING_USAGE_PERCENT",
-    0.9,
+    DEFAULT_DISK_WARNING_USAGE_THRESHOLD,
   );
   const diskWarningMinFreeBytes = parsePositiveIntEnv(
     "LUMIVERSE_DISK_WARNING_MIN_FREE_BYTES",
-    100 * 1024 * 1024 * 1024,
+    DEFAULT_DISK_WARNING_MIN_FREE_BYTES,
   );
 
   const frontendDir = process.env.FRONTEND_DIR || "";

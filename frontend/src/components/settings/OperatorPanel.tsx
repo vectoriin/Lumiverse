@@ -23,11 +23,13 @@ import { spinClass } from '@/components/shared/Spinner'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import { useStore } from '@/store'
 import {
+  type DiskWarningSettings,
   type DatabaseMaintenanceSettings,
   operatorApi,
   type DatabaseTuningSettings,
   type DnsSettings,
   type OperatorDatabaseStatus,
+  type OperatorDiskWarningStatus,
   type OperatorDnsStatus,
   type OperatorSharpStatus,
   type OperatorStatus,
@@ -298,6 +300,28 @@ function normalizeSharpSettings(input: SharpSettings): SharpSettings {
   }
 }
 
+function normalizeDiskWarningSettings(input: DiskWarningSettings): DiskWarningSettings {
+  const usagePercentThreshold = input.usagePercentThreshold == null || !Number.isFinite(input.usagePercentThreshold)
+    ? null
+    : Math.max(0.01, Math.min(1, input.usagePercentThreshold))
+  const minFreeBytesThreshold = input.minFreeBytesThreshold == null || !Number.isFinite(input.minFreeBytesThreshold)
+    ? null
+    : Math.max(0, Math.floor(input.minFreeBytesThreshold))
+  return { usagePercentThreshold, minFreeBytesThreshold }
+}
+
+function formatThresholdPercent(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  const pct = value * 100
+  return Number.isInteger(pct) ? pct.toFixed(0) : pct.toFixed(1)
+}
+
+function formatGiBValue(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return '—'
+  const gib = bytes / (1024 * 1024 * 1024)
+  return Number.isInteger(gib) ? gib.toFixed(0) : gib.toFixed(1)
+}
+
 // ─── Confirmation state ─────────────────────────────────────────────────────
 
 interface ConfirmState {
@@ -408,6 +432,8 @@ export default function OperatorPanel() {
   const [dbStatus, setDbStatus] = useState<OperatorDatabaseStatus | null>(null)
   const [dbTuning, setDbTuning] = useState<DatabaseTuningSettings>({ cacheMemoryPercent: null, mmapSizeBytes: null })
   const [dbMaintenanceSettings, setDbMaintenanceSettings] = useState<DatabaseMaintenanceSettings>({})
+  const [diskWarningStatus, setDiskWarningStatus] = useState<OperatorDiskWarningStatus | null>(null)
+  const [diskWarningSettings, setDiskWarningSettings] = useState<DiskWarningSettings>({})
   const [sharpStatus, setSharpStatus] = useState<OperatorSharpStatus | null>(null)
   const [sharpSettings, setSharpSettings] = useState<SharpSettings>({})
   const [dnsStatus, setDnsStatus] = useState<OperatorDnsStatus | null>(null)
@@ -489,6 +515,7 @@ export default function OperatorPanel() {
       'clearing cache': t('operator.busyClearingCache'),
       'installing dependencies': t('operator.busyInstallingDeps'),
       'saving database tuning': t('operator.busySavingDbTuning'),
+      'saving disk warning settings': t('operator.busySavingDiskWarning'),
       'saving sharp settings': t('operator.busySavingSharp'),
       'saving database maintenance': t('operator.busySavingDbMaintenance'),
       'refreshing database stats': t('operator.busyRefreshingDbStats'),
@@ -570,6 +597,20 @@ export default function OperatorPanel() {
       setDnsSettings({
         dohFallbackEnabled: next.configuredSettings.dohFallbackEnabled ?? false,
         dohEndpoint: next.configuredSettings.dohEndpoint,
+      })
+      return next
+    } catch {
+      return null
+    }
+  }, [])
+
+  const refreshDiskWarningSettings = useCallback(async () => {
+    try {
+      const next = await operatorApi.getDiskWarning()
+      setDiskWarningStatus(next)
+      setDiskWarningSettings({
+        usagePercentThreshold: next.configuredSettings.usagePercentThreshold ?? null,
+        minFreeBytesThreshold: next.configuredSettings.minFreeBytesThreshold ?? null,
       })
       return next
     } catch {
@@ -752,14 +793,22 @@ export default function OperatorPanel() {
   useEffect(() => {
     let mounted = true
     const fetchStatus = async () => {
-      const [s] = await Promise.all([refreshStatus(), refreshDatabase(), refreshVectorHealth(), refreshVectorConfig(), refreshSharpSettings(), refreshDnsSettings()])
+      const [s] = await Promise.all([
+        refreshStatus(),
+        refreshDatabase(),
+        refreshVectorHealth(),
+        refreshVectorConfig(),
+        refreshSharpSettings(),
+        refreshDnsSettings(),
+        refreshDiskWarningSettings(),
+      ])
       if (mounted && s) setLoading(false)
       else if (mounted) setLoading(false)
     }
     fetchStatus()
     const interval = setInterval(fetchStatus, 30_000)
     return () => { mounted = false; clearInterval(interval) }
-  }, [refreshDatabase, refreshDnsSettings, refreshSharpSettings, refreshStatus, refreshVectorConfig, refreshVectorHealth])
+  }, [refreshDatabase, refreshDiskWarningSettings, refreshDnsSettings, refreshSharpSettings, refreshStatus, refreshVectorConfig, refreshVectorHealth])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -812,6 +861,7 @@ export default function OperatorPanel() {
       // Re-fetch status (new PID, uptime reset, possibly new branch/version)
       refreshStatus()
       refreshDatabase()
+      refreshDiskWarningSettings()
       refreshSharpSettings()
       refreshDnsSettings()
       refreshTrustedHosts()
@@ -824,7 +874,7 @@ export default function OperatorPanel() {
       clearInterval(disconnectPoll)
       unsub()
     }
-  }, [reconnecting, refreshDatabase, refreshDnsSettings, refreshSharpSettings, refreshStatus, refreshTrustedHosts])
+  }, [reconnecting, refreshDatabase, refreshDiskWarningSettings, refreshDnsSettings, refreshSharpSettings, refreshStatus, refreshTrustedHosts])
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
@@ -1083,6 +1133,23 @@ export default function OperatorPanel() {
     }
     setBusy(null)
   }, [addToast, dnsSettings])
+
+  const handleSaveDiskWarningSettings = useCallback(async () => {
+    setBusy('saving disk warning settings')
+    try {
+      const normalized = normalizeDiskWarningSettings(diskWarningSettings)
+      const next = await operatorApi.putDiskWarning(normalized)
+      setDiskWarningStatus(next)
+      setDiskWarningSettings({
+        usagePercentThreshold: next.configuredSettings.usagePercentThreshold ?? null,
+        minFreeBytesThreshold: next.configuredSettings.minFreeBytesThreshold ?? null,
+      })
+      addToast({ type: 'success', message: t('operator.diskWarningApplySuccess') })
+    } catch (err) {
+      addToast({ type: 'error', message: err instanceof Error ? err.message : t('operator.diskWarningApplyFailed') })
+    }
+    setBusy(null)
+  }, [addToast, diskWarningSettings, t])
 
   const handleRunVacuumNow = useCallback(() => {
     const normalizedTuning = normalizeDatabaseTuning(dbTuning)
@@ -1605,8 +1672,19 @@ export default function OperatorPanel() {
                     ? t('operator.dbDiskUnknown')
                     : dbStats?.vacuumHasEnoughFreeBytes
                       ? t('operator.dbDiskEnough')
-                      : t('operator.dbDiskNotEnough'),
+                  : t('operator.dbDiskNotEnough'),
                 })}
+              </span>
+            </div>
+            <div className={styles.dbInfoBlock}>
+              <span className={styles.statusLabel}>{t('operator.dbDiskWarningEffective')}</span>
+              <span className={styles.dbInlineText}>
+                {diskWarningStatus
+                  ? t('operator.dbDiskWarningEffectiveValue', {
+                    percent: formatThresholdPercent(diskWarningStatus.effectiveSettings.usagePercentThreshold),
+                    free: formatBytes(diskWarningStatus.effectiveSettings.minFreeBytesThreshold),
+                  })
+                  : '—'}
               </span>
             </div>
           </div>
@@ -1619,6 +1697,47 @@ export default function OperatorPanel() {
               })}
             </div>
           )}
+
+          <div className={styles.tuningGrid}>
+            <label className={styles.fieldGroup}>
+              <span className={styles.fieldLabel}>{t('operator.dbDiskWarnPercent')}</span>
+              <NumericInput
+                min={1}
+                max={100}
+                step={0.5}
+                className={styles.fieldInput}
+                placeholder={t('operator.placeholderDefault', {
+                  value: formatThresholdPercent(diskWarningStatus?.defaults.usagePercentThreshold ?? 0.9),
+                })}
+                value={diskWarningSettings.usagePercentThreshold == null ? null : Number((diskWarningSettings.usagePercentThreshold * 100).toFixed(2))}
+                allowEmpty
+                onChange={(value) => setDiskWarningSettings((prev) => ({
+                  ...prev,
+                  usagePercentThreshold: value == null ? null : value / 100,
+                }))}
+              />
+              <span className={styles.fieldHint}>{t('operator.dbDiskWarnPercentHint')}</span>
+            </label>
+
+            <label className={styles.fieldGroup}>
+              <span className={styles.fieldLabel}>{t('operator.dbDiskWarnFree')}</span>
+              <NumericInput
+                min={0}
+                step={10}
+                className={styles.fieldInput}
+                placeholder={t('operator.placeholderDefault', {
+                  value: formatGiBValue(diskWarningStatus?.defaults.minFreeBytesThreshold ?? (100 * 1024 * 1024 * 1024)),
+                })}
+                value={diskWarningSettings.minFreeBytesThreshold == null ? null : Number((diskWarningSettings.minFreeBytesThreshold / (1024 * 1024 * 1024)).toFixed(2))}
+                allowEmpty
+                onChange={(value) => setDiskWarningSettings((prev) => ({
+                  ...prev,
+                  minFreeBytesThreshold: value == null ? null : Math.round(value * 1024 * 1024 * 1024),
+                }))}
+              />
+              <span className={styles.fieldHint}>{t('operator.dbDiskWarnFreeHint')}</span>
+            </label>
+          </div>
 
           <div className={styles.tuningGrid}>
             <label className={styles.fieldGroup}>
@@ -1849,6 +1968,10 @@ export default function OperatorPanel() {
             <button className={styles.controlBtn} disabled={!!effectiveBusy} onClick={handleRefreshDatabase}>
               <RefreshCw size={14} />
               {t('operator.dbRefreshStats')}
+            </button>
+            <button className={styles.controlBtn} disabled={!!effectiveBusy} onClick={handleSaveDiskWarningSettings}>
+              <HardDrive size={14} />
+              {t('operator.dbSaveDiskWarning')}
             </button>
             <button className={styles.controlBtn} disabled={!!effectiveBusy} onClick={handleSaveDatabaseTuning}>
               <HardDrive size={14} />

@@ -109,6 +109,11 @@ initSharpSettings();
 const { initDnsSettings } = await import("./services/dns-settings.service");
 initDnsSettings();
 
+// Load owner-scoped disk warning thresholds before the monitor starts so
+// operator changes apply live without a server restart.
+const { initDiskWarningSettings } = await import("./services/disk-warning-settings.service");
+initDiskWarningSettings();
+
 // Start background vectorization maintenance only after the database is ready.
 const { startVectorizationQueueMaintenance } = await import("./services/vectorization-queue.service");
 startVectorizationQueueMaintenance();
