@@ -415,6 +415,7 @@ export default function RegexEditorModal() {
                       { p: 'ai_output' as const, label: tr('placementAi') },
                       { p: 'world_info' as const, label: tr('placementWi') },
                       { p: 'reasoning' as const, label: tr('placementReasoning') },
+                      { p: 'memory' as const, label: tr('placementMemory') },
                     ]).map(({ p, label }) => (
                       <button
                         key={p}

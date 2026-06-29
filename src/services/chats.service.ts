@@ -13,6 +13,7 @@ import { paginatedQuery } from "./pagination";
 import * as embeddingsSvc from "./embeddings.service";
 import * as audioSvc from "./audio.service";
 import * as memoryCortex from "./memory-cortex";
+import * as regexScriptsSvc from "./regex-scripts.service";
 import { removePoolEntriesForChat } from "./generation-pool.service";
 import { invalidateChatMemoryCache, scheduleChatMemoryRefresh } from "./chat-memory-cache.service";
 import { enqueueChatPipelineTask } from "./chat-pipeline-coordinator.service";
@@ -2848,9 +2849,20 @@ async function updateChatChunks(userId: string, chatId: string, newMessage: Mess
   const cfg = await embeddingsSvc.getEmbeddingConfig(userId);
   if (!cfg.enabled || !cfg.vectorize_chat_messages) return;
 
+  const chat = getChat(userId, chatId);
+  const characterId = chat?.character_id ?? null;
+
+  // Strip "memory"-placement scripts before vectorizing; only this copy is
+  // stripped, the stored message row stays intact for display.
+  const memStripped = await regexScriptsSvc.applyMemoryIngestionRegex(
+    userId,
+    newMessage.content,
+    { characterId, chatId },
+  );
+
   const reasoningStrip = getReasoningStripOptions(userId);
-  const env = contentHasMacroHints(newMessage.content) ? buildMacroEnvForChat(userId, chatId) : null;
-  const sanitizedContent = await resolveAndSanitizeForVectorization(newMessage.content, env, reasoningStrip);
+  const env = contentHasMacroHints(memStripped) ? buildMacroEnvForChat(userId, chatId) : null;
+  const sanitizedContent = await resolveAndSanitizeForVectorization(memStripped, env, reasoningStrip);
   const lastChunk = getLastChatChunk(chatId);
   let chunkId: string;
 
@@ -2874,7 +2886,6 @@ async function updateChatChunks(userId: string, chatId: string, newMessage: Mess
       const cortexConfig = memoryCortex.getCortexConfig(userId);
       if (!cortexConfig.enabled) return;
 
-      const chat = getChat(userId, chatId);
       const characterNames: string[] = [];
       const aliasMaps: Map<string, string>[] = [];
       if (chat) {
@@ -2948,6 +2959,7 @@ async function updateChatChunks(userId: string, chatId: string, newMessage: Mess
         chunkId: chunk.id,
         chatId,
         userId,
+        characterId,
         content: chunk.content,
         messageIds: JSON.parse(chunk.message_ids || "[]"),
         startMessageIndex: 0,
@@ -3268,11 +3280,18 @@ async function chunkAndPersistMessages(
 
   const targetTokens = chatMemSettings.chunkTargetTokens;
   const reasoningStrip = getReasoningStripOptions(userId);
+  // Memory strip on rebuild too, else re-chunking raw messages bypasses it.
+  // Scripts fetched once for the whole chat.
+  const characterId = getChat(userId, chatId)?.character_id;
+  const memoryScripts = regexScriptsSvc.getActiveMemoryScripts(userId, { characterId, chatId });
   const anyMessageHasMacros = messages.some((m) => contentHasMacroHints(m.content));
   const env = anyMessageHasMacros ? buildMacroEnvForChat(userId, chatId) : null;
   const sanitizedByMsgId = new Map<string, string>();
   for (const msg of messages) {
-    sanitizedByMsgId.set(msg.id, await resolveAndSanitizeForVectorization(msg.content, env, reasoningStrip));
+    const memStripped = memoryScripts.length > 0
+      ? await regexScriptsSvc.applyRegexScripts(msg.content, memoryScripts, "memory", undefined, undefined, undefined, { source: "prompt_backend" })
+      : msg.content;
+    sanitizedByMsgId.set(msg.id, await resolveAndSanitizeForVectorization(memStripped, env, reasoningStrip));
   }
 
   let currentChunk: Message[] = [];

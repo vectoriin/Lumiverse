@@ -964,6 +964,7 @@ function ScriptRow({
                   { p: 'ai_output' as const, label: t('regexPanel.targetAi') },
                   { p: 'world_info' as const, label: t('regexPanel.targetWi') },
                   { p: 'reasoning' as const, label: t('regexPanel.targetCot') },
+                  { p: 'memory' as const, label: t('regexPanel.targetMemory') },
                 ]).map(({ p, label }) => (
                   <label key={p} className={styles.flagCheck}>
                     <input

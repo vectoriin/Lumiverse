@@ -657,6 +657,7 @@
     "placementAi": "AI",
     "placementReasoning": "CoT",
     "placementWi": "WI",
+    "placementMemory": "Memory",
     "macroNone": "None",
     "macroRaw": "Raw",
     "macroEscaped": "Escaped",
