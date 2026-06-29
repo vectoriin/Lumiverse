@@ -656,7 +656,8 @@ function applyGroupLogic(entries: WorldBookEntry[]): WorldBookEntry[] {
 /**
  * Bucket activated entries into WorldInfoCache positions:
  *  0 = before, 1 = after, 2 = AN before, 3 = AN after,
- *  4 = depth-based, 5 = EM before, 6 = EM after
+ *  4 = depth-based, 5 = EM before, 6 = EM after, 7 = at-marker,
+ *  8 = outlet-only (excluded from all position buckets; surfaces only via {{outlet::name}})
  */
 function bucketByPosition(entries: WorldBookEntry[]): WorldInfoCache {
   const cache: WorldInfoCache = {
@@ -706,13 +707,16 @@ function bucketByPosition(entries: WorldBookEntry[]): WorldInfoCache {
       case 7:
         cache.atMarker.push({ content, role, entryLabel });
         break;
+      case 8:
+        // Outlet-only: not injected at any position; resolved solely via the
+        // {{outlet::name}} macro from `activatedEntries`.
+        break;
       default:
         // Unknown position — treat as "before"
         cache.before.push({ content, role, entryLabel });
         break;
     }
   }
-
   return cache;
 }
 

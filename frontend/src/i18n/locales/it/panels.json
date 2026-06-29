@@ -1299,6 +1299,8 @@
       "depthShort": "@ profondità",
       "atMarker": "Al marker",
       "markerShort": "@ marker",
+      "outletOnly": "Solo outlet",
+      "outletOnlyShort": "Outlet",
       "fallback": "Pos {{position}}"
     },
     "entryType": {
@@ -1417,6 +1419,7 @@
         "automationId": "ID automazione"
       },
       "outletPlaceholder": "Usa con {{outlet::name}}",
+      "outletOnlyHint": "Nessun nome outlet impostato — questa voce non verrà mostrata da nessuna parte.",
       "countTokens": "Conta token",
       "countTokensTitle": "Stima il conteggio token usando il tokenizer del modello attuale",
       "tokenCount": "{{count}} token",

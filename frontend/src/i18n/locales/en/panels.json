@@ -1378,6 +1378,8 @@
       "depthShort": "@ Depth",
       "atMarker": "At Marker",
       "markerShort": "@ Marker",
+      "outletOnly": "Outlet Only",
+      "outletOnlyShort": "Outlet",
       "fallback": "Pos {{position}}"
     },
     "entryType": {
@@ -1496,6 +1498,7 @@
         "automationId": "Automation ID"
       },
       "outletPlaceholder": "Use with {{outlet::name}}",
+      "outletOnlyHint": "No outlet name set — this entry will not be output anywhere.",
       "countTokens": "Count tokens",
       "countTokensTitle": "Estimate token count using current model's tokenizer",
       "tokenCount": "{{count}} tokens",
