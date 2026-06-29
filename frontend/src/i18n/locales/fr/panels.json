@@ -1416,6 +1416,11 @@
         "automationId": "ID d'automatisation"
       },
       "outletPlaceholder": "Utiliser avec {{outlet::name}}",
+      "markerTarget": "Cible de marqueur",
+      "markerTargetNone": "Aucun (pool {{wi_marker}})",
+      "markerSideBefore": "Avant",
+      "markerSideAfter": "Après",
+      "markerSideLabel": "Position",
       "countTokens": "Compter les jetons",
       "countTokensTitle": "Estimer le nombre de jetons à l'aide du tokenizer du modèle actuel",
       "tokenCount": "Jetons {{count}}",

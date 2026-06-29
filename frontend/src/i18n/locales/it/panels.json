@@ -1417,6 +1417,11 @@
         "automationId": "ID automazione"
       },
       "outletPlaceholder": "Usa con {{outlet::name}}",
+      "markerTarget": "Obiettivo marcatore",
+      "markerTargetNone": "Nessuno (pool {{wi_marker}})",
+      "markerSideBefore": "Prima",
+      "markerSideAfter": "Dopo",
+      "markerSideLabel": "Posizione",
       "countTokens": "Conta token",
       "countTokensTitle": "Stima il conteggio token usando il tokenizer del modello attuale",
       "tokenCount": "{{count}} token",

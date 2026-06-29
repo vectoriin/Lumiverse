@@ -1416,6 +1416,11 @@
         "automationId": "オートメーションID"
       },
       "outletPlaceholder": "{{outlet::name}} と一緒に使用する",
+      "markerTarget": "マーカーターゲット",
+      "markerTargetNone": "なし ({{wi_marker}} プール)",
+      "markerSideBefore": "前",
+      "markerSideAfter": "後",
+      "markerSideLabel": "位置",
       "countTokens": "トークンを数える",
       "countTokensTitle": "現在のトークン数を推定するモデルのトークナイザー",
       "tokenCount": "{{count}} トークン",

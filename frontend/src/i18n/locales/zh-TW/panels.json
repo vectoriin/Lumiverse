@@ -1416,6 +1416,11 @@
         "automationId": "自動化 ID"
       },
       "outletPlaceholder": "配合 {{outlet::name}} 使用",
+      "markerTarget": "標記目標",
+      "markerTargetNone": "無 ({{wi_marker}} 集區)",
+      "markerSideBefore": "之前",
+      "markerSideAfter": "之後",
+      "markerSideLabel": "位置",
       "countTokens": "統計 token",
       "countTokensTitle": "使用當前模型的分詞器估算 token 數",
       "tokenCount": "{{count}} tokens",
