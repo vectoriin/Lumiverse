@@ -1862,8 +1862,8 @@ export async function assemblePrompt(
       ),
     );
 
-    if (cortexResult && cortexResult.memories.length > 0) {
-      memoryResult = formatCortexForAssembly(
+    if (cortexResult) {
+      const cortexMemoryResult = formatCortexForAssembly(
         cortexResult,
         cortexConfig,
         character,
@@ -1871,6 +1871,19 @@ export async function assemblePrompt(
         ctx.chatId,
         chatMemSettings ?? embeddingsSvc.DEFAULT_CHAT_MEMORY_SETTINGS,
       );
+      if (hasCortexContent(cortexResult, macroEnv)) {
+        memoryResult = cortexMemoryResult;
+      } else {
+        // Genuinely no cortex context (new chat, no chunks, etc.) - fall back to vector retrieval.
+        memoryResult = await safeCollectChatVectorMemory(
+          ctx.userId,
+          ctx.chatId,
+          messages,
+          chatMemSettings,
+          perChatOverrides,
+          ctx.excludeMessageId,
+        );
+      }
     } else {
       // Genuinely no memories (new chat, no chunks, etc.) — fall back to vector retrieval
       memoryResult = await safeCollectChatVectorMemory(
@@ -4528,6 +4541,19 @@ function formatCortexForAssembly(
     chunksAvailable: 0,
     chunksPending: 0,
   };
+}
+
+function hasCortexContent(
+  cortexResult: memoryCortex.CortexResult,
+  macroEnv: MacroEnv,
+): boolean {
+  return (
+    cortexResult.memories.length > 0 ||
+    cortexResult.entityContext.length > 0 ||
+    cortexResult.activeRelationships.length > 0 ||
+    !!cortexResult.arcContext ||
+    !!macroEnv.extra.cortex?.colorMap
+  );
 }
 
 /** Fault-tolerant wrapper: embedding timeouts or failures should never kill generation. */
