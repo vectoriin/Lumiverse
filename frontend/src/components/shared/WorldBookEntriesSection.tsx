@@ -82,9 +82,71 @@ import styles from './WorldBookEntriesSection.module.css'
 
 const DEFAULT_PAGE_SIZE = 50 as const
 const CUSTOM_PAGE_SIZE = 200 as const
+const ENTRY_FIELD_VISIBLE_TOP_GUTTER = 12
+const ENTRY_FIELD_KEYBOARD_GUTTER = 72
+const ENTRY_FIELD_REVEAL_THRESHOLD = 10
+const ENTRY_FIELD_FOCUS_SETTLE_DELAYS = [40, 180, 360, 520] as const
 
 /** Ignore WORLD_BOOK_ENTRY_CHANGED echoes of our own writes for this long. */
 const SELF_ECHO_WINDOW_MS = 2_000
+
+function isEditableEntryField(target: EventTarget | null): target is HTMLElement {
+  if (!(target instanceof HTMLElement)) return false
+  if (!target.closest('[data-world-book-entry-editor="true"]')) return false
+  if (target.isContentEditable) return true
+  if (target instanceof HTMLTextAreaElement) return !target.disabled && !target.readOnly
+  if (target instanceof HTMLSelectElement) return !target.disabled
+  if (!(target instanceof HTMLInputElement) || target.disabled || target.readOnly) return false
+
+  return ![
+    'button',
+    'checkbox',
+    'color',
+    'file',
+    'hidden',
+    'image',
+    'radio',
+    'range',
+    'reset',
+    'submit',
+  ].includes(target.type)
+}
+
+function parseCssPx(value: string): number {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function getEntryFieldBottomGutter(container: HTMLElement): number {
+  const style = getComputedStyle(container)
+  const footerHeight = parseCssPx(style.getPropertyValue('--worldbook-footer-height'))
+  return Math.max(ENTRY_FIELD_KEYBOARD_GUTTER, footerHeight + ENTRY_FIELD_VISIBLE_TOP_GUTTER)
+}
+
+function getEntryFieldRevealDelta(target: HTMLElement, container: HTMLElement) {
+  const targetRect = target.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  const viewportBottom = window.visualViewport?.height ?? window.innerHeight
+  const visibleTop = Math.max(containerRect.top, 0) + ENTRY_FIELD_VISIBLE_TOP_GUTTER
+  const visibleBottom = Math.min(containerRect.bottom, viewportBottom) - getEntryFieldBottomGutter(container)
+
+  if (targetRect.bottom > visibleBottom) {
+    return targetRect.bottom - visibleBottom
+  }
+  if (targetRect.top < visibleTop) {
+    return targetRect.top - visibleTop
+  }
+  return 0
+}
+
+function revealEntryFieldTarget(target: HTMLElement | null, container: HTMLElement | null) {
+  if (!target || !container || !container.contains(target)) return
+  if (document.activeElement !== target && !target.contains(document.activeElement)) return
+
+  const delta = getEntryFieldRevealDelta(target, container)
+  if (Math.abs(delta) < ENTRY_FIELD_REVEAL_THRESHOLD) return
+  container.scrollTop += delta
+}
 
 function mapSortForApi(sortBy: WorldBookEntrySortBy): 'order' | 'priority' | 'created' | 'updated' | 'name' {
   return sortBy === 'custom' ? 'order' : sortBy
@@ -385,11 +447,90 @@ export default function WorldBookEntriesSection({
   const [bulkDepth, setBulkDepth] = useState('4')
   const [pendingAction, setPendingAction] = useState(false)
   const entryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const sectionRef = useRef<HTMLDivElement>(null)
   const localScrollRef = useRef<HTMLDivElement>(null)
+  const focusedEntryFieldRef = useRef<HTMLElement | null>(null)
+  const focusRevealFrameRef = useRef(0)
+  const focusRevealTimersRef = useRef<number[]>([])
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const activeScrollRef = scrollContainerRef ?? localScrollRef
   const usesSharedScroll = scrollContainerRef != null
   useScrollGate(activeScrollRef)
+
+  const clearFocusRevealTimers = useCallback(() => {
+    for (const timer of focusRevealTimersRef.current) {
+      window.clearTimeout(timer)
+    }
+    focusRevealTimersRef.current = []
+  }, [])
+
+  const scheduleEntryFieldReveal = useCallback((target = focusedEntryFieldRef.current) => {
+    if (typeof window === 'undefined' || navigator.maxTouchPoints <= 0) return
+    if (!target) return
+
+    if (focusRevealFrameRef.current) {
+      window.cancelAnimationFrame(focusRevealFrameRef.current)
+    }
+    focusRevealFrameRef.current = window.requestAnimationFrame(() => {
+      focusRevealFrameRef.current = 0
+      revealEntryFieldTarget(target, activeScrollRef.current)
+    })
+  }, [activeScrollRef])
+
+  const scheduleEntryFieldFocusCorrection = useCallback((target: HTMLElement) => {
+    focusedEntryFieldRef.current = target
+    clearFocusRevealTimers()
+    scheduleEntryFieldReveal(target)
+    focusRevealTimersRef.current = ENTRY_FIELD_FOCUS_SETTLE_DELAYS.map((delay) =>
+      window.setTimeout(() => scheduleEntryFieldReveal(target), delay)
+    )
+  }, [clearFocusRevealTimers, scheduleEntryFieldReveal])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || navigator.maxTouchPoints <= 0) return
+    const root = sectionRef.current
+    if (!root) return
+
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!isEditableEntryField(event.target)) return
+      scheduleEntryFieldFocusCorrection(event.target)
+    }
+
+    const handleFocusOut = (event: FocusEvent) => {
+      if (event.target === focusedEntryFieldRef.current) {
+        focusedEntryFieldRef.current = null
+      }
+    }
+
+    const handleInput = (event: Event) => {
+      if (!isEditableEntryField(event.target)) return
+      focusedEntryFieldRef.current = event.target
+      scheduleEntryFieldReveal(event.target)
+    }
+
+    const handleViewportChange = () => {
+      scheduleEntryFieldReveal()
+    }
+
+    root.addEventListener('focusin', handleFocusIn)
+    root.addEventListener('focusout', handleFocusOut)
+    root.addEventListener('input', handleInput)
+    window.visualViewport?.addEventListener('resize', handleViewportChange)
+    window.visualViewport?.addEventListener('scroll', handleViewportChange)
+
+    return () => {
+      root.removeEventListener('focusin', handleFocusIn)
+      root.removeEventListener('focusout', handleFocusOut)
+      root.removeEventListener('input', handleInput)
+      window.visualViewport?.removeEventListener('resize', handleViewportChange)
+      window.visualViewport?.removeEventListener('scroll', handleViewportChange)
+      clearFocusRevealTimers()
+      if (focusRevealFrameRef.current) {
+        window.cancelAnimationFrame(focusRevealFrameRef.current)
+        focusRevealFrameRef.current = 0
+      }
+    }
+  }, [clearFocusRevealTimers, scheduleEntryFieldFocusCorrection, scheduleEntryFieldReveal])
 
   // ── Live-sync (WORLD_BOOK_ENTRY_* / WORLD_BOOK_CHANGED) ──
   // Mirror of `entries` for use inside WS handlers without re-subscribing.
@@ -973,6 +1114,7 @@ export default function WorldBookEntriesSection({
 
   return (
     <div
+      ref={sectionRef}
       className={clsx(
         styles.section,
         usesSharedScroll ? styles.sectionSharedScroll : styles.sectionStandaloneScroll,

@@ -100,7 +100,7 @@ export default function WorldBookEntryEditor({ entry, onUpdate, onImmediateUpdat
   )
 
   return (
-    <div className={styles.entryEditor}>
+    <div className={styles.entryEditor} data-world-book-entry-editor="true">
       {/* Identity & Content */}
       <span className={styles.sectionHeading}>{t('sections.identity')}</span>
       <div className={styles.entryFieldGroup}>
