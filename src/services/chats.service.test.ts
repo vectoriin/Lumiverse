@@ -12,6 +12,7 @@ import {
   patchMessageExtra,
   removeGroupMember,
   setGroupMemberAlternateFields,
+  updateMessage,
 } from "./chats.service";
 
 function initChatsTestDb(): void {
@@ -66,6 +67,26 @@ function initChatsTestDb(): void {
     parent_message_id TEXT,
     branch_id TEXT,
     created_at INTEGER NOT NULL
+  )`);
+
+  db.run(`CREATE TABLE chat_memory_cache (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    settings_key TEXT NOT NULL,
+    source_message_count INTEGER NOT NULL DEFAULT 0,
+    query_preview TEXT NOT NULL DEFAULT '',
+    chunks_json TEXT NOT NULL DEFAULT '[]',
+    formatted TEXT NOT NULL DEFAULT '',
+    count INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    settings_source TEXT NOT NULL DEFAULT 'global',
+    chunks_available INTEGER NOT NULL DEFAULT 0,
+    chunks_pending INTEGER NOT NULL DEFAULT 0,
+    retrieval_mode TEXT NOT NULL DEFAULT 'empty',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(chat_id, settings_key)
   )`);
 }
 
@@ -242,6 +263,44 @@ describe("recent chats", () => {
     expect(restoredSecondSwipe.swipe_id).toBe(1);
     expect(restoredSecondSwipe.extra.reasoning).toBe("second swipe reasoning");
     expect(restoredSecondSwipe.extra.reasoningDuration).toBe(456);
+  });
+
+  test("clears active swipe reasoning with explicit null without clearing other swipes", () => {
+    seedChat("chat-1", "c1", "Swipe chat", "{}", 100);
+    seedMessage("msg-1", "chat-1", "first swipe", {
+      reasoning: "first swipe reasoning",
+      reasoningDuration: 123,
+    });
+
+    const added = addSwipe("u1", "msg-1", "second swipe")!;
+    patchMessageExtra("u1", "msg-1", {
+      ...added.extra,
+      reasoning: "second swipe reasoning",
+      reasoningDuration: 456,
+    });
+
+    const activeBeforeClear = getMessage("u1", "msg-1")!;
+    const cleared = updateMessage("u1", "msg-1", {
+      extra: {
+        ...activeBeforeClear.extra,
+        reasoning: null,
+        reasoningDuration: null,
+      },
+    })!;
+
+    expect(cleared.swipe_id).toBe(1);
+    expect(cleared.extra.reasoning).toBeUndefined();
+    expect(cleared.extra.reasoningDuration).toBeUndefined();
+
+    const firstSwipe = cycleSwipe("u1", "msg-1", "left")!;
+    expect(firstSwipe.swipe_id).toBe(0);
+    expect(firstSwipe.extra.reasoning).toBe("first swipe reasoning");
+    expect(firstSwipe.extra.reasoningDuration).toBe(123);
+
+    const restoredSecondSwipe = cycleSwipe("u1", "msg-1", "right")!;
+    expect(restoredSecondSwipe.swipe_id).toBe(1);
+    expect(restoredSecondSwipe.extra.reasoning).toBeUndefined();
+    expect(restoredSecondSwipe.extra.reasoningDuration).toBeUndefined();
   });
 
   test("keeps generation metadata scoped to the active swipe", () => {

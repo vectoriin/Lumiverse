@@ -5333,13 +5333,14 @@ export class WorkerHost {
       if (patch.reasoning && typeof patch.reasoning === "object") {
         const r = patch.reasoning;
         if (r.text !== undefined) {
-          if (r.text === null) delete extra.reasoning;
+          if (r.text === null) extra.reasoning = null;
           else extra.reasoning = r.text;
           extraDirty = true;
         }
         if (r.duration !== undefined) {
-          if (r.duration === null) delete extra.reasoning_duration;
-          else extra.reasoning_duration = r.duration;
+          delete extra.reasoning_duration;
+          if (r.duration === null) extra.reasoningDuration = null;
+          else extra.reasoningDuration = r.duration;
           extraDirty = true;
         }
       }
