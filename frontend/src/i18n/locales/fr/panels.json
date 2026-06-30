@@ -1298,6 +1298,8 @@
       "afterAN": "Après AN",
       "atDepth": "En profondeur",
       "depthShort": "@ Profondeur",
+      "outletOnly": "Sortie uniquement",
+      "outletOnlyShort": "Sortie",
       "fallback": "Pos {{position}}"
     },
     "entryType": {
@@ -1416,6 +1418,7 @@
         "automationId": "ID d'automatisation"
       },
       "outletPlaceholder": "Utiliser avec {{outlet::name}}",
+      "outletOnlyHint": "Aucun nom de sortie défini — cette entrée ne sera affichée nulle part.",
       "countTokens": "Compter les jetons",
       "countTokensTitle": "Estimer le nombre de jetons à l'aide du tokenizer du modèle actuel",
       "tokenCount": "Jetons {{count}}",

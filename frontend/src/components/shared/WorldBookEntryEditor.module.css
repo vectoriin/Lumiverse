@@ -55,6 +55,11 @@
   align-items: center;
   justify-content: space-between;
 }
+.fieldHint {
+  color: var(--lumiverse-text-muted);
+  font-size: calc(11.5px * var(--lumiverse-font-scale, 1));
+  margin: 4px 0 0;
+}
 
 .entryInput {
   background: var(--lumiverse-bg);

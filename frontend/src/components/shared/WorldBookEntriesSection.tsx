@@ -15,6 +15,7 @@ import {
   MoreVertical,
   MoveRight,
   Plus,
+  Plug,
   Search,
   Square,
   Tag,
@@ -1077,7 +1078,9 @@ export default function WorldBookEntriesSection({
                 ? <BetweenHorizontalEnd size={14} />
                 : option.value === 7
                   ? <MapPin size={14} />
-                  : <Hash size={14} />,
+                  : option.value === 8
+                    ? <Plug size={14} />
+                    : <Hash size={14} />,
         active: selectedPositionEntry.position === option.value,
         onClick: () => {
           updateEntry(selectedPositionEntry.id, { position: option.value })

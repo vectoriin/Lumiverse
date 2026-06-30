@@ -1298,6 +1298,8 @@
       "afterAN": "AN後",
       "atDepth": "深度",
       "depthShort": "@深さ",
+      "outletOnly": "アウトレットのみ",
+      "outletOnlyShort": "アウトレット",
       "fallback": "位置 {{position}}"
     },
     "entryType": {
@@ -1416,6 +1418,7 @@
         "automationId": "オートメーションID"
       },
       "outletPlaceholder": "{{outlet::name}} と一緒に使用する",
+      "outletOnlyHint": "アウトレット名が未設定 — このエントリはどこにも出力されません。",
       "countTokens": "トークンを数える",
       "countTokensTitle": "現在のトークン数を推定するモデルのトークナイザー",
       "tokenCount": "{{count}} トークン",

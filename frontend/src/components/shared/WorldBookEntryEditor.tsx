@@ -206,6 +206,9 @@ export default function WorldBookEntryEditor({ entry, onUpdate, onImmediateUpdat
             />
           </div>
         </div>
+        {entry.position === 8 && !(entry.outlet_name || '').trim() && (
+          <p className={styles.fieldHint}>{t('outletOnlyHint')}</p>
+        )}
       </div>
 
       {/* Activation */}

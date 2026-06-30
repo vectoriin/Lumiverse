@@ -1298,6 +1298,8 @@
       "afterAN": "作者注後",
       "atDepth": "指定深度",
       "depthShort": "@ 深度",
+      "outletOnly": "僅出口",
+      "outletOnlyShort": "出口",
       "fallback": "位置 {{position}}"
     },
     "entryType": {
@@ -1416,6 +1418,7 @@
         "automationId": "自動化 ID"
       },
       "outletPlaceholder": "配合 {{outlet::name}} 使用",
+      "outletOnlyHint": "未設定出口名稱 — 此條目不會在任何位置輸出。",
       "countTokens": "統計 token",
       "countTokensTitle": "使用當前模型的分詞器估算 token 數",
       "tokenCount": "{{count}} tokens",

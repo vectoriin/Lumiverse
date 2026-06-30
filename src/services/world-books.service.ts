@@ -1238,8 +1238,8 @@ export function bulkOperateEntries(
 
   if (input.action === "set_position") {
     const position = Number.isFinite(input.position) ? Math.trunc(input.position) : 0;
-    if (position < 0 || position > 7) {
-      throw new Error("position must be between 0 and 7");
+    if (position < 0 || position > 8) {
+      throw new Error("position must be between 0 and 8");
     }
     const depth = position === 4 && Number.isFinite(input.depth) ? Math.trunc(input.depth!) : 4;
     db.transaction(() => {
