@@ -455,6 +455,53 @@ export function useLoomBuilder() {
     }
   }, [activePreset, persistPreset, takePendingPreset, refreshRegistry])
 
+  const moveBlockToPreset = useCallback(async (blockId: string, targetPresetId: string) => {
+    try {
+      // Flush any pending debounced save first
+      const pending = takePendingPreset(activePresetRef.current?.id ?? '')
+      if (pending) {
+        activePresetRef.current = pending
+        setActivePreset(pending)
+        await persistPreset(pending)
+      }
+
+      const source = activePresetRef.current
+      if (!source || targetPresetId === source.id) return
+      const block = source.blocks.find((b) => b.id === blockId)
+      if (!block) return
+
+      const target = unmarshalPreset(await presetsApi.get(targetPresetId))
+
+      let movedId = block.id
+      if (target.blocks.some((b) => b.id === movedId)) movedId = generateUUID()
+      const movedBlock: PromptBlock = { ...JSON.parse(JSON.stringify(block)), id: movedId }
+
+      // Insert at the top
+      const targetVars = { ...target.promptVariables }
+      if (source.promptVariables[blockId]) {
+        targetVars[movedId] = JSON.parse(JSON.stringify(source.promptVariables[blockId]))
+      }
+      const targetUpdated: LoomPreset = {
+        ...target,
+        blocks: [movedBlock, ...target.blocks],
+        promptVariables: targetVars,
+        updatedAt: Date.now(),
+      }
+
+      // Until this finishes the source is untouched
+      await persistPreset(targetUpdated)
+      // Now remove the block from the source
+      const sourceUpdated = { ...source, blocks: source.blocks.filter((b) => b.id !== blockId), updatedAt: Date.now() }
+      activePresetRef.current = sourceUpdated
+      setActivePreset(sourceUpdated)
+      await persistPreset(sourceUpdated)
+      await refreshRegistry()
+    } catch (err) {
+      console.warn('[LoomBuilder] Failed to move block:', err)
+      throw err
+    }
+  }, [persistPreset, takePendingPreset, refreshRegistry])
+
   // Save sampler overrides — immediate state update, debounced API save
   const saveSamplerOverrides = useCallback((overrides: any) => {
     updateActivePreset((current) => ({
@@ -686,6 +733,7 @@ export function useLoomBuilder() {
     toggleBlock,
     reorderBlocks,
     duplicateBlock,
+    moveBlockToPreset,
 
     // Sampler & body settings
     saveSamplerOverrides,

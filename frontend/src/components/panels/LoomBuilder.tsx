@@ -35,6 +35,7 @@ import {
   Download,
   Upload,
   Copy,
+  FolderInput,
   Layers,
   Hash,
   Lock,
@@ -287,12 +288,13 @@ interface SortableBlockItemProps {
   onEdit: (block: PromptBlock) => void
   onDelete: (id: string) => void
   onDuplicate: (block: PromptBlock) => void
+  onMove: (block: PromptBlock) => void
   onToggle: (id: string) => void
   indented: boolean
   dragDisabled?: boolean
 }
 
-function SortableBlockItem({ block, onEdit, onDelete, onDuplicate, onToggle, indented, dragDisabled = false }: SortableBlockItemProps) {
+function SortableBlockItem({ block, onEdit, onDelete, onDuplicate, onMove, onToggle, indented, dragDisabled = false }: SortableBlockItemProps) {
   const { t } = useLb()
   const { t: tc } = useTranslation('common')
   const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id: block.id, disabled: dragDisabled })
@@ -351,6 +353,11 @@ function SortableBlockItem({ block, onEdit, onDelete, onDuplicate, onToggle, ind
       {!block.isLocked && (
         <Button size="icon-sm" variant="ghost" onClick={() => onDuplicate(block)} title={tc('actions.duplicate')}>
           <Copy size={14} />
+        </Button>
+      )}
+      {!block.isLocked && (
+        <Button size="icon-sm" variant="ghost" onClick={() => onMove(block)} title={t('block.moveToPreset')}>
+          <FolderInput size={14} />
         </Button>
       )}
       {!block.isLocked && (
@@ -1448,6 +1455,7 @@ export default function LoomBuilder({
     updateBlock,
     toggleBlock,
     duplicateBlock,
+    moveBlockToPreset,
     saveSamplerOverrides,
     saveCustomBody,
     savePromptBehavior,
@@ -1560,6 +1568,8 @@ export default function LoomBuilder({
   const [markerMenuOpen, setMarkerMenuOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [confirmDeletePreset, setConfirmDeletePreset] = useState(false)
+  const [moveBlockTarget, setMoveBlockTarget] = useState<PromptBlock | null>(null)
+  const [moveBusy, setMoveBusy] = useState(false)
   const [showLegacyExportConfirm, setShowLegacyExportConfirm] = useState(false)
   const [showPromptVariablesModal, setShowPromptVariablesModal] = useState(false)
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set())
@@ -1864,6 +1874,24 @@ export default function LoomBuilder({
   const handleDuplicateBlock = useCallback((block: PromptBlock) => {
     void duplicateBlock(block.id, `${block.name}${lb('preset.copySuffix')}`)
   }, [duplicateBlock, lb])
+
+  const handleMoveBlock = useCallback((block: PromptBlock) => {
+    setMoveBlockTarget(block)
+  }, [])
+
+  const handleMoveBlockToPreset = useCallback(async (targetPresetId: string) => {
+    if (!moveBlockTarget || moveBusy) return
+    setMoveBusy(true)
+    try {
+      await moveBlockToPreset(moveBlockTarget.id, targetPresetId)
+      addToast({ type: 'success', message: lb('toast.blockMoved') })
+      setMoveBlockTarget(null)
+    } catch {
+      addToast({ type: 'error', message: lb('toast.moveBlockFailed') })
+    } finally {
+      setMoveBusy(false)
+    }
+  }, [moveBlockTarget, moveBusy, moveBlockToPreset, addToast, lb])
 
   const confirmDeleteBlock = useCallback(() => {
     if (confirmDelete) {
@@ -2281,6 +2309,7 @@ export default function LoomBuilder({
                           onEdit={handleEdit}
                           onDelete={handleDelete}
                           onDuplicate={handleDuplicateBlock}
+                          onMove={handleMoveBlock}
                           onToggle={toggleBlock}
                           indented={!!group.categoryBlock}
                           dragDisabled={isSearchActive}
@@ -2403,6 +2432,45 @@ export default function LoomBuilder({
           onConfirm={() => { void handleDeletePreset() }}
           onCancel={() => setConfirmDeletePreset(false)}
         />
+
+      {/* Move block to another preset */}
+        <ModalShell
+          isOpen={!!moveBlockTarget}
+          onClose={() => { if (!moveBusy) setMoveBlockTarget(null) }}
+          maxWidth="clamp(320px, 90vw, min(420px, var(--lumiverse-content-max-width, 420px)))"
+          className={s.presetNameModal}
+        >
+          <div className={s.presetNameHeader}>
+            <FolderInput size={16} />
+            <h3 className={s.presetNameTitle}>{lb('moveBlock.title')}</h3>
+          </div>
+          <div className={s.presetNameBody}>
+            {(() => {
+              const targets = Object.entries(registry)
+                .filter(([id]) => id !== activePresetId)
+                .sort((a, b) => a[1].name.localeCompare(b[1].name))
+              if (targets.length === 0) {
+                return <p className={s.emptyState}>{lb('moveBlock.empty')}</p>
+              }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '50vh', overflowY: 'auto' }}>
+                  {targets.map(([id, entry]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={s.menuButton}
+                      disabled={moveBusy}
+                      onClick={() => { void handleMoveBlockToPreset(id) }}
+                    >
+                      <FolderInput size={14} />
+                      {entry.name}
+                    </button>
+                  ))}
+                </div>
+              )
+            })()}
+          </div>
+        </ModalShell>
 
         {activePreset && (
           <PromptVariablesModal

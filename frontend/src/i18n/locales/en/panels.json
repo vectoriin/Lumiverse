@@ -3058,7 +3058,12 @@
       "dragReorder": "Drag to reorder",
       "marker": "marker",
       "enable": "Enable",
-      "disable": "Disable"
+      "disable": "Disable",
+      "moveToPreset": "Move to another preset"
+    },
+    "moveBlock": {
+      "title": "Move block to preset",
+      "empty": "No other presets to move to."
     },
     "blockEditor": {
       "backToList": "Back to list",
@@ -3311,6 +3316,8 @@
     },
     "toast": {
       "exportFailed": "Failed to export preset",
+      "blockMoved": "Block moved to preset",
+      "moveBlockFailed": "Failed to move block",
       "importedRegexFromPreset": "Imported {{count}} regex script from preset",
       "importedRegexFromPreset_plural": "Imported {{count}} regex scripts from preset",
       "regexImportFailed": "{{count}} regex script failed to import",
