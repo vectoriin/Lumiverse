@@ -8,6 +8,7 @@ import { toast } from '@/lib/toast'
 import i18n from '@/i18n'
 import { enqueuePresetRegexOperation } from '@/lib/presetRegexQueue'
 import { getMacroCatalog } from '@/api/macros'
+import { generateUUID } from '@/lib/uuid'
 import type { LoomPreset, PromptBlock, LoomConnectionProfile, MacroGroup, PromptVariableValues } from '@/lib/loom/types'
 import {
   DEFAULT_SAMPLER_OVERRIDES,
@@ -421,6 +422,39 @@ export function useLoomBuilder() {
     saveBlocks(blocks)
   }, [activePreset, saveBlocks])
 
+  const duplicateBlock = useCallback(async (blockId: string, copyName: string) => {
+    if (!activePreset) return
+    // Check existence before draining
+    if (!activePreset.blocks.some((b) => b.id === blockId)) return
+    const base = takePendingPreset(activePreset.id) ?? activePreset
+    const index = base.blocks.findIndex((b) => b.id === blockId)
+    if (index === -1) {
+      void persistPreset(base) // drained but block gone; don't lose the edits
+      return
+    }
+    const original = base.blocks[index]
+    const newId = generateUUID()
+    // Deep copy
+    const copy: PromptBlock = { ...JSON.parse(JSON.stringify(original)), id: newId, name: copyName }
+    const blocks = [...base.blocks]
+    blocks.splice(index + 1, 0, copy)
+    const normalizedBlocks = normalizeCategoryBlockState(blocks)
+    const promptVariables = { ...base.promptVariables }
+    if (promptVariables[blockId]) {
+      promptVariables[newId] = JSON.parse(JSON.stringify(promptVariables[blockId]))
+    }
+    const updated = { ...base, blocks: normalizedBlocks, promptVariables, updatedAt: Date.now() }
+    activePresetRef.current = updated
+    setActivePreset(updated)
+    try {
+      await persistPreset(updated)
+      await refreshRegistry()
+    } catch (err) {
+      console.warn('[LoomBuilder] Failed to duplicate block:', err)
+      throw err
+    }
+  }, [activePreset, persistPreset, takePendingPreset, refreshRegistry])
+
   // Save sampler overrides — immediate state update, debounced API save
   const saveSamplerOverrides = useCallback((overrides: any) => {
     updateActivePreset((current) => ({
@@ -651,6 +685,7 @@ export function useLoomBuilder() {
     updateBlock,
     toggleBlock,
     reorderBlocks,
+    duplicateBlock,
 
     // Sampler & body settings
     saveSamplerOverrides,

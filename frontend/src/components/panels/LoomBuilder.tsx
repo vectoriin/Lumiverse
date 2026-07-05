@@ -286,12 +286,13 @@ interface SortableBlockItemProps {
   block: PromptBlock
   onEdit: (block: PromptBlock) => void
   onDelete: (id: string) => void
+  onDuplicate: (block: PromptBlock) => void
   onToggle: (id: string) => void
   indented: boolean
   dragDisabled?: boolean
 }
 
-function SortableBlockItem({ block, onEdit, onDelete, onToggle, indented, dragDisabled = false }: SortableBlockItemProps) {
+function SortableBlockItem({ block, onEdit, onDelete, onDuplicate, onToggle, indented, dragDisabled = false }: SortableBlockItemProps) {
   const { t } = useLb()
   const { t: tc } = useTranslation('common')
   const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id: block.id, disabled: dragDisabled })
@@ -347,6 +348,11 @@ function SortableBlockItem({ block, onEdit, onDelete, onToggle, indented, dragDi
       <Button size="icon-sm" variant="ghost" onClick={() => onEdit(block)} title={tc('actions.edit')}>
         <Edit2 size={14} />
       </Button>
+      {!block.isLocked && (
+        <Button size="icon-sm" variant="ghost" onClick={() => onDuplicate(block)} title={tc('actions.duplicate')}>
+          <Copy size={14} />
+        </Button>
+      )}
       {!block.isLocked && (
         <Button size="icon-sm" variant="danger-ghost" onClick={() => onDelete(block.id)} title={tc('actions.delete')}>
           <Trash2 size={14} />
@@ -1441,6 +1447,7 @@ export default function LoomBuilder({
     removeBlock,
     updateBlock,
     toggleBlock,
+    duplicateBlock,
     saveSamplerOverrides,
     saveCustomBody,
     savePromptBehavior,
@@ -1853,6 +1860,10 @@ export default function LoomBuilder({
   const handleDelete = useCallback((blockId: string) => {
     setConfirmDelete(blockId)
   }, [])
+
+  const handleDuplicateBlock = useCallback((block: PromptBlock) => {
+    void duplicateBlock(block.id, `${block.name}${lb('preset.copySuffix')}`)
+  }, [duplicateBlock, lb])
 
   const confirmDeleteBlock = useCallback(() => {
     if (confirmDelete) {
@@ -2269,6 +2280,7 @@ export default function LoomBuilder({
                           block={block}
                           onEdit={handleEdit}
                           onDelete={handleDelete}
+                          onDuplicate={handleDuplicateBlock}
                           onToggle={toggleBlock}
                           indented={!!group.categoryBlock}
                           dragDisabled={isSearchActive}
