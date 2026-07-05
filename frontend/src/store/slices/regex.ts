@@ -26,6 +26,12 @@ export const createRegexSlice: StateCreator<RegexSlice> = (set, get) => ({
     return script
   },
 
+  duplicateRegexScript: async (id: string) => {
+    const script = await regexApi.duplicate(id)
+    set((s) => ({ regexScripts: [...s.regexScripts, script] }))
+    return script
+  },
+
   updateRegexScript: async (id: string, updates: UpdateRegexScriptInput) => {
     const activePresetId = (get() as any).activeLoomPresetId ?? null
     const updated = await regexApi.update(id, {

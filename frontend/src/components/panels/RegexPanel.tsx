@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/i18n'
 
-import { Plus, Upload, Download, Trash2, Globe, User, MessageCircle, ChevronRight, FolderPlus, Check, X, Link, Unlink, TriangleAlert, GripVertical } from 'lucide-react'
+import { Plus, Upload, Download, Trash2, Copy, Globe, User, MessageCircle, ChevronRight, FolderPlus, Check, X, Link, Unlink, TriangleAlert, GripVertical } from 'lucide-react'
 import {
   DndContext,
   MouseSensor,
@@ -93,6 +93,7 @@ export default function RegexPanel() {
   const regexScripts = useStore((s) => s.regexScripts)
   const loadRegexScripts = useStore((s) => s.loadRegexScripts)
   const addRegexScript = useStore((s) => s.addRegexScript)
+  const duplicateRegexScript = useStore((s) => s.duplicateRegexScript)
   const updateRegexScript = useStore((s) => s.updateRegexScript)
   const removeRegexScript = useStore((s) => s.removeRegexScript)
   const bulkRemoveRegexScripts = useStore((s) => s.bulkRemoveRegexScripts)
@@ -325,6 +326,16 @@ export default function RegexPanel() {
       toast.error(err.body?.error || err.message || t('regexPanel.requestFailed'))
     }
   }, [removeRegexScript, expandedId])
+
+  const handleDuplicate = useCallback(async (script: RegexScript) => {
+    try {
+      const copy = await duplicateRegexScript(script.id)
+      setExpandedId(copy.id)
+      toast.success(t('regexPanel.duplicated'))
+    } catch (err: any) {
+      toast.error(err.body?.error || err.message || t('regexPanel.requestFailed'))
+    }
+  }, [duplicateRegexScript])
 
   const handleDeleteGroup = useCallback(async (scripts: RegexScript[]) => {
     setDeleteGroupTarget(null)
@@ -609,6 +620,7 @@ export default function RegexPanel() {
                             expanded={expandedId === script.id}
                             onToggleExpand={() => setExpandedId(expandedId === script.id ? null : script.id)}
                             onDelete={(e) => { e.stopPropagation(); setDeleteScriptTarget(script) }}
+                            onDuplicate={(e) => { e.stopPropagation(); void handleDuplicate(script) }}
                             onToggle={(disabled, e) => handleToggle(script.id, disabled, e)}
                             onBindPreset={(e) => handleBindToPreset(script, e)}
                             onUpdate={(updates) => updateRegexScript(script.id, updates)}
@@ -631,6 +643,7 @@ export default function RegexPanel() {
                     expanded={expandedId === script.id}
                     onToggleExpand={() => setExpandedId(expandedId === script.id ? null : script.id)}
                     onDelete={(e) => { e.stopPropagation(); setDeleteScriptTarget(script) }}
+                    onDuplicate={(e) => { e.stopPropagation(); void handleDuplicate(script) }}
                     onToggle={(disabled, e) => handleToggle(script.id, disabled, e)}
                     onBindPreset={(e) => handleBindToPreset(script, e)}
                     onUpdate={(updates) => updateRegexScript(script.id, updates)}
@@ -711,6 +724,7 @@ function ScriptRow({
   expanded,
   onToggleExpand,
   onDelete,
+  onDuplicate,
   onToggle,
   onBindPreset,
   onUpdate,
@@ -725,6 +739,7 @@ function ScriptRow({
   expanded: boolean
   onToggleExpand: () => void
   onDelete: (e: React.MouseEvent) => void
+  onDuplicate: (e: React.MouseEvent) => void
   onToggle: (disabled: boolean, e: React.MouseEvent) => void
   onBindPreset: (e: React.MouseEvent) => void
   onUpdate: (updates: Record<string, any>) => void | Promise<void>
@@ -850,6 +865,9 @@ function ScriptRow({
             {script.preset_id === activePresetId ? <Unlink size={13} /> : <Link size={13} />}
           </Button>
         )}
+        <Button size="icon-sm" variant="ghost" className={styles.deleteBtn} onClick={onDuplicate} title={i18n.t('actions.duplicate', { ns: 'common' })}>
+          <Copy size={13} />
+        </Button>
         <Button size="icon-sm" variant="danger-ghost" className={styles.deleteBtn} onClick={onDelete} title={i18n.t('actions.delete', { ns: 'common' })}>
           <Trash2 size={13} />
         </Button>

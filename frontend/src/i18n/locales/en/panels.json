@@ -700,6 +700,7 @@
   "regexPanel": {
     "title": "Regex Scripts",
     "newScript": "New Script",
+    "duplicated": "Regex duplicated",
     "newFolder": "New Folder",
     "folderName": "Folder name...",
     "dragToReorder": "Drag to reorder",

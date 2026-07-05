@@ -1216,6 +1216,7 @@ export interface RegexSlice {
   /** Pure setter for hydrating from pre-fetched data (bootstrap payload). */
   setRegexScripts: (scripts: RegexScript[]) => void
   addRegexScript: (input: CreateRegexScriptInput) => Promise<RegexScript>
+  duplicateRegexScript: (id: string) => Promise<RegexScript>
   updateRegexScript: (id: string, updates: UpdateRegexScriptInput) => Promise<void>
   removeRegexScript: (id: string) => Promise<void>
   bulkRemoveRegexScripts: (ids: string[]) => Promise<number>
